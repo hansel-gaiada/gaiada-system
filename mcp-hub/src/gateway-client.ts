@@ -37,7 +37,7 @@ export function toolCallUsageFor(tool: string, args: Record<string, unknown>, pr
 async function post(path: string, body: unknown, capability: "llm" | "media"): Promise<string> {
   const who = toolCallUsage.getStore();
   let status: number | null = null; // null until the gateway answers: a network failure is an `error` row
-  let data: { text?: string; provider?: string; usage?: unknown } | null = null;
+  let data: { text?: string; provider?: string; tier?: string; usage?: unknown } | null = null;
   try {
     const res = await fetch(`${config.gatewayUrl}${path}`, {
       method: "POST",
@@ -49,7 +49,7 @@ async function post(path: string, body: unknown, capability: "llm" | "media"): P
     });
     status = res.status;
     if (!res.ok) throw new Error(`gateway ${path} ${res.status}`);
-    data = (await res.json()) as { text?: string; provider?: string; usage?: unknown };
+    data = (await res.json()) as { text?: string; provider?: string; tier?: string; usage?: unknown };
     if (typeof data.text !== "string") throw new Error(`gateway ${path} returned no text`);
     return data.text;
   } finally {
@@ -67,8 +67,10 @@ const ECHO_PREFIX = "[echo — no provider key configured]";
 // (no real provider produced it), is a FAILURE here: no brief, PRD, report, scope or summary is ever legitimately
 // either, and storing one opens the next stage on a blank artifact (M6-P4n, live 2026-10-13). The throw fails the tool,
 // n8n's node errors, the webhook answers 5xx and platform-nest's at-least-once bridge redelivers: a bounded retry.
-export async function gatewayComplete(prompt: string): Promise<string> {
-  const raw = await post("/complete", { prompt }, "llm");
+// AIP-07: `task` is the gateway routing class of the calling tool; omitted when the caller names none (the body is then byte-identical to before).
+export type GatewayTask = "chat" | "summarise" | "classify" | "agent_step" | "draft";
+export async function gatewayComplete(prompt: string, task?: GatewayTask): Promise<string> {
+  const raw = await post("/complete", task ? { prompt, task } : { prompt }, "llm");
   if (!raw.trim()) throw new Error("gateway /complete: the model returned no text");
   if (raw.trimStart().startsWith(ECHO_PREFIX)) {
     throw new Error("gateway /complete: the gateway answered with its echo fallback: no real provider produced this");

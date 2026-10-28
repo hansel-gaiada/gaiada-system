@@ -27,10 +27,25 @@ describe("AIP-03b · the bot's /complete", () => {
     gateway(200, { text: "the digest", provider: "openai", usage: { promptTokens: 900, completionTokens: 120, costUsd: 0.004, source: "provider" } });
     expect(await complete("summarise the chat SECRET-CHAT-TEXT")).toBe("the digest");
     expect(reported).toEqual([{
-      tenantId: T, userId: null, surface: "bot", capability: "llm", task: "bot.complete", runId: null, provider: "openai", model: null,
+      tenantId: T, userId: null, surface: "bot", capability: "llm", task: "bot.complete", runId: null, provider: "openai", model: null, tier: null,
       promptTokens: 900, completionTokens: 120, tokensSource: "provider", costUsd: 0.004, costSource: "provider", outcome: "ok",
     }]);
     expect(JSON.stringify(reported)).not.toMatch(/SECRET|digest/);
+  });
+
+  it("AIP-07: /complete carries task chat, /media carries no task, and the answer's tier is reported (an invalid one is dropped)", async () => {
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ text: "hi", provider: "openai", tier: "fast" }), text: async () => "" }));
+    vi.stubGlobal("fetch", f);
+    await complete("p");
+    expect(JSON.parse(String((f.mock.calls[0] as unknown as [string, RequestInit])[1].body))).toEqual({ prompt: "p", task: "chat" });
+    expect(reported[0].tier).toBe("fast");
+    gateway(200, { text: "hi", provider: "openai", tier: "turbo" });
+    await complete("p");
+    expect(reported[1].tier).toBeNull();
+    const m = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ text: "seen", provider: "openai" }), text: async () => "" }));
+    vi.stubGlobal("fetch", m);
+    await describeMedia(Buffer.from("x"), "image/png");
+    expect("task" in JSON.parse(String((m.mock.calls[0] as unknown as [string, RequestInit])[1].body))).toBe(false);
   });
 
   it("an answer with no usage is tokens 'none' and ok", async () => {

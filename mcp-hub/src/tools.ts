@@ -40,7 +40,7 @@ export function registerCoreTools(): void {
     handler: async (args) => {
       const text = String(args.text ?? "");
       if (!text.trim()) throw new Error("text required");
-      return gatewayComplete(`Summarize the following concisely for a work context:\n\n${text}`);
+      return gatewayComplete(`Summarize the following concisely for a work context:\n\n${text}`, "summarise");
     },
   });
 

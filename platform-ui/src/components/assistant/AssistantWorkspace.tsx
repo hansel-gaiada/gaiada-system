@@ -228,7 +228,7 @@ export function AssistantWorkspace({
       return;
     }
     const optimistic: AssistantThread = {
-      id: r.id, ownerUserId: "", title: null, brainProvider: null, brainModel: null, hermesSessionId: null,
+      id: r.id, ownerUserId: "", title: null, brainProvider: null, brainTier: null, brainModel: null, hermesSessionId: null,
       status: "active", pinned: false, lastMessageAt: null, totalTokens: 0, totalCostUsd: "0.00",
       compactionSummary: null, compactionSummaryUptoSeq: null,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),

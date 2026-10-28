@@ -1,0 +1,44 @@
+# AIP-08b (AI plan Phase 2, owner ruling AIP-D5: "only people with an 'advanced' grant may pick a named provider; everyone else sees
+# Auto, Fast and Strong"; docs/PERMISSION-CONTRACT.md §55; docs/FRONTEND-BFF-CONTRACT.md §18) — authz for the NEW `assistant_brain`
+# resource kind (module assistant): a company's assistant brain setting. ONE action:
+#   choose_provider — pin one of YOUR OWN assistant threads to a NAMED gateway provider (openai, claude, hermes, ...) instead of
+#                     Auto or a tier (Fast, Standard/Strong). A cost lever, not a data-access one: it never opens anyone's thread.
+#
+# THE RESOURCE: one per company. `id` = `tenantId` = the company the thread lives in. The handler (assistant.controller.ts) builds it
+# from the validated route `:tenantId` alone, never from a body. No other attribute is read, so the resourcePayload() allow-list needs
+# nothing new (id and tenantId are already carried).
+#
+# WHO: company_admin of THAT company (and therefore `owner`, which mirrors company_admin's bundle and reaches this kind through the
+# permission arm below, owner having no Cerbos rules of its own); the platform_admin wildcard; and anyone a role edit gives
+# `assistant.brain.choose_provider` (uiGrantable), through the permission arm. Nobody else: manager, member, viewer and every module
+# tier get Auto, Fast and Strong only.
+#
+# THIS IS NOT resource_assistant_thread.yaml. That policy is owner-private with no admin rule, by design, and stays untouched: this
+# kind decides only WHICH brain a person may ask for on their own thread. The thread's own `create` / `update` / `message` / `stream`
+# checks still run first, unchanged.
+#
+# Restart `gaiada-test-cerbos` after adding this file: a NEW policy file is not hot-reloaded over the bind mount.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: assistant_brain
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    # The SaaS operator tier keeps unconditional reach, as on every non-exempt kind (iam-215-boundary-pin.test.ts).
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["choose_provider"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # =========== permission-matching arm (IAM-04 pattern, as resource_knowledge_source.yaml). Generic global-or-company mirror. ======
+    # This is how `owner` (permission-native) and a role edit's holder reach the action. The platform_admin wildcard is deliberately
+    # NOT mirrored (IAM-04c: the tier bypass never enters the permission catalog).
+    - actions: ["choose_provider"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_assistant_brain_choose_provider"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

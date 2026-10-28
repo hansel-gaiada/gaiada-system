@@ -28,7 +28,7 @@ Element.prototype.scrollIntoView = vi.fn();
 
 function thread(id: string, title: string, extra: Partial<AssistantThread> = {}): AssistantThread {
   return {
-    id, ownerUserId: "u1", title, brainProvider: null, brainModel: null, hermesSessionId: null, status: "active",
+    id, ownerUserId: "u1", title, brainProvider: null, brainTier: null, brainModel: null, hermesSessionId: null, status: "active",
     pinned: false, lastMessageAt: "2026-10-13T09:00:00Z", totalTokens: 0, totalCostUsd: "0.00",
     compactionSummary: null, compactionSummaryUptoSeq: null, createdAt: "2026-10-13T09:00:00Z", updatedAt: "2026-10-13T09:00:00Z",
     ...extra,

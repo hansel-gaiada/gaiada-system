@@ -37,9 +37,9 @@ describe("mapHealthToBrains", () => {
 });
 
 describe("getBrains", () => {
-  it("returns exactly {brains:[{value,available}], checkedAt} and leaks nothing from /health", async () => {
+  it("returns exactly {brains:[{value,available}], tiers, checkedAt} and leaks nothing from /health", async () => {
     const r = await getBrains({ ...base, fetchImpl: okFetch(HEALTH), now: () => 1_000, warn: () => {} });
-    expect(Object.keys(r).sort()).toEqual(["brains", "checkedAt"]);
+    expect(Object.keys(r).sort()).toEqual(["brains", "checkedAt", "tiers"]);
     for (const b of r.brains!) expect(Object.keys(b).sort()).toEqual(["available", "value"]);
     const text = JSON.stringify(r);
     for (const leak of ["glm", "openrouter", "budget", "spentUsd", "endpoint", "unconfigured", "whisper"]) expect(text).not.toContain(leak);

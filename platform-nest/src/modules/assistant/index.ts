@@ -39,7 +39,13 @@ export const assistantModule: ModuleContract = {
   // enforced (via `owns` + `inTenant` + `notLow` in Cerbos, never via `permissions`/
   // `role_permissions`), just never role-grantable, so they have no place in a module's grantable
   // permission declarations.
-  permissions: [],
+  //
+  // AIP-08b (owner ruling AIP-D5, PERMISSION-CONTRACT §55): ONE grantable key, on a DIFFERENT kind (`assistant_brain`, the company's
+  // brain setting): pick a named AI provider for your own threads instead of Auto, Fast or Strong. It is a cost lever, not a way into
+  // anyone's thread: the five relationship keys above stay undeclared, and resource_assistant_thread.yaml is untouched.
+  permissions: [
+    { key: "assistant.brain.choose_provider", description: "Pick a named AI provider (not just Auto, Fast or Strong) for your own assistant threads" },
+  ],
   customFieldTargets: [],
   mcpTools: [
     {

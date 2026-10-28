@@ -35,6 +35,13 @@ describe("WS11 delivery tools", () => {
     expect(JSON.parse(out)).toEqual({ content: "# Prototype\nscreens..." });
   });
 
+  it("AIP-07: design.prototype sends task draft", async () => {
+    const f = mockFetch(200, { text: "# Prototype" }) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal("fetch", f);
+    await getTool("design.prototype")!.handler({ prd: "build a login page" }, principal);
+    expect(JSON.parse(String((f.mock.calls[0] as unknown as [string, RequestInit])[1].body)).task).toBe("draft");
+  });
+
   // M6-P4n: a blank or echoed design must fail the tool, not become the design stage's artifact.
   it("design.prototype refuses an empty generation and the gateway's echo fallback", async () => {
     vi.stubGlobal("fetch", mockFetch(200, { text: "" }));

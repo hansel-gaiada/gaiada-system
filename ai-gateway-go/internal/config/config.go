@@ -7,6 +7,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"gaiada/ai-gateway-go/internal/routing"
 )
 
 type Config struct {
@@ -110,6 +112,15 @@ type Config struct {
 	AgentDailyCallCap   int
 	AgentMaxTokens      int
 	AgentMaxConcurrency int
+	// AIP-06 (route by task). GatewayTiers (GATEWAY_TIERS) is `tier=provider[:model]`, comma-separated,
+	// e.g. `fast=openai,strong=openai:z-ai/glm-5.3-flash` (provider split from model at the FIRST `:`).
+	// GatewayTaskTiers (GATEWAY_TASK_TIERS) is `task=tier`, e.g. `chat=standard,summarise=fast`. Both
+	// are raw env text; main parses them (routing.FromEnv: a bad entry is logged by key and dropped,
+	// never fatal) into Routing, the ENV table. A console override (adminconfig tiers/taskTiers) is
+	// folded over it by the server, so DELETE /admin/config reverts to Routing. Empty = no routing.
+	GatewayTiers     string
+	GatewayTaskTiers string
+	Routing          routing.Table
 }
 
 func envBool(key string, fallback bool) bool {
@@ -207,5 +218,7 @@ func Load() Config {
 		AgentDailyCallCap:      envInt("GATEWAY_AGENT_DAILY_CALL_CAP", 0),
 		AgentMaxTokens:         envInt("GATEWAY_AGENT_MAX_TOKENS", 8192),
 		AgentMaxConcurrency:    envInt("GATEWAY_AGENT_MAX_CONCURRENCY", 4),
+		GatewayTiers:           strings.TrimSpace(envOr("GATEWAY_TIERS", "")),
+		GatewayTaskTiers:       strings.TrimSpace(envOr("GATEWAY_TASK_TIERS", "")),
 	}
 }

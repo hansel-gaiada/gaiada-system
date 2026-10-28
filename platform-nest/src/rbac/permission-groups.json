@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 174,
-      "grantablePermissionsInCatalog": 483,
-      "permissionsCoveredByGroups": 444,
+      "groups": 175,
+      "grantablePermissionsInCatalog": 484,
+      "permissionsCoveredByGroups": 445,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 117
@@ -2030,6 +2030,16 @@
         "core.dept_notice.post",
         "core.dept_notice.edit",
         "core.dept_notice.withdraw"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "assistant_choose_provider",
+      "name": "Assistant: choose AI provider",
+      "domain": "assistant",
+      "description": "Pick a named AI provider (openai, claude, hermes and so on) for your own assistant threads, instead of only Auto, Fast or Strong. AIP-08b (owner ruling AIP-D5): a cost lever, not data access; company_admin and owner hold it by default, anyone else through a role edit. It never opens another person's thread.",
+      "permissions": [
+        "assistant.brain.choose_provider"
       ],
       "sensitive": false
     }

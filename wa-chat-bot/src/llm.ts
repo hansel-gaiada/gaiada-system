@@ -18,7 +18,7 @@ export function botTenantId(): string | null {
 
 export async function complete(prompt: string): Promise<string> {
   let status: number | null = null; // null until the gateway answers: unreachable is an `error` row
-  let data: { text?: string; provider?: string; usage?: unknown } | null = null;
+  let data: { text?: string; provider?: string; tier?: string; usage?: unknown } | null = null;
   try {
     const res = await fetch(`${config.gatewayUrl}/complete`, {
       method: "POST",
@@ -26,14 +26,14 @@ export async function complete(prompt: string): Promise<string> {
         "Content-Type": "application/json",
         ...(config.gatewayToken ? { Authorization: `Bearer ${config.gatewayToken}` } : {}),
       },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, task: "chat" }), // AIP-07: the bot's reply is a chat turn for the gateway's routing
     });
     status = res.status;
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       return `[Gateway ${res.status}: ${body.slice(0, 120)}]`;
     }
-    data = (await res.json()) as { text?: string; provider?: string; usage?: unknown };
+    data = (await res.json()) as { text?: string; provider?: string; tier?: string; usage?: unknown };
     return data.text ?? "";
   } catch (err) {
     return `[Gateway unreachable: ${(err as Error).message} — is the ERP gateway (GATEWAY_URL) reachable?]`;
@@ -46,7 +46,7 @@ export async function complete(prompt: string): Promise<string> {
  *  can mark the media row failed (unlike chat, a placeholder must not be stored as a transcript). */
 export async function describeMedia(bytes: Buffer, mime: string): Promise<string> {
   let status: number | null = null;
-  let data: { text?: string; provider?: string; usage?: unknown } | null = null;
+  let data: { text?: string; provider?: string; tier?: string; usage?: unknown } | null = null;
   try {
     const res = await fetch(`${config.gatewayUrl}/media`, {
       method: "POST",
@@ -58,7 +58,7 @@ export async function describeMedia(bytes: Buffer, mime: string): Promise<string
     });
     status = res.status;
     if (!res.ok) throw new Error(`gateway /media ${res.status}`);
-    data = (await res.json()) as { text?: string; provider?: string; usage?: unknown };
+    data = (await res.json()) as { text?: string; provider?: string; tier?: string; usage?: unknown };
     if (!data.text) throw new Error("gateway /media returned no text");
     return data.text;
   } finally {

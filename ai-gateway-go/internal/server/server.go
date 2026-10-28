@@ -24,6 +24,7 @@ import (
 	"gaiada/ai-gateway-go/internal/dlp"
 	"gaiada/ai-gateway-go/internal/metrics"
 	"gaiada/ai-gateway-go/internal/providers"
+	"gaiada/ai-gateway-go/internal/routing"
 )
 
 type Chains struct {
@@ -42,6 +43,10 @@ type Admin struct {
 	// KnownProviders is the set a chain write may name. Validated before anything is applied so an
 	// unknown name is a 400 rather than a silently shortened chain.
 	KnownProviders []string
+	// OverridableProviders (AIP-06) is the subset of KnownProviders that implement
+	// providers.ModelOverrider, i.e. the only ones a `tiers` write may attach a model to. Supplied by
+	// main from the full registry; when nil the server derives it from the live LLM chain.
+	OverridableProviders []string
 }
 
 // runtimeTuning holds the settings that live OUTSIDE the chain/budget objects but are still
@@ -166,9 +171,14 @@ func writeSSEDone(w http.ResponseWriter, flusher http.Flusher, canFlush bool) {
 // docs/FRONTEND-BFF-CONTRACT.md §18's "ASST-15" addendum): `meta` keeps its ONE timing rule,
 // unconditionally, for every provider — pre-first-token, no exceptions — and the late-arriving
 // session id moved to its own additive terminal event, `event: session` (writeSSESession below).
+//
+// AIP-06: `tier` is additive and present ONLY when a requested tier was applied (the provider that
+// releases the first byte is the tier's provider). Absent otherwise, so a meta frame for a request
+// with no task/tier, or whose tier was not applied, is byte for byte what it always was.
 type metaPayload struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
+	Tier     string `json:"tier,omitempty"`
 }
 
 // writeSSEMeta writes the `event: meta` frame. Call site + timing rule: see the long comment
@@ -176,14 +186,14 @@ type metaPayload struct {
 // from INSIDE the DLP scrubber's sink, at the first byte release, never from inside the
 // chain.Run/CompleteStream callback directly (a provider that never gets bytes to the wire must
 // never announce itself).
-func writeSSEMeta(w http.ResponseWriter, flusher http.Flusher, canFlush bool, provider, model string) {
-	enc, err := json.Marshal(metaPayload{Provider: provider, Model: model})
+func writeSSEMeta(w http.ResponseWriter, flusher http.Flusher, canFlush bool, provider, model, tier string) {
+	enc, err := json.Marshal(metaPayload{Provider: provider, Model: model, Tier: tier})
 	if err != nil {
 		// Marshal of two plain strings cannot fail in practice (see writeSSEData's identical
 		// reasoning) — guarded anyway rather than assumed. Drop the un-encodable model rather than
 		// the whole frame: knowing WHICH provider served, even without its model name, is still
 		// strictly better than silence.
-		enc, _ = json.Marshal(metaPayload{Provider: provider})
+		enc, _ = json.Marshal(metaPayload{Provider: provider, Tier: tier})
 	}
 	fmt.Fprintf(w, "event: meta\ndata: %s\n\n", enc)
 	if canFlush {
@@ -222,7 +232,13 @@ type completeAnswer struct {
 	// Model (AIP-03 follow-up) names the upstream model that served, and is set only together with
 	// `usage`: an answer without usage stays byte for byte the old one, and every answer that carries
 	// counts also says which model they are for, so a price-table cost can be computed downstream.
-	Model string        `json:"model,omitempty"`
+	// AIP-06: it is ALSO set when a tier was applied (the served model, possibly the tier's override).
+	Model string `json:"model,omitempty"`
+	// Tier (AIP-06) is the tier that was actually applied: set only when the request resolved to a tier
+	// AND the provider that served is that tier's provider. Absent in every other case, so an answer for
+	// a request with no task/tier (or `provider`, or an unapplied tier) is byte for byte the old one.
+	// Field order: provider, text, model, tier, usage.
+	Tier  string        `json:"tier,omitempty"`
 	Usage *usagePayload `json:"usage,omitempty"`
 }
 
@@ -298,6 +314,32 @@ func modelOf(p providers.Provider) string {
 		return mr.ModelName()
 	}
 	return ""
+}
+
+// routedProvider (AIP-06) returns the provider to use for ONE attempt of a routed request. When the
+// route carries a model and p is the route's provider and can take an override, it is a shallow copy
+// with only the text model replaced; otherwise it is p itself. The shared provider is never mutated,
+// and every other provider in a failover keeps its own default model. The bool reports whether an
+// override was actually applied.
+func routedProvider(p providers.Provider, route routing.Route) (providers.Provider, bool) {
+	if route.Model == "" || p.Name() != route.Hint {
+		return p, false
+	}
+	if mo, ok := p.(providers.ModelOverrider); ok {
+		return mo.WithModel(route.Model), true
+	}
+	return p, false
+}
+
+// appliedTier (AIP-06) is the tier to REPORT: route.Tier, but only when the provider that served is
+// the route's provider and the route's model (if any) was really used for that attempt. "" otherwise
+// (no tier requested, `provider` was sent, the tier's provider was skipped or failed and another one
+// served).
+func appliedTier(route routing.Route, served string, overridden bool) string {
+	if route.Tier == "" || served != route.Hint || (route.Model != "" && !overridden) {
+		return ""
+	}
+	return route.Tier
 }
 
 // callCompleteStream invokes CompleteStream, dispatching to the richest optional extension a
@@ -432,6 +474,36 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 	// Boot values seed the runtime tuning; a persisted override has already been folded into cfg by
 	// main before this point, so the two never disagree at startup.
 	rt := &runtimeTuning{providerTimeoutMs: cfg.ProviderTimeoutMs, dlpClassifierOn: cfg.DLPClassifierEnabled}
+
+	// AIP-06: the live routing table. cfg.Routing is the ENV table; a persisted console override
+	// (tiers/taskTiers) replaces the matching half. Requests read it per call; an admin write or clear
+	// swaps it (never edits it), so concurrent requests see either the old or the new table whole.
+	envRouting := cfg.Routing
+	effectiveRouting := func() routing.Table {
+		if admin != nil && admin.Store != nil {
+			return adminconfig.FoldRouting(envRouting, admin.Store.Get())
+		}
+		return envRouting
+	}
+	table := routing.NewHolder(effectiveRouting())
+	refreshRouting := func() { table.Update(effectiveRouting) }
+	// overridableNames is the set of providers that can take a tier model: main's full registry when
+	// supplied, else whatever in the live LLM chain implements ModelOverrider.
+	overridableNames := func() []string {
+		if admin != nil && admin.OverridableProviders != nil {
+			return admin.OverridableProviders
+		}
+		names := []string{}
+		if chains.LLM != nil {
+			for _, p := range chains.LLM.Filtered(func(p providers.Provider) bool {
+				_, ok := p.(providers.ModelOverrider)
+				return ok
+			}) {
+				names = append(names, p.Name())
+			}
+		}
+		return names
+	}
 	// activeClassifier gates on BOTH "a classifier exists" and "it's currently switched on", so the
 	// runtime toggle is real rather than cosmetic.
 	activeClassifier := func() *dlp.Classifier {
@@ -465,6 +537,11 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 		}
 		if c := activeClassifier(); c != nil {
 			body["classifierReachable"] = classifierReachable(c)
+		}
+		// AIP-06: the NAMES of the configured tiers, never a provider or model; the key is absent when
+		// none are configured, so an unrouted gateway's /health body is exactly what it was.
+		if names := table.Get().TierNames(); len(names) > 0 {
+			body["tiers"] = names
 		}
 		writeJSON(w, 200, body)
 	})
@@ -517,7 +594,17 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 				"llmChain":              len(ov.LLMChain) > 0,
 				"mediaChain":            len(ov.MediaChain) > 0,
 				"embedChain":            len(ov.EmbedChain) > 0,
+				"tiers":                 ov.Tiers != nil,
+				"taskTiers":             ov.TaskTiers != nil,
 			}
+		}
+		live := table.Get()
+		liveTiers, liveTaskTiers := live.Tiers, live.TaskTiers
+		if liveTiers == nil {
+			liveTiers = map[string]routing.Entry{}
+		}
+		if liveTaskTiers == nil {
+			liveTaskTiers = map[string]string{}
 		}
 		writeJSON(w, 200, map[string]any{
 			"writableKeys": writableKeys,
@@ -530,7 +617,9 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 				"embed": chainReport(cfg.EmbedChain, chains.Embed),
 			},
 			"providers": providerConfigReport(cfg),
-			"budget":    b.Breakdown(time.Now()),
+			// AIP-06: the EFFECTIVE routing table (env, or the console override when one is set).
+			"routing": map[string]any{"tiers": liveTiers, "taskTiers": liveTaskTiers},
+			"budget":  b.Breakdown(time.Now()),
 			"reliability": map[string]any{
 				"breakerThreshold":  threshold,
 				"breakerCooldownMs": cooldownMs,
@@ -594,7 +683,7 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 				return
 			}
 
-			applied, err := admin.Store.Set(key, body.Value, admin.KnownProviders)
+			applied, err := admin.Store.Set(key, body.Value, admin.KnownProviders, overridableNames())
 			if err != nil {
 				writeErr(w, 400, err.Error())
 				return
@@ -636,6 +725,10 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 				if ov.DLPClassifierEnabled != nil {
 					rt.setClassifierOn(*ov.DLPClassifierEnabled)
 				}
+			case "tiers", "taskTiers":
+				// Rebuilt from the env table + the store under the holder's lock, so the live table is
+				// exactly what was persisted, whichever of two concurrent writes lands last.
+				refreshRouting()
 			case "llmChain", "mediaChain", "embedChain":
 				if admin.BuildProviders == nil {
 					writeErr(w, 501, "chain reordering isn't wired in this process")
@@ -697,6 +790,8 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 				rt.setTimeout(cfg.ProviderTimeoutMs)
 			case "dlpClassifierEnabled":
 				rt.setClassifierOn(cfg.DLPClassifierEnabled)
+			case "tiers", "taskTiers":
+				refreshRouting() // the override is cleared in the store, so this folds back to env
 			case "llmChain", "mediaChain", "embedChain":
 				if admin.BuildProviders != nil {
 					target, names := chains.LLM, cfg.LLMChain
@@ -762,27 +857,34 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			// it enforces against what SERVED, so an unhonoured hint = writes correctly contained but
 			// permanently inert). The assistant's brain picker worked only because it streams.
 			Provider string `json:"provider"`
+			// Task and Tier (AIP-06) are optional ROUTING hints, identical on /complete/stream: `task` is
+			// one of chat|summarise|classify|agent_step|draft, `tier` one of fast|standard|strong. Any
+			// other value is treated as absent, never an error. Precedence: provider > tier > the task's
+			// tier > plain chain order. See internal/routing.
+			Task string `json:"task"`
+			Tier string `json:"tier"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if strings.TrimSpace(body.Prompt) == "" {
 			writeErr(w, 400, "prompt required")
 			return
 		}
+		route := routing.Resolve(body.Provider, body.Task, body.Tier, table.Get())
 		ok, scope := b.Take(tenantOf(r), started)
 		if !ok {
-			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "budget"})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "budget", Task: route.Task})
 			writeErr(w, 429, scope+" daily budget exceeded — degraded until tomorrow")
 			return
 		}
 		result, err := dlp.DLP(body.Prompt)
 		if err != nil {
-			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds(), Task: route.Task})
 			writeErr(w, 503, err.Error())
 			return
 		}
 		if c := activeClassifier(); c != nil {
 			if allowed, cerr := c.Classify(r.Context(), result.Clean); cerr != nil || !allowed {
-				emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+				emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds(), Task: route.Task})
 				msg := "DLP classifier blocked this request"
 				if cerr != nil {
 					msg = cerr.Error()
@@ -795,7 +897,12 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 		// every attempt so a failed-over provider's figures can never be attributed to the next one.
 		var usage *usagePayload
 		var servedModel string
-		text, provider, taxonomy, err := chain.RunWithHint(chains.LLM, r.Context(), body.Provider, func(p providers.Provider) (string, error) {
+		// AIP-06: whether THIS attempt ran on a model-overridden copy (reset per attempt, like usage).
+		var overridden bool
+		text, provider, taxonomy, err := chain.RunWithHint(chains.LLM, r.Context(), route.Hint, func(p providers.Provider) (string, error) {
+			// The tier's model applies to the tier's provider only, and to this attempt only: a
+			// failover provider runs on its own default model.
+			p, overridden = routedProvider(p, route)
 			usage, servedModel = nil, modelOf(p)
 			// Fresh per-attempt timeout derived from r.Context(), NOT a single deadline shared
 			// across the whole failover chain: a hung provider costs at most one
@@ -813,22 +920,24 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			return p.Complete(ctx, result.Clean)
 		})
 		if err != nil {
-			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: taxonomy, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: taxonomy, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds(), Task: route.Task})
 			writeErr(w, 502, err.Error())
 			return
 		}
+		// AIP-06: the tier is REPORTED only when it was applied (the tier's provider served).
+		tier := appliedTier(route, provider, overridden)
 		answerModel := ""
-		if usage != nil {
+		if usage != nil || tier != "" {
 			answerModel = servedModel
 		}
-		row := auditUsage(audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()}, usage)
+		row := auditUsage(audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds(), Task: route.Task, Tier: tier}, usage)
 		row.Model = answerModel
 		emit(r.Context(), row)
 		// Report the provider that actually served (after any failover) so a WS8 write-capable agent
 		// can enforce the D13 failover gate + WS9 can attribute the run. Additive/back-compatible.
 		// AIP-02: `usage` (the upstream's own counts and cost, source "provider") is appended only
 		// when real; {provider,text} are untouched either way. `model` rides with `usage` only.
-		writeJSON(w, 200, completeAnswer{Provider: provider, Text: text, Model: answerModel, Usage: usage})
+		writeJSON(w, 200, completeAnswer{Provider: provider, Text: text, Model: answerModel, Tier: tier, Usage: usage})
 	})
 
 	mux.HandleFunc("POST /media", func(w http.ResponseWriter, r *http.Request) {
@@ -933,6 +1042,10 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			// providers.SessionStreamingProvider (today: hermes). See docs/FRONTEND-BFF-CONTRACT.md
 			// §18's "ASST-15" addendum.
 			ProviderSession string `json:"providerSession"`
+			// Task and Tier (AIP-06): optional routing hints, exactly as on /complete (provider > tier >
+			// the task's tier > plain chain order; any invalid value is treated as absent).
+			Task string `json:"task"`
+			Tier string `json:"tier"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if strings.TrimSpace(body.Prompt) == "" {
@@ -941,21 +1054,22 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			writeErr(w, 400, "prompt required")
 			return
 		}
+		route := routing.Resolve(body.Provider, body.Task, body.Tier, table.Get())
 		ok, scope := b.Take(tenantOf(r), started)
 		if !ok {
-			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "budget"})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "budget", Task: route.Task})
 			writeErr(w, 429, scope+" daily budget exceeded — degraded until tomorrow")
 			return
 		}
 		result, err := dlp.DLP(body.Prompt)
 		if err != nil {
-			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds(), Task: route.Task})
 			writeErr(w, 503, err.Error())
 			return
 		}
 		if c := activeClassifier(); c != nil {
 			if allowed, cerr := c.Classify(r.Context(), result.Clean); cerr != nil || !allowed {
-				emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+				emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds(), Task: route.Task})
 				writeErr(w, 503, "DLP classifier blocked this request")
 				return
 			}
@@ -977,6 +1091,11 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 		// tries providers strictly sequentially, so at most one attempt is ever "current").
 		metaEmitted := false
 		var currentProvider, currentModel string
+		// AIP-06: currentOverridden is whether the CURRENT attempt runs on a model-overridden copy.
+		// auditTier is the tier APPLIED, for the audit row: set where the serving provider is known
+		// (the first-released byte for `meta`, the success path, a mid-stream failure) and "" otherwise.
+		var currentOverridden bool
+		auditTier := ""
 		// usage is nil until a provider's onUsage callback fires with REAL counts (ASST-11: never
 		// zero-filled, never estimated). It is only ever read on the success path, after chain.Run
 		// returns — see the write site right before writeSSEDone.
@@ -1018,7 +1137,10 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 		emitToken := func(token string) {
 			if !metaEmitted {
 				metaEmitted = true
-				writeSSEMeta(w, flusher, canFlush, currentProvider, currentModel)
+				// AIP-06: `tier` rides in meta only when the provider releasing the first byte is the
+				// tier's provider (and its model override, if any, is what runs).
+				metaTier := appliedTier(route, currentProvider, currentOverridden)
+				writeSSEMeta(w, flusher, canFlush, currentProvider, currentModel, metaTier)
 			}
 			streamed = true
 			// ASST-10: single-line JSON `data:` payload — see the writeSSEData comment above for
@@ -1095,6 +1217,11 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 				Redactions:       len(result.Redactions) + scrubber.Redactions(),
 				ForcedBoundaries: scrubber.ForcedBoundaries(),
 				LatencyMs:        time.Since(started).Milliseconds(),
+				Task:             route.Task,
+				Tier:             auditTier,
+			}
+			if auditTier != "" {
+				row.Model = currentModel // a routed stream names the model that served it
 			}
 			// AIP-02: the counts the stream reported (nil on every failure path), never text.
 			emit(r.Context(), auditUsage(row, usage))
@@ -1108,7 +1235,11 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 		// other provider in this loop is, never bypassed. Everything below (currentProvider/
 		// currentModel bookkeeping, the meta/usage/session capture, the hold-window discard) is
 		// UNCHANGED from before this ticket — only which provider is tried in which order can differ.
-		text, provider, taxonomy, err := chain.RunWithHint(chains.LLM, streamCtx, body.Provider, func(p providers.Provider) (string, error) {
+		text, provider, taxonomy, err := chain.RunWithHint(chains.LLM, streamCtx, route.Hint, func(p providers.Provider) (string, error) {
+			// AIP-06: the tier's model applies to the tier's provider only, for this attempt only. The
+			// copy (or p itself) is what currentProvider/currentModel below report, so `meta` names the
+			// override; every failover provider runs on its own default model.
+			p, currentOverridden = routedProvider(p, route)
 			// ASST-11: recorded BEFORE the attempt runs, so if emit() fires during (or at the final
 			// Close() flush after) THIS attempt, it reports THIS provider — see the emit closure's
 			// comment for why that is always the provider actually releasing bytes, never a prior
@@ -1179,6 +1310,7 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 				// the misleading row the ticket calls out.
 				p := currentProvider
 				auditProvider = &p
+				auditTier = appliedTier(route, currentProvider, currentOverridden)
 			}
 			if !midStreamErrorHandled {
 				writeSSEError(w, flusher, canFlush, err.Error())
@@ -1190,6 +1322,7 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 		// the audit row to the real server, not the requested hint.
 		servedBy := provider
 		auditProvider = &servedBy
+		auditTier = appliedTier(route, provider, currentOverridden)
 		// Exactly one flush of the held tail on the success path (no-op if the winning provider
 		// was non-streaming, or if the mid-stream branch above already closed). Skipping it would
 		// truncate every streamed response by up to dlp.MaxDetectableSpan bytes.

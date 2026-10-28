@@ -2327,21 +2327,39 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
 - ✅ `GET /api/:t/assistant/threads` — paginated (`limit`/`offset`, default 50 / max 200),
   substring search on title (`q`), optional `status` filter (`active`/`archived`), ordered
   pinned-first then `last_message_at DESC NULLS LAST`. Response `{ items, total }`.
-- ✅ `POST /api/:t/assistant/threads` — `{ title?, brainProvider?, brainModel? }` → `{ id }`. Owner
+- ✅ `POST /api/:t/assistant/threads` — `{ title?, brainProvider?, brainTier?, brainModel? }` → `{ id }`. Owner
   is always the caller; `brain` is stored but **not routed** until Phase 2 (ASST-06/Hermes) — see
-  that ticket, not this one, for per-brain dispatch.
+  that ticket, not this one, for per-brain dispatch. **AIP-08a:** `brainTier` is `'fast'|'standard'|'strong'|null`
+  (anything else is 400); a non-null `brainTier` together with a non-null `brainProvider` is 400 (`brain_conflict`).
+  **AIP-08b (BUILT, PROTOTYPED; ruling AIP-D5):** a non-null `brainProvider` needs `assistant.brain.choose_provider`
+  (`can()` on the `assistant_brain` kind for `:t`; company_admin and owner by default, anyone else through a role edit) or the
+  call is **403** `brain_provider_forbidden: ...` and no thread is created. A tier, Auto and a blank provider need no grant.
 - ✅ `GET /api/:t/assistant/threads/:id` — thread + paged messages (`messageLimit` default 200/max
   500, `beforeSeq` cursor for older pages), returned oldest→newest. Response
-  `{ thread, messages, hasMoreMessages }`.
+  `{ thread, messages, hasMoreMessages }`. **AIP-08a:** `thread` carries `brainTier: 'fast'|'standard'|'strong'|null`
+  (`null` = Auto; never set together with `brainProvider`).
 - ✅ `PATCH /api/:t/assistant/threads/:id` — rename (`title`) / pin (`pinned`) / archive
-  (`status: 'active'|'archived'`) / brain (`brainProvider`/`brainModel`).
+  (`status: 'active'|'archived'`) / brain (`brainProvider`/`brainTier`/`brainModel`). **AIP-08a** (migration
+  `202610281200_assistant_thread_brain_tier.sql`): `brainTier` is `'fast'|'standard'|'strong'|null`, any other value is 400;
+  a non-null `brainTier` with a non-null `brainProvider` in one body is 400 (`brain_conflict`); a thread holds a tier OR a
+  provider, never both (two CHECKs). Setting a non-null `brainTier` also sets `brain_provider = NULL` in the same UPDATE and
+  counts as a provider change for the ASST-16 rule below (`hermes_session_id` is reset when the stored provider was non-null);
+  setting a non-null `brainProvider` also sets `brain_tier = NULL`; setting either to `null` touches only that column;
+  `brainModel` is never touched by it. Every reply in the thread sends the stored tier to the gateway's `/complete/stream` as
+  `tier` (only when set, so an Auto thread's body is unchanged); at the gateway `provider` > `tier` > the task's tier.
+  **AIP-08b (BUILT, PROTOTYPED; ruling AIP-D5):** setting a non-null `brainProvider` (even the value already stored) needs
+  `assistant.brain.choose_provider` or the PATCH is **403** `brain_provider_forbidden: ...` and nothing in the body is written
+  (not even a title sent with it). Clearing it (`null` or blank) and every `brainTier` value need no grant. At SEND time (the
+  stream route and `POST :t/assistant/ask`) a stored `brainProvider` is sent as the `provider` hint only while the thread's owner
+  holds the grant NOW; otherwise no `provider` and no `providerSession` go out (the reply routes as Auto: tier, then task), nothing
+  errors, and the stored value is kept. A failed check drops the hint; it never refuses the reply.
 - ✅ `DELETE /api/:t/assistant/threads/:id` — hard delete; CASCADEs to `assistant_messages` →
   `assistant_tool_calls`, and SETs NULL (row survives) on `assistant_memory.source_thread_id` —
   proven by `modules/assistant/assistant.test.ts`'s cascade probe (admin-pool reads, not just
   invisible-under-RLS).
 - **PROTOTYPED** (AIP-00c, 2026-10-27) `GET /api/:t/assistant/brains` (`modules/assistant/brains.ts`, route in
   `assistant.controller.ts`) — which gateway LLM brains can serve right now, for the brain picker. Authorized
-  exactly like `capabilities` (an authenticated user; no resource, no new Cerbos kind or action). Reads the
+  exactly like `capabilities` (an authenticated user; no resource; AIP-08b adds the per-caller `canChooseProvider` check below). Reads the
   gateway's `GET /health` (`providers.llm`; state `ok` = available, `open` and `unconfigured` = not) and answers
   `{ brains: [{ value: "<gateway provider name>", available: boolean }] | null, checkedAt: <ISO> }`. `echo` is never
   listed; a provider outside the live `LLM_CHAIN` is absent. **`brains: null` means UNKNOWN** (gateway unreachable,
@@ -2350,6 +2368,17 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   endpoints, budget, key state) is returned. Cached in memory for 60 s. Consumer: `lib/assistantActions.ts#refreshBrainsAction`
   -> `components/assistant/BrainPicker.tsx`, which offers Auto plus the available brains and keeps a thread's stored
   value visible as "<label> (unavailable)". The `openai` label is now "Cloud (default)" (the live endpoint is OpenRouter).
+  **AIP-08a:** the answer also carries `tiers: string[] | null`, the valid tier names (`fast`, `standard`, `strong`) from
+  `/health`'s `tiers`: `[]` when that key is absent (none configured), `null` when `/health` could not be read (the same cases
+  as `brains: null`). Anything else in `/health`'s `tiers` is dropped. The picker offers Auto, then Fast and Strong (each only
+  when listed), then the providers; Standard is not offered (Auto already means the gateway's default for the task) but a stored
+  `standard` still shows as the current choice. Select values are `tier:<name>` / `provider:<name>` / empty for Auto.
+  **AIP-08b (BUILT, PROTOTYPED; ruling AIP-D5):** the answer also carries `canChooseProvider: boolean`, whether THIS caller may
+  pick a named provider in `:t` (`assistant.brain.choose_provider` on the `assistant_brain` kind, a fresh Cerbos check per request;
+  the 60 s cache holds only the gateway read). When it is `false`, **`brains` is `[]`**, so the provider list never reaches the
+  browser; `tiers` is unchanged. The picker then offers Auto and the tiers only, and a thread whose stored provider the person can
+  no longer pick shows it as the current choice, labelled "<label> (not available to you)"; Auto, Fast or Strong can still be chosen.
+  The UI never derives this from its own role map: `canChooseProvider` is the source.
 - Deliberately **NO** `writeActivity()`/`notify()` call on any of the above: the tenant activity
   feed (`GET :t/activity`) is readable by every plain member, and writing thread metadata into it
   would leak a private thread's existence/title to people with no Cerbos grant to read it — the
@@ -2581,6 +2610,31 @@ if it were first in line naturally) and does not touch breaker state; an empty o
 falls through to the chain's untouched `Run` behavior. Absent hint ⇒ byte-identical behavior to
 before this ticket for every existing caller (`/complete`, `/media`, `/embed` don't accept a hint
 at all; `/complete/stream` with no `provider` field delegates straight to `Run`).
+
+### AIP-06 — route by task and tier (`POST /complete` and `POST /complete/stream`, 2026-10-28)
+
+Plan `docs/plans/2026-10-27-ai-plan.md` §2.2; rulings AIP-D1 (one model for every tier for now) and AIP-D5.
+Additive and optional; with the fields absent the wire is byte for byte what it was.
+
+- **Request.** Both routes accept `task` (`chat` | `summarise` | `classify` | `agent_step` | `draft`) and `tier`
+  (`fast` | `standard` | `strong`). Any other value (wrong case, unknown, empty, wrong JSON type) is treated as absent,
+  never an error. Precedence: `provider` (the ASST-15 hint) > `tier` > the task's tier > plain chain order. When
+  `provider` is sent the tier is not consulted at all.
+- **A tier names a provider and, optionally, a model** (gateway config `GATEWAY_TIERS`, `GATEWAY_TASK_TIERS`, or the
+  console keys `tiers` and `taskTiers`). The tier's provider is tried first, on the tier's model for that one attempt.
+  It is a HINT exactly like `provider`: a provider that is unavailable, has an open breaker, or fails is skipped or
+  failed over from as today, and every other provider runs on its own default model.
+- **Response, only when a tier was APPLIED** (the provider that served is the tier's provider):
+  `POST /complete` answers `{provider, text, model, tier, usage?}` (`model` is the served model, and is also set whenever
+  `usage` is); `POST /complete/stream`'s `event: meta` is `{provider, model, tier}`, where `model` names the overridden model
+  and `tier` is present only when the provider that released the first byte is the tier's provider. When no tier was
+  applied (none requested, `provider` sent, the tier's provider did not serve), `tier` is absent and the body, the meta
+  frame and the audit row are exactly the previous ones. A consumer must treat an absent `tier` as "no tier applied".
+- **Audit** (`GET /egress-audit`, `llm` rows): `task` (the validated requested task, even when routing did not use it)
+  and `tier` (the applied tier) are added, omitted when empty; a routed success also records `model`. Never text.
+- **`GET /health`** gains `tiers`: the sorted names of the configured tiers (never a provider or model), and the key is
+  absent when none are configured. `providers.llm` is unchanged.
+- The agent listener (`/v1/chat/completions`) is not affected: the caller's model never routes there.
 
 ### Memory panel backend — propose vs confirm, quarantine discipline (ASST-19, 2026-08-05)
 
@@ -13200,6 +13254,7 @@ The `ai-agents` runner, the knowledge service, the MCP hub and the WhatsApp bot 
 | Route | `POST /api/internal/ai-usage` (no tenant in the path or a header). `ServiceGuard`, the guard of `/principal/resolve`, `/auth/magic-link` and `/mcp/tool-defs`: `Authorization: Bearer <PLATFORM_SERVICE_TOKEN>` compared in constant time; an unset token refuses everyone. No token, a wrong token and a user session (an OIDC JWT, a cookie, `x-user-id` alone) are each **401**. |
 | Body | `{ "events": [ ... ] }`, 1 to 100 events; anything else is **400**. Each event is the writer's event shape (`AI_USAGE_EVENT_KEYS`): ids, counts, labels and money only; an unknown key is refused, so no text field can ride in. |
 | Answer | **200** `{ "accepted": n, "rejected": [{ "index", "reason" }], "counted": { "user_not_member": n } }`. A bad event never fails the batch. `reason` is a short code, never an echoed value: `not_an_object`, `unknown_field`, `invalid_<field>` (a validator failure; names a known field only), `surface_not_allowed`, `unknown_tenant`, `write_failed`. `counted` is additive: events stored but adjusted. |
+| Tier | `tier` is optional (AIP-07): the routing tier the gateway applied, exactly `fast`, `standard` or `strong`; any other value is refused for that event as `invalid_tier`. Absent or null = no tier applied. The callers send `task` (the gateway routing class) to `/complete` and report the answer's `tier` here; `task` in the event stays the call-site label. |
 | Surface fence | `agent`, `knowledge`, `bot` or `other` only. `assistant`, `compaction`, `title` and `search` are platform-nest's own and are refused per index. |
 | Tenant | Each event names its company, which must be a live company, else `unknown_tenant`. A `userId` must be an active member of THAT company; otherwise it is stored as NULL and counted as `user_not_member`, never rejected. A supplied `orgUnitId` is ignored: the department is the member's primary placement today (as in 64.2), or null. |
 | Reporter (each service) | Queue in memory; flush every 5 s or at 50 events (batches of at most 50); never awaited on the call path, never throws; a failed batch is retried once, then dropped with one warning that carries a count and no event content; the queue is capped at 1000 (oldest dropped, counted). `occurredAt` is stamped when the call is reported. Config `PLATFORM_URL` and `PLATFORM_SERVICE_TOKEN`; when either is unset the reporter is off, with one log line at boot. An event with no company uuid is not queued (logged once). |

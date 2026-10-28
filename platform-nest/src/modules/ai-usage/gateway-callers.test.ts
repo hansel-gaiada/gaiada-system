@@ -307,3 +307,92 @@ describe("assistant compaction (assembleContext)", () => {
     expect(out.compactionUpdate?.summary).toBe("still summarised");
   });
 });
+
+// ── AIP-07: every /complete caller sends the routing class and records the tier the gateway reports ──────────────────────────────
+describe("AIP-07 · task in the request body, tier in the usage row", () => {
+  const TIER = 8; // the `tier` column of the INSERT, see the parameter order above
+  /** A fetch that records the request body it was sent and answers with `answer`. */
+  const spy = (answer: unknown) => {
+    const bodies: unknown[] = [];
+    const f = (async (_u: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return { ok: true, status: 200, json: async () => answer } as unknown as Response;
+    }) as unknown as typeof fetch;
+    return { bodies, f };
+  };
+  const attr = (task: string | null) => ({ tenantId: T, userId: U, surface: "other" as const, task });
+
+  it.each([
+    ["search", searchComplete],
+    ["social", socialComplete],
+  ] as const)("%s client: a mapped label sends its class, an unmapped one sends NO task key, and the tier lands in the row", async (_n, complete) => {
+    const mapped = spy({ text: "x", provider: "openai", tier: "fast" });
+    await complete("p", { gatewayUrl: GW, gatewayToken: "t", fetchImpl: mapped.f, attribution: attr("social.inbox_triage") });
+    expect(mapped.bodies[0]).toEqual({ prompt: "p", task: "classify" });
+    expect((await row(1))[TIER]).toBe("fast");
+
+    const unmapped = spy({ text: "x", provider: "openai", tier: "strong" });
+    await complete("p", { gatewayUrl: GW, gatewayToken: "t", fetchImpl: unmapped.f, attribution: attr("some.unknown_label") });
+    expect(unmapped.bodies[0]).toEqual({ prompt: "p" });
+    expect("task" in (unmapped.bodies[0] as object)).toBe(false);
+
+    const none = spy({ text: "x", provider: "openai" });
+    await complete("p", { gatewayUrl: GW, gatewayToken: "t", fetchImpl: none.f, attribution: attr(null) });
+    expect(none.bodies[0]).toEqual({ prompt: "p" });
+    expect((await row(3))[TIER]).toBeNull(); // no tier reported = none applied
+  });
+
+  it("an invalid tier value from the gateway is dropped, not stored", async () => {
+    await searchComplete("p", { gatewayUrl: GW, gatewayToken: "t", fetchImpl: json({ text: "x", provider: "openai", tier: "turbo" }), attribution: attr("search.brief_draft") });
+    expect((await row())[TIER]).toBeNull();
+  });
+
+  it("a refused call records no tier", async () => {
+    await expect(searchComplete("p", { gatewayUrl: GW, gatewayToken: "t", fetchImpl: json({ tier: "fast" }, 503), attribution: attr("search.brief_draft") })).rejects.toThrow(/503/);
+    const v = await row();
+    expect([v[V.outcome], v[TIER]]).toEqual(["blocked_dlp", null]);
+  });
+
+  it("/embed never carries a task", async () => {
+    const s = spy({ embedding: [0.1] });
+    await embedViaGateway("text", { gatewayUrl: GW, gatewayToken: "t", fetchImpl: s.f, attribution: attr("search.embed_keyword") });
+    expect(s.bodies[0]).toEqual({ text: "text" });
+  });
+
+  it("the assistant stream sends task chat and records meta's tier; an invalid tier is dropped", async () => {
+    const enc = new TextEncoder();
+    const mk = (tier: unknown) => {
+      const bodies: unknown[] = [];
+      const f = (async (_u: unknown, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        const blocks = [`event: meta\ndata: ${JSON.stringify({ provider: "openai", model: "m1", tier })}\n\n`, `data: ${JSON.stringify("Hi")}\n\n`, `event: done\ndata: {}\n\n`].join("");
+        return { ok: true, status: 200, body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(enc.encode(blocks)); c.close(); } }) } as unknown as Response;
+      }) as unknown as typeof fetch;
+      return { bodies, f };
+    };
+    const emit: RelayEmit = { token: () => {}, meta: () => {}, usage: () => {}, session: () => {}, done: () => {}, error: () => {} };
+    const run = (f: typeof fetch, id: string) => relayGeneration(reserveGeneration(`aip07-${id}`, `aip07-msg-${id}`)!, {
+      tenantId: T, prompt: "a prompt", emit, gatewayUrl: GW, gatewayToken: "t", fetchImpl: f,
+      attribution: { tenantId: T, userId: U, surface: "assistant", threadId: TH, task: "assistant.reply" },
+    });
+    const good = mk("standard");
+    const r = await run(good.f, "a");
+    expect(good.bodies[0]).toEqual({ prompt: "a prompt", task: "chat" });
+    expect(r.tier).toBe("standard");
+    expect((await row(1))[TIER]).toBe("standard");
+    const bad = mk("turbo");
+    await run(bad.f, "b");
+    expect((await row(2))[TIER]).toBeNull();
+  });
+
+  it("the compaction call sends task summarise and records the answer's tier", async () => {
+    const thread = { ownerUserId: U, compactionSummary: null, compactionSummaryUptoSeq: null };
+    const client = {
+      query: vi.fn(async (sql: string) => (/FROM assistant_messages/.test(sql) ? { rows: [1, 2, 3].map((seq) => ({ seq, role: seq % 2 ? "user" : "assistant", content: `message number ${seq} `.repeat(8) })) } : { rows: [] })),
+    } as unknown as PoolClient;
+    const s = spy({ text: "a summary", provider: "openai", tier: "fast" });
+    await assembleContext(client, TH, thread, 4, { tenantId: T, charBudget: 60, knowledgeTopK: 0, gatewayUrl: GW, fetchImpl: s.f });
+    expect((s.bodies[0] as { task?: string }).task).toBe("summarise");
+    expect((await row())[TIER]).toBe("fast");
+  });
+});

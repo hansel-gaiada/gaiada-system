@@ -2946,3 +2946,12 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "agency.discovery_submission.delete" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_assistant_brain_* — AIP-08b (AIP-D5, PERMISSION-CONTRACT §55): pick a named AI provider for your own threads.
+    - name: perm_assistant_brain_choose_provider
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "assistant.brain.choose_provider" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))

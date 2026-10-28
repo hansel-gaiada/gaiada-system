@@ -292,7 +292,9 @@ describe.skipIf(!TEST_URL)("Assistant handoff + roster (ASST-21) — live PG + C
   // permission, so it was removed rather than renamed. Handoff authorization is unchanged: still
   // enforced by Cerbos's `owns`/`inTenant`/`notLow` conditions, just never through
   // `ModuleContract.permissions`/`role_permissions`.
-  it("module contract: assistant declares NO grantable permissions (all 5 are relationship-class, never role-grantable)", () => {
-    expect(assistantModule.permissions).toEqual([]);
+  // AIP-08b (AIP-D5): the module now declares exactly ONE grantable key, on the separate `assistant_brain` kind. The five
+  // relationship-class thread/memory/agent_run keys are still never declared.
+  it("module contract: assistant declares only assistant.brain.choose_provider (the 5 relationship-class keys stay undeclared)", () => {
+    expect(assistantModule.permissions.map((p) => p.key)).toEqual(["assistant.brain.choose_provider"]);
   });
 });

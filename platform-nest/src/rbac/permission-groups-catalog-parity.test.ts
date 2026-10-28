@@ -141,7 +141,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // DW-10e (2026-10-16): +2 grantable (core.work_request.{send_across,read_across} on the EXISTING work_request kind, both in the existing `work_requests` group). 469 -> 471.
     // SCP-1b (2026-10-26): +11 grantable on EXISTING kinds; +2 authoring groups (`social_pipeline`, `social_boosts`), and portal.approve_spend joins `portal_pay`. 471 -> 482.
     // M5-W1q (2026-10-27): +1 grantable (webdev.webdesk_media_asset.review on the EXISTING webdesk_media_asset kind, in the existing `webdesk_media_library` group). 482 -> 483.
-    expect(grantable.length).toBe(483);
+    // AIP-08b (2026-10-28, AIP-D5): +1 grantable (assistant.brain.choose_provider on the NEW assistant_brain kind, in 1 NEW authoring group `assistant_choose_provider`, not sensitive, not advancedOnly). 483 -> 484.
+    expect(grantable.length).toBe(484);
     expect(relationshipKeys.size).toBe(15);
   });
 

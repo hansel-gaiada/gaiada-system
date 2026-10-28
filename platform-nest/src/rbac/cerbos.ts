@@ -9,6 +9,8 @@ import type { Principal } from "./principal";
 export interface Resource {
   kind: string;
   id?: string;
+  /** AIP-08b: `assistant_brain` (resource_assistant_brain.yaml) reads ONLY `id` and `tenantId`, both the route `:tenantId`
+   *  (assistant.controller.ts). No allow-list change was needed: resourcePayload() already carries both. */
   tenantId?: string;
   ownerId?: string;
   projectId?: string;
