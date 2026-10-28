@@ -1,10 +1,10 @@
 // SCP-1k — the client page's header (plan §8 row 1k): the client, its officer, the count against the monthly target (stories and extra posts beside it, never
 // in it), the cycle line (month, deadline, ready-by and the client's health), the tone in one line and the cycle's highlights. It draws what the server
 // answered: the counts are `GET allocation`'s `thisCycle`, the health and the posts are `GET cycles/:cycleId/health`'s.
-// SCP-Sg adds the followers line from `GET engagements/:engagementId/accounts-summary`: followers with the 30-day change, the 30-day reach, a SIMULATED chip when
+// SCP-Sg adds the followers line from `GET engagements/:engagementId/accounts-summary`: followers with the 30-day change, the 30-day reach, the SIMULATED mark when
 // the numbers are the simulator's, and "Last synced <time>" (or "Not synced yet"). A refused or failed read says so in words, never "0".
 import { HealthChip } from "./HealthChip";
-import { SimulatedAccountChip } from "./SimulatedAccountChip";
+import { SimulatedMark } from "./SimulatedMark";
 import { CREATIVE_SOURCE_LABEL, NETWORK_LABEL, cycleCountsText, type AllocationRow } from "@/lib/socialAllocation";
 import { cycleHighlights, monthTitle, type CycleView } from "@/lib/socialClient";
 import { formatDate } from "@/lib/format";
@@ -107,7 +107,7 @@ function FollowersLine({ summary }: { summary: AccountsSummaryRead }) {
           <span>reach in 30 days</span>
         </>
       )}
-      {simulated && <><SimulatedAccountChip /><span className="scp-chead__beside">{SUMMARY_SIMULATED_NOTE}</span></>}
+      {simulated && <><SimulatedMark of="metrics" /><span className="scp-chead__beside">{SUMMARY_SIMULATED_NOTE}</span></>}
       <span className="scp-chead__beside">{lastSyncedText(lastSyncedAt)}</span>
     </p>
   );

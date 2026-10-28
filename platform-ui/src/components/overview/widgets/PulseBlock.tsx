@@ -1,10 +1,11 @@
 import Link from "next/link";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { pulseValueText, type PulseTileModel } from "@/lib/overviewPulse";
 
 // DW-3e: the Overview's Pulse block. One tile per built reader: its label, a count and a link to the page that
 // lists what it counts. A tile that could not be read says why in words ("No access", "Unavailable") in the
 // figure's place; it is never an empty tile and never 0. A refused tile has no link, because its page would refuse too.
-// A count that includes simulated rows (SCP-3f) carries the SIMULATED mark, in words, so it is never colour alone.
+// A count that includes simulated rows (SCP-3f) carries the one SIMULATED mark (SimulatedMark.tsx), in words, so it is never colour alone.
 export function PulseBlock({ tiles }: { tiles: readonly PulseTileModel[] }) {
   return (
     <section className="ov-block ov-pulse" aria-label="Pulse">
@@ -15,7 +16,7 @@ export function PulseBlock({ tiles }: { tiles: readonly PulseTileModel[] }) {
             <>
               <span className="ov-nums__label">{t.label}</span>
               <span className={`ov-nums__value${t.reading.kind === "ok" ? "" : " ov-nums__value--none"}`}>{pulseValueText(t.reading)}</span>
-              {t.reading.kind === "ok" && t.reading.simulated && <span className="ov-pulse__sim" title="Counts simulated posts: mock data for the dev review">SIMULATED</span>}
+              {t.reading.kind === "ok" && t.reading.simulated && <SimulatedMark of="metrics" />}
               {(t.reading.kind === "ok" || t.reading.kind === "unavailable") && t.reading.detail && <span className="ov-nums__detail">{t.reading.detail}</span>}
             </>
           );
