@@ -1,13 +1,14 @@
 // SCP-1k — the client's calendar tab (BFF §63.10 `GET calendar`): the client's scheduled posts on a Monday-first month grid, each coloured by its phase (the
 // status tokens) with a legend; the post's status and format are written in its link, so colour is never the only signal. A day shows in the zone the
-// page shows dates in. Holidays and approved leave come from the department calendar (§59) and are not drawn here yet. A post opens the post page.
+// page shows dates in. Holidays and approved leave come from the department calendar (§59) and are not drawn here (the all-clients calendar, SCP-3e, draws them
+// and moves dates; this tab is one client's read-only month, on the same Monday-first grid builder, weekdays and legend). A post opens the post page.
 import Link from "next/link";
 import type { CSSProperties } from "react";
+import { CalendarLegend } from "@/components/social/CalendarLegend";
+import { CALENDAR_WEEKDAYS } from "@/lib/socialCalendar";
 import {
-  PHASE_LEGEND, clientHref, formatWords, itemsByDay, monthGrid, monthTitle, phaseLabel, phaseStyle, postHref, shiftMonth, statusLabel, type CalendarItem,
+  clientHref, formatWords, itemsByDay, monthGrid, monthTitle, phaseLabel, phaseStyle, postHref, shiftMonth, statusLabel, type CalendarItem,
 } from "@/lib/socialClient";
-
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
 export function ClientCalendar({
   deptId, engagementId, month, items, today, dayOf, timeOf,
@@ -28,19 +29,12 @@ export function ClientCalendar({
         <h3 className="scp-monthnav__title">{monthTitle(month)}</h3>
         <Link className="scp-monthnav__btn" href={clientHref(deptId, engagementId, "calendar", { month: shiftMonth(month, 1) })} aria-label="Next month">&rsaquo;</Link>
       </div>
-      <ul className="scp-legend" aria-label="Phase colours">
-        {PHASE_LEGEND.map((p) => (
-          <li key={p.key} className="scp-legend__item">
-            <span className="scp-legend__dot" style={{ "--scp-phase": p.token } as CSSProperties} aria-hidden="true" />
-            {p.label}
-          </li>
-        ))}
-      </ul>
+      <CalendarLegend />
       <div className="scp-tablewrap">
         <table className="scp-cal">
           <caption>{inGrid === 0 ? `No posts are scheduled in ${monthTitle(month)}.` : `${inGrid} ${inGrid === 1 ? "post" : "posts"} scheduled in view.`}</caption>
           <thead>
-            <tr>{WEEKDAYS.map((d) => <th key={d} scope="col">{d}</th>)}</tr>
+            <tr>{CALENDAR_WEEKDAYS.map((d) => <th key={d} scope="col">{d}</th>)}</tr>
           </thead>
           <tbody>
             {weeks.map((w) => (
