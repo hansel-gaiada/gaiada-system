@@ -154,6 +154,12 @@ describe.skipIf(!TEST_URL)("social module (SMM-02)", () => {
     expect(readReview?.method).toBe("GET");
     expect(readReview?.pathTemplate).toBe("/api/:tenantId/modules/social/variants/:variantId/client-review");
 
+    // SCP-4d (BFF §63.15) — the boost pair moves money records: both are high-impact POST writes.
+    const requestBoost = socialModule.mcpTools.find((t) => t.name === "social.requestBoost");
+    expect(requestBoost).toMatchObject({ write: true, impact: "high", minAssurance: "low", method: "POST", pathTemplate: "/api/:tenantId/modules/social/posts/:postId/boosts" });
+    const boostAction = socialModule.mcpTools.find((t) => t.name === "social.boostAction");
+    expect(boostAction).toMatchObject({ write: true, impact: "high", minAssurance: "low", method: "POST", pathTemplate: "/api/:tenantId/modules/social/boosts/:boostId/actions" });
+
     // The portal decide must NEVER be declared here — no portal capability is ever an MCP tool in
     // this program; the client's decision is a human act on the trust boundary, made in a browser
     // session authenticated as the client, never something an agent (staff-side or client-side) is

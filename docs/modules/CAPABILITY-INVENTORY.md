@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **282** capabilities across **17** owners
-- **147** writes · 135 reads
-- Writes by impact: **high 26** · medium 41 · low 80
+- **284** capabilities across **17** owners
+- **149** writes · 135 reads
+- Writes by impact: **high 28** · medium 41 · low 80
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -239,6 +239,7 @@ unfalsifiable after.
 | social | `social.approvePostVariant` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/approve` | write | `high` |
 | social | `social.approveReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/approve` | write | `low` |
 | social | `social.approveReport` | `POST` | `/api/:tenantId/modules/social/reports/:id/approve` | write | `low` |
+| social | `social.boostAction` | `POST` | `/api/:tenantId/modules/social/boosts/:boostId/actions` | write | `high` |
 | social | `social.checkPublishPreconditions` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/publish-preconditions` | read | — |
 | social | `social.checkReplySendPreconditions` | `GET` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send-preconditions` | read | — |
 | social | `social.createEngagement` | `POST` | `/api/:tenantId/modules/social/engagements` | write | `low` |
@@ -267,6 +268,7 @@ unfalsifiable after.
 | social | `social.provisionPublisherOrg` | `POST` | `/api/:tenantId/modules/social/publisher-orgs` | write | `medium` |
 | social | `social.publishPost` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish` | write | `high` |
 | social | `social.publishPostMetered` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish-metered` | write | `high` |
+| social | `social.requestBoost` | `POST` | `/api/:tenantId/modules/social/posts/:postId/boosts` | write | `high` |
 | social | `social.requestClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | write | `medium` |
 | social | `social.sendReply` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send` | write | `high` |
 | social | `social.setEngagementScope` | `PATCH` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | write | `medium` |

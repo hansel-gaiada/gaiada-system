@@ -57,6 +57,7 @@ const READERS: Record<PulseSource, (userId: string, tenantId: string, me: Me, sh
   "social-overview-late": async (_u, _t, _me, s) => readingOfOverview(await s.overview(), "late"),
   "social-overview-scheduled-week": async (_u, _t, _me, s) => readingOfOverview(await s.overview(), "scheduledThisWeek"),
   "social-overview-failed": async (_u, _t, _me, s) => readingOfOverview(await s.overview(), "failedPosts"),
+  "social-overview-boosts-waiting": async (_u, _t, _me, s) => readingOfOverview(await s.overview(), "boostsWaiting"),
   "it-account-requests": async (u, t) => readingOfAccounts(await listAccounts(u, t)),
   "hr-leave-pending": async (u, t, me) =>
     inHrScope(me, t) ? readingOfResult(await listLeaveResult(u, t, { status: "pending" }), (rows) => ({ value: rows.length })) : FORBIDDEN_READING,

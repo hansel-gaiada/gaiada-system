@@ -16,7 +16,7 @@ function cand(id: string, status: string, o: Partial<FeedCandidate> = {}): FeedC
     blockedFrom: null, blockWaitingOn: null, cycleId: "cy1", readyBy: "2026-10-10", stepEstimates: {}, iAmAssignee: false, ...o,
   };
 }
-const facts = (o: Partial<OverviewFacts> = {}): OverviewFacts => ({ failedPosts: 0, scheduledThisWeek: 0, simulatedIds: new Set(), ...o });
+const facts = (o: Partial<OverviewFacts> = {}): OverviewFacts => ({ failedPosts: 0, scheduledThisWeek: 0, boostsWaiting: 0, simulatedIds: new Set(), ...o });
 const ctx = (includeSimulated: boolean) => ({ today: TODAY, calendar: {}, samples: new Map(), includeSimulated });
 
 describe("weekOf: Monday to Sunday of the day's week", () => {
@@ -55,9 +55,9 @@ describe("composeOverview", () => {
     expect(composeOverview([cand("y", "proofread", { readyBy: "2026-12-20" })], facts(), ctx(false)).tiles.late).toBe(0);
   });
 
-  it("takes the SQL counts as they come and answers boostsWaiting null, never 0", () => {
-    const r = composeOverview([], facts({ failedPosts: 3, scheduledThisWeek: 2 }), ctx(false));
-    expect(r.tiles).toEqual({ inProduction: 0, withClient: 0, late: 0, scheduledThisWeek: 2, failedPosts: 3, boostsWaiting: null });
+  it("takes the SQL counts as they come and passes boostsWaiting through", () => {
+    const r = composeOverview([], facts({ failedPosts: 3, scheduledThisWeek: 2, boostsWaiting: 4 }), ctx(false));
+    expect(r.tiles).toEqual({ inProduction: 0, withClient: 0, late: 0, scheduledThisWeek: 2, failedPosts: 3, boostsWaiting: 4 });
   });
 
   it("leaves simulated posts out while the switch is off (own mark or a variant's), counts them while it is on, and says which", () => {
