@@ -92,6 +92,8 @@ interface World {
   everyReviewPending: boolean;
   approvedSchedule: { scheduledAt: string | null; placement: string[] } | null;
   publisherAvailable: boolean;
+  /** SCP-Sa3: the post's accounts are of both kinds (a real Instagram and a simulated Facebook). */
+  mixedAccountKinds?: boolean;
 }
 
 /** The content of a well-formed post: every hand-off check passes. Scenarios describe stage moves; the officer's
@@ -135,7 +137,7 @@ const AFTER_DESIGN = new Set(["final", "client", "approved", "scheduled", "live"
 const DESIGN_CASES = new Set(["final_design", "client_design"]);
 
 /** The start-state keys the adapter reads. An unknown key fails the suite rather than being ignored. */
-const START_KEYS = new Set(["status", "creativeState", "changeCase", "authorIs", "officerIs", "approvedTimeIsPast", "publisherRegistered", "failingChecks", "blockedFrom"]);
+const START_KEYS = new Set(["status", "creativeState", "changeCase", "authorIs", "officerIs", "approvedTimeIsPast", "publisherRegistered", "failingChecks", "blockedFrom", "mixedAccountKinds"]);
 
 function startOf(sc: ScpScenario): { post: PipelinePostState | null; world: World } {
   const start = sc.start ?? {};
@@ -144,6 +146,7 @@ function startOf(sc: ScpScenario): { post: PipelinePostState | null; world: Worl
   const world: World = {
     officerId: IDS[officer], creativeSource: sc.creativeSource ?? "creatives", designCount: 0, reviewHash: null, hashSeq: 1,
     everyReviewPending: false, approvedSchedule: null, publisherAvailable: start.publisherRegistered === true,
+    mixedAccountKinds: start.mixedAccountKinds === true,
   };
   if (start.status === undefined) return { post: null, world };
   const status = String(start.status);
@@ -194,7 +197,9 @@ function factsOf(world: World): StageFacts {
     now: NOW, cycleExists: true, cycleId: "c-cycle", engagementId: "e-engagement",
     engagementCreativeSource: world.creativeSource, creativesUnitExists: true,
     assetExists: true, designExists: true, designCount: world.designCount, unstoredDesignIds: [],
-    accountsByNetwork: { instagram: 1, facebook: 1 }, reviewHash: world.reviewHash, everyReviewPending: world.everyReviewPending,
+    accountsByNetwork: { instagram: 1, facebook: 1 },
+    accountKinds: world.mixedAccountKinds ? { simulated: ["facebook"], real: ["instagram"] } : { simulated: ["instagram", "facebook"], real: [] },
+    reviewHash: world.reviewHash, everyReviewPending: world.everyReviewPending,
     variantStatuses: [], anyVariantPublishing: false, mediaFailures: [], publisherAvailable: world.publisherAvailable,
     approvedSchedule: world.approvedSchedule, decidedByThisContact: true, withinUndoWindow: true, nothingHappenedSince: true,
     callerHoldsPost: false, lastFollowUpAt: null,
@@ -699,6 +704,7 @@ const GUARD_FAILERS: Record<string, (c: StageContext) => void> = {
   designs_stored: (c) => { c.facts.unstoredDesignIds = ["d-link-only"]; },
   one_account_per_placement_network: (c) => { c.facts.accountsByNetwork = {}; },
   account_not_ambiguous: (c) => { c.facts.accountsByNetwork = { instagram: 2 }; },
+  account_kinds_not_mixed: (c) => { c.facts.accountKinds = { simulated: ["facebook"], real: ["instagram"] }; },
   seen_hash_matches: (c) => { c.params.seenHash = "hash-stale"; },
   every_variant_review_pending: (c) => { c.facts.everyReviewPending = false; },
   own_decision: (c) => { c.facts.decidedByThisContact = false; },
@@ -1209,5 +1215,74 @@ describe("SCP hand-off checks · each refuses and passes", () => {
     expect(r.filter((c) => !c.ok).map((c) => c.code)).toEqual(["must_haves_unticked"]);
     expect(r.find((c) => c.code === "must_haves_unticked")!.message).toContain("hashtag_set");
     expect(r.find((c) => c.code === "must_haves_unticked")!.message).toContain("Core");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// SCP-Sa3 (SCP-D9): a post is wholly simulated or wholly real
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe("SCP-Sa3 · account_kinds_not_mixed", () => {
+  const ONLY_SIM = { simulated: ["instagram", "facebook"], real: [] as string[] };
+  const ONLY_REAL = { simulated: [] as string[], real: ["instagram", "facebook"] };
+  const MIXED = { simulated: ["facebook"], real: ["instagram"] };
+  const withKinds = (action: string, kinds: { simulated: string[]; real: string[] }): StageContext => {
+    const c = baseline(action);
+    c.facts.accountKinds = kinds;
+    return c;
+  };
+
+  it("the fixture puts it on final_approve (after the account guards) and schedule_publisher (first), and on no other action", () => {
+    const on = SCP.actions.filter((a) => a.guards.some((g) => g.guard === "account_kinds_not_mixed"));
+    expect(on.map((a) => a.action).sort()).toEqual(["final_approve", "schedule_publisher"]);
+    const fa = scpAction("final_approve")!.guards.map((g) => g.guard);
+    expect(fa.indexOf("account_kinds_not_mixed")).toBeGreaterThan(fa.indexOf("account_not_ambiguous"));
+    expect(scpAction("schedule_publisher")!.guards[0].guard).toBe("account_kinds_not_mixed");
+    // nothing is dispatched by a hand schedule or a reschedule: they carry no such guard
+    for (const name of ["schedule", "reschedule"]) expect(scpAction(name)!.guards.map((g) => g.guard), name).not.toContain("account_kinds_not_mixed");
+    expect(SCP.refusals.publisher_kinds_mixed).toEqual(expect.objectContaining({ http: 409 }));
+  });
+
+  it.each(["final_approve", "schedule_publisher"])("%s: all simulated passes, all real passes", (action) => {
+    expect(decide(withKinds(action, ONLY_SIM)).ok, "all simulated").toBe(true);
+    expect(decide(withKinds(action, ONLY_REAL)).ok, "all real").toBe(true);
+  });
+
+  it.each(["final_approve", "schedule_publisher"])("%s: a real and a simulated network refuse 409 publisher_kinds_mixed, naming both lists", (action) => {
+    const r = decide(withKinds(action, MIXED));
+    expect(r).toMatchObject({ ok: false, code: "publisher_kinds_mixed", http: 409, guard: "account_kinds_not_mixed", detail: { simulated: ["facebook"], real: ["instagram"] } });
+  });
+
+  it("a placement of one network (a story-only post is one network too) can never be mixed, whichever kind it is", () => {
+    for (const action of ["final_approve", "schedule_publisher"]) {
+      expect(decide(withKinds(action, { simulated: ["instagram"], real: [] })).ok, `${action} simulated`).toBe(true);
+      expect(decide(withKinds(action, { simulated: [], real: ["instagram"] })).ok, `${action} real`).toBe(true);
+    }
+  });
+
+  it("no accounts of either kind (a post with no variants yet) passes this guard; publisher_available and the account guards judge that", () => {
+    expect(decide(withKinds("schedule_publisher", { simulated: [], real: [] })).ok).toBe(true);
+  });
+
+  it("final_approve judges the mix after the account guards and the designs, not before them", () => {
+    const noAccount = withKinds("final_approve", MIXED);
+    noAccount.facts.accountsByNetwork = {};
+    expect(decide(noAccount)).toMatchObject({ code: "no_account_for_network" });
+    const noDesign = withKinds("final_approve", MIXED);
+    noDesign.facts.designCount = 0;
+    expect(decide(noDesign)).toMatchObject({ code: "design_missing" });
+  });
+
+  it("schedule_publisher judges the mix before the publisher's availability (a mixed post never reaches an engine, whatever is registered)", () => {
+    const c = withKinds("schedule_publisher", MIXED);
+    c.facts.publisherAvailable = false;
+    expect(decide(c)).toMatchObject({ code: "publisher_kinds_mixed" });
+  });
+
+  it("the probe marks both actions unavailable for a mixed post, and available for a whole one", () => {
+    for (const action of ["final_approve", "schedule_publisher"]) {
+      expect(probe(withKinds(action, MIXED)), action).toMatchObject({ allowed: false, reason: "publisher_kinds_mixed" });
+      expect(probe(withKinds(action, ONLY_SIM)), action).toMatchObject({ allowed: true });
+    }
   });
 });

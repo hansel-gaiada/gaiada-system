@@ -241,6 +241,7 @@ export const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   design_not_stored: "A design that is only a link has nothing to show the client. Add it from the Asset Library.",
   no_account_for_network: "The client has no account on a network the post is placed on.",
   ambiguous_account: "The client has more than one account on a network the post is placed on, so the server cannot choose.",
+  publisher_kinds_mixed: "This post's networks mix simulated and real accounts. Place it on one kind only.",
   content_changed: "The post changed after the client was shown it.",
   post_not_with_client: "The post is not with the client.",
   client_review_already_decided: "The client has already decided on this post.",

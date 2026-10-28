@@ -233,18 +233,20 @@ export async function resolveAssetGroup(c: PoolClient, tenantId: string, assetId
 
 // ── Accounts, units, people ──────────────────────────────────────────────────────────────────────────────────────
 
-/** The client's usable accounts, per network (BFF §63.3.5: "the client's account on that network"). */
-export async function loadClientAccounts(c: PoolClient, tenantId: string, clientId: string): Promise<Map<string, Array<{ id: string; quota: QuotaSnapshot }>>> {
-  const { rows } = await c.query<{ id: string; network: string; quota: QuotaSnapshot }>(
-    `SELECT id, network, quota FROM social_accounts
+/** The client's usable accounts, per network (BFF §63.3.5: "the client's account on that network"). `simulated` is the account's
+ *  KIND (202610280100's CHECK makes it exactly one of simulated or real): SCP-Sa3's `account_kinds_not_mixed` reads it from this
+ *  same query, so the guard judges the very accounts the other two account guards counted. */
+export async function loadClientAccounts(c: PoolClient, tenantId: string, clientId: string): Promise<Map<string, Array<{ id: string; quota: QuotaSnapshot; simulated: boolean }>>> {
+  const { rows } = await c.query<{ id: string; network: string; quota: QuotaSnapshot; simulated: boolean }>(
+    `SELECT id, network, quota, simulated FROM social_accounts
       WHERE tenant_id = $1 AND client_id = $2 AND deleted_at IS NULL AND status <> 'disconnected'
       ORDER BY network, id`,
     [tenantId, clientId],
   );
-  const out = new Map<string, Array<{ id: string; quota: QuotaSnapshot }>>();
+  const out = new Map<string, Array<{ id: string; quota: QuotaSnapshot; simulated: boolean }>>();
   for (const r of rows) {
     const list = out.get(r.network) ?? [];
-    list.push({ id: r.id, quota: r.quota ?? {} });
+    list.push({ id: r.id, quota: r.quota ?? {}, simulated: r.simulated === true });
     out.set(r.network, list);
   }
   return out;
@@ -355,6 +357,22 @@ export async function loadFacts(c: PoolClient, f: FactsInput): Promise<StageFact
   if (guards.has("one_account_per_placement_network") || guards.has("account_not_ambiguous")) {
     const accounts = await loadClientAccounts(c, f.tenantId, f.engagement.client_id);
     facts.accountsByNetwork = Object.fromEntries([...accounts.entries()].map(([n, l]) => [n, l.length]));
+  }
+  if (guards.has("account_kinds_not_mixed")) {
+    // SCP-Sa3. `final_approve` has no variants worth judging yet (they are made by its own effect, and an older round's may be
+    // stale), so it reads the accounts its placement will resolve to, from the account guards' own query. Every later action
+    // (`schedule_publisher`) reads the accounts of the post's LIVE variants: those are what the engine would be handed. A
+    // network holding both kinds (an ambiguous pair, refused earlier by `account_not_ambiguous`) lands in both lists and so
+    // reads as mixed, never as safe.
+    const simulated = new Set<string>();
+    const real = new Set<string>();
+    if (f.action === "final_approve") {
+      const accounts = await loadClientAccounts(c, f.tenantId, f.engagement.client_id);
+      for (const n of f.state?.placement ?? []) for (const a of accounts.get(n) ?? []) (a.simulated ? simulated : real).add(n);
+    } else {
+      for (const v of variants) (v.account_simulated ? simulated : real).add(v.network);
+    }
+    facts.accountKinds = { simulated: [...simulated].sort(), real: [...real].sort() };
   }
   if (guards.has("seen_hash_matches")) facts.reviewHash = reviewHashOf(variants);
   if (guards.has("every_variant_review_pending")) facts.everyReviewPending = variants.length > 0 && variants.every((v) => v.review_status === "pending");
