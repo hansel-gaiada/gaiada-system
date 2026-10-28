@@ -166,7 +166,9 @@ export function brainOptionLabel(value: string | null): string {
 // which is neither "none available" nor an error.
 export interface BrainAvailability { value: string; available: boolean }
 // `tiers` (AIP-08a): the tier names the gateway reports. `[]` = none configured, `null` = unknown (same cases as `brains: null`).
-export interface BrainsResult { brains: BrainAvailability[] | null; tiers: string[] | null; checkedAt: string }
+// `canChooseProvider` (AIP-08b, ruling AIP-D5): whether THIS person may pick a named provider (`assistant.brain.choose_provider`, decided
+// by the server's Cerbos check). When false the server sends `brains: []`; the picker then offers Auto and the tiers only.
+export interface BrainsResult { brains: BrainAvailability[] | null; tiers: string[] | null; checkedAt: string; canChooseProvider: boolean }
 export interface SendMessageResult { messageId: string; streamUrl: string }
 export interface StopResult { ok: boolean; stopped: boolean }
 

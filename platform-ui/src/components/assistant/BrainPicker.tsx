@@ -21,6 +21,11 @@ import { refreshBrainsAction, setThreadBrainAction, type BrainChoiceBody } from 
 // default for the task, which is `standard`), but a stored `standard` is shown as the current choice. Select values are prefixed
 // (`tier:fast`, `provider:openai`) so a tier and a provider name can never collide; Auto is "".
 //
+// AIP-08b (owner ruling AIP-D5): only people holding `assistant.brain.choose_provider` may pick a named provider. The server says so in
+// `canChooseProvider` (and sends `brains: []` without it); this picker never decides it from the UI's own role map. Without the grant only
+// Auto and the tiers are offered. A thread whose stored provider the person can no longer pick keeps it as the current choice, labelled
+// "<label> (not available to you)", and choosing Auto, Fast or Strong from there works (no grant is needed to leave a provider).
+//
 // Disabled while a generation is in flight: switching mid-stream would race the in-flight relay's
 // already-captured `provider`/`providerSession` inputs (assistant.controller.ts's `stream()` reads
 // `thread.brainProvider`/`hermesSessionId` once, at the moment `relayGeneration` is called) —
@@ -39,6 +44,8 @@ export function BrainPicker({ thread, disabled, onChanged }: {
   // `undefined` = not loaded yet; `null` = unknown (a failed or unreadable check); a Set = the available values.
   const [available, setAvailable] = useState<Set<string> | null | undefined>(undefined);
   const [tiers, setTiers] = useState<Set<string> | null | undefined>(undefined);
+  // AIP-08b: the server's answer for this person. `undefined` = not loaded yet; `null` = unknown (a failed check).
+  const [canChoose, setCanChoose] = useState<boolean | null | undefined>(undefined);
 
   useEffect(() => {
     let alive = true;
@@ -50,8 +57,9 @@ export function BrainPicker({ thread, disabled, onChanged }: {
           ? new Set(r.brains.filter((b) => b.available).map((b) => b.value))
           : null);
         setTiers(r && r.ok && Array.isArray(r.tiers) ? new Set(r.tiers) : null);
+        setCanChoose(r && r.ok ? r.canChooseProvider === true : null);
       } catch {
-        if (alive) { setAvailable(null); setTiers(null); }
+        if (alive) { setAvailable(null); setTiers(null); setCanChoose(null); }
       }
     })();
     return () => { alive = false; };
@@ -64,8 +72,12 @@ export function BrainPicker({ thread, disabled, onChanged }: {
   const stored = thread.brainProvider;
   const storedTier = thread.brainTier ?? null;
   const offeredTiers = BRAIN_TIER_CHOICES.filter((t) => (tiers instanceof Set && tiers.has(t)) || (loading && t === storedTier));
-  const offered = BRAIN_OPTIONS.filter((o) => o.value === null || (available instanceof Set && available.has(o.value)) || (loading && o.value === stored));
+  const offered = BRAIN_OPTIONS.filter((o) => o.value === null
+    || (canChoose === true && available instanceof Set && available.has(o.value))
+    || (loading && o.value === stored));
   const storedHidden = !loading && stored !== null && !offered.some((o) => o.value === stored);
+  // AIP-08b: a stored provider hidden because the person lacks the grant says so, rather than calling the brain unavailable.
+  const storedHiddenSuffix = canChoose === false ? " (not available to you)" : " (unavailable)";
   // A stored tier that is not offered (Standard, or one the gateway no longer reports) is still the current choice.
   const storedTierHidden = storedTier !== null && !offeredTiers.includes(storedTier);
   const storedTierUnavailable = !loading && storedTierHidden && !(tiers instanceof Set && tiers.has(storedTier));
@@ -123,7 +135,7 @@ export function BrainPicker({ thread, disabled, onChanged }: {
         {providerOptions.map((o) => (
           <option key={o.value!} value={providerValue(o.value!)}>{o.label}</option>
         ))}
-        {storedHidden && <option value={providerValue(stored!)}>{brainOptionLabel(stored)} (unavailable)</option>}
+        {storedHidden && <option value={providerValue(stored!)}>{brainOptionLabel(stored)}{storedHiddenSuffix}</option>}
       </select>
       <span id="asst-brain-help" className="asst-brain-picker__note asst-brain-picker__help">Fast is quicker and cheaper; Strong is for harder questions.</span>
       {available === null && <span className="asst-brain-picker__note">Other brains can&apos;t be checked right now.</span>}

@@ -23,7 +23,7 @@ beforeEach(() => {
 describe("BrainPicker availability (AIP-00c)", () => {
   it("with only openai available: Auto and Cloud (default), nothing else", async () => {
     vi.mocked(refreshBrainsAction).mockResolvedValue({
-      ok: true, checkedAt: "x", tiers: [],
+      ok: true, canChooseProvider: true, checkedAt: "x", tiers: [],
       brains: [{ value: "claude", available: false }, { value: "gemini", available: false }, { value: "openai", available: true }],
     });
     render(<BrainPicker thread={thread(null)} disabled={false} onChanged={() => {}} />);
@@ -32,7 +32,7 @@ describe("BrainPicker availability (AIP-00c)", () => {
   });
 
   it("unknown (null) shows Auto plus the muted line", async () => {
-    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, brains: null, tiers: null, checkedAt: "x" });
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, canChooseProvider: true, brains: null, tiers: null, checkedAt: "x" });
     render(<BrainPicker thread={thread(null)} disabled={false} onChanged={() => {}} />);
     expect(await screen.findByText("Other brains can't be checked right now.")).toBeInTheDocument();
     expect(optionTexts()).toEqual(["Auto (failover chain)"]);
@@ -47,7 +47,7 @@ describe("BrainPicker availability (AIP-00c)", () => {
 
   it("a stored gemini that is unavailable is still the current value, labelled (unavailable)", async () => {
     vi.mocked(refreshBrainsAction).mockResolvedValue({
-      ok: true, checkedAt: "x", tiers: [], brains: [{ value: "gemini", available: false }, { value: "openai", available: true }],
+      ok: true, canChooseProvider: true, checkedAt: "x", tiers: [], brains: [{ value: "gemini", available: false }, { value: "openai", available: true }],
     });
     render(<BrainPicker thread={thread("gemini")} disabled={false} onChanged={() => {}} />);
     await waitFor(() => expect(optionTexts()).toContain("Gemini (unavailable)"));
@@ -56,7 +56,7 @@ describe("BrainPicker availability (AIP-00c)", () => {
   });
 
   it("choosing a provider sends {brainProvider} and clears the tier locally", async () => {
-    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, checkedAt: "x", tiers: [], brains: [{ value: "openai", available: true }] });
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, canChooseProvider: true, checkedAt: "x", tiers: [], brains: [{ value: "openai", available: true }] });
     const onChanged = vi.fn();
     render(<BrainPicker thread={thread(null)} disabled={false} onChanged={onChanged} />);
     await waitFor(() => expect(optionTexts()).toContain("Cloud (default)"));
@@ -66,7 +66,7 @@ describe("BrainPicker availability (AIP-00c)", () => {
   });
 
   it("choosing Auto from an unavailable stored provider sends both null", async () => {
-    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, checkedAt: "x", tiers: [], brains: [{ value: "openai", available: true }] });
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, canChooseProvider: true, checkedAt: "x", tiers: [], brains: [{ value: "openai", available: true }] });
     render(<BrainPicker thread={thread("hermes")} disabled={false} onChanged={() => {}} />);
     await waitFor(() => expect(optionTexts()).toContain("Hermes (unavailable)"));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "" } });
@@ -77,7 +77,7 @@ describe("BrainPicker availability (AIP-00c)", () => {
 describe("BrainPicker tiers (AIP-08a)", () => {
   const brains = [{ value: "openai", available: true }];
   const load = (tiers: string[] | null, b: typeof brains | null = brains) =>
-    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, checkedAt: "x", brains: b, tiers });
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, canChooseProvider: true, checkedAt: "x", brains: b, tiers });
 
   it("all three tiers reported: Auto, Fast, Strong, then the providers; Standard is not offered", async () => {
     load(["fast", "standard", "strong"]);
@@ -155,7 +155,7 @@ describe("BrainPicker tiers (AIP-08a)", () => {
   });
 
   it("a tier and a provider named alike never collide", async () => {
-    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, checkedAt: "x", tiers: ["fast"], brains: [] });
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, canChooseProvider: true, checkedAt: "x", tiers: ["fast"], brains: [] });
     render(<BrainPicker thread={thread("fast")} disabled={false} onChanged={() => {}} />);
     await waitFor(() => expect(screen.getAllByRole("option").map((o) => (o as HTMLOptionElement).value)).toEqual(["", "tier:fast", "provider:fast"]));
   });
@@ -178,5 +178,54 @@ describe("BrainPicker tiers (AIP-08a)", () => {
     expect(screen.getByRole("combobox")).toHaveAttribute("aria-describedby", help.id);
     expect(screen.getByRole("combobox")).toBeDisabled();
     expect(screen.getByLabelText("Brain")).toBe(screen.getByRole("combobox"));
+  });
+});
+
+describe("BrainPicker and the choose_provider grant (AIP-08b)", () => {
+  const brains = [{ value: "openai", available: true }, { value: "hermes", available: true }];
+  const tiers = ["fast", "standard", "strong"];
+
+  it("WITH the grant: Auto, the tiers and the available named providers", async () => {
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, canChooseProvider: true, checkedAt: "x", brains, tiers });
+    render(<BrainPicker thread={thread(null)} disabled={false} onChanged={() => {}} />);
+    await waitFor(() => expect(optionTexts()).toEqual(["Auto (failover chain)", "Fast", "Strong", "Cloud (default)", "Hermes"]));
+  });
+
+  it("WITHOUT the grant: Auto, Fast and Strong only, never a named provider (even if a list arrived) and no muted line", async () => {
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, canChooseProvider: false, checkedAt: "x", brains, tiers });
+    render(<BrainPicker thread={thread(null)} disabled={false} onChanged={() => {}} />);
+    await waitFor(() => expect(optionTexts()).toEqual(["Auto (failover chain)", "Fast", "Strong"]));
+    expect(screen.queryByText(/can't be checked/)).not.toBeInTheDocument();
+  });
+
+  it("WITHOUT the grant, a stored provider stays the current choice, labelled (not available to you), and Fast can be chosen", async () => {
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, canChooseProvider: false, checkedAt: "x", brains: [], tiers });
+    const onChanged = vi.fn();
+    render(<BrainPicker thread={thread("openai")} disabled={false} onChanged={onChanged} />);
+    await waitFor(() => expect(optionTexts()).toEqual(["Auto (failover chain)", "Fast", "Strong", "Cloud (default) (not available to you)"]));
+    expect(screen.getByRole("combobox")).toHaveValue("provider:openai");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "tier:fast" } });
+    await waitFor(() => expect(setThreadBrainAction).toHaveBeenCalledWith("t1", { brainTier: "fast" }));
+    expect(onChanged).toHaveBeenCalledWith({ brainTier: "fast", brainProvider: null, hermesSessionId: null });
+  });
+
+  it("WITHOUT the grant, choosing Auto from a stored provider clears both", async () => {
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, canChooseProvider: false, checkedAt: "x", brains: [], tiers });
+    render(<BrainPicker thread={thread("hermes")} disabled={false} onChanged={() => {}} />);
+    await waitFor(() => expect(optionTexts()).toContain("Hermes (not available to you)"));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "" } });
+    await waitFor(() => expect(setThreadBrainAction).toHaveBeenCalledWith("t1", { brainProvider: null, brainTier: null }));
+  });
+
+  it("an answer without canChooseProvider (an older server) offers no named provider: the server is the source, never assumed", async () => {
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: true, checkedAt: "x", brains, tiers } as never);
+    render(<BrainPicker thread={thread(null)} disabled={false} onChanged={() => {}} />);
+    await waitFor(() => expect(optionTexts()).toEqual(["Auto (failover chain)", "Fast", "Strong"]));
+  });
+
+  it("a failed check keeps the old wording for a stored provider: (unavailable), not a claim about the grant", async () => {
+    vi.mocked(refreshBrainsAction).mockResolvedValue({ ok: false, error: "boom" });
+    render(<BrainPicker thread={thread("openai")} disabled={false} onChanged={() => {}} />);
+    await waitFor(() => expect(optionTexts()).toContain("Cloud (default) (unavailable)"));
   });
 });
