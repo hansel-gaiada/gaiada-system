@@ -9,7 +9,7 @@ import type { AssistantThread } from "@/lib/assistant";
 // when collapsed.
 function noop() {}
 const threads: AssistantThread[] = [{
-  id: "t1", ownerUserId: "u1", title: "Draft the Q3 update", brainProvider: null, brainModel: null,
+  id: "t1", ownerUserId: "u1", title: "Draft the Q3 update", brainProvider: null, brainTier: null, brainModel: null,
   hermesSessionId: null, status: "active", pinned: false, lastMessageAt: "2026-08-04T09:00:00Z",
   totalTokens: 0, totalCostUsd: "0.00", compactionSummary: null, compactionSummaryUptoSeq: null,
   createdAt: "2026-08-04T09:00:00Z", updatedAt: "2026-08-04T09:00:00Z",
