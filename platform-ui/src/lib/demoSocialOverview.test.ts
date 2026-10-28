@@ -21,11 +21,11 @@ const allCards = (): Card[] => {
 };
 
 describe("demoOverview", () => {
-  it("answers the contract's shape, which the UI's own parser accepts, with the boosts tile null", () => {
+  it("answers the contract's shape, which the UI's own parser accepts, with a boosts-waiting number", () => {
     const r = demoOverview("u-social", 0);
     expect(r.status).toBe(200);
     const o = asOverview(r.json);
-    expect(o.tiles.boostsWaiting).toBeNull();
+    expect(o.tiles.boostsWaiting).toBeGreaterThanOrEqual(1);
     expect(Object.keys((r.json as { tiles: object }).tiles).sort()).toEqual(["boostsWaiting", "failedPosts", "inProduction", "late", "scheduledThisWeek", "withClient"]);
   });
 

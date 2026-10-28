@@ -515,8 +515,11 @@ const FAILED_ENGINE = ["failed", "partially_published"];
 /**
  * `GET overview` (§63.7, SCP-3f): the Pulse tiles, computed from the demo posts the way the server computes them (the same phase map, the demo's fixed health,
  * the display zone's week). `composerFailed` is the legacy Composer store's failed posts, which the one Failed posts number includes. The demo's simulator is always
- * on (as `POST simulated-accounts` already says), so simulated rows are counted and the answer says so. Boosts have no store yet: null.
+ * on (as `POST simulated-accounts` already says), so simulated rows are counted and the answer says so. Boosts have no demo store: the tile shows a fixed number of waiting boosts.
  */
+/** SCP-4d: the demo has no boost store, so the Boosts waiting tile shows a fixed, plausible number (a requested boost and an approved one). */
+const DEMO_BOOSTS_WAITING = 2;
+
 export function demoOverview(userId: string, composerFailed: number): DemoResult {
   if (isClientContact(userId)) return err(403, "not authorized: social_post read");
   const week = demoWeekOf(todayIsoInDisplayZone());
@@ -531,7 +534,7 @@ export function demoOverview(userId: string, composerFailed: number): DemoResult
       return day >= week.from && day < week.to;
     }).length,
     failedPosts: live.filter((p) => FAILED_ENGINE.includes(String(scpEngineStatusOf(view(p))))).length + composerFailed,
-    boostsWaiting: null,
+    boostsWaiting: DEMO_BOOSTS_WAITING,
   };
   return ok({ tiles, simulatedIncluded: true });
 }
