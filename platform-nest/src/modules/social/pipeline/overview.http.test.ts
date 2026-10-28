@@ -126,12 +126,14 @@ describe.skipIf(!TEST_URL)("SCP-3f · GET overview (BFF §63.7)", () => {
     const scheduleVia = o.scheduleVia ?? (status === "scheduled" || live ? "manual" : null);
     await withTenants([tenant], (c) => c.query(
       `INSERT INTO social_posts (id, tenant_id, engagement_id, title, cycle_id, pipeline_status, status_since, status, scheduled_at, simulated, schedule_via,
-                                 live_url, went_live_at, deleted_at, archived_at, archived_by, archive_reason)
+                                 live_url, went_live_at, deleted_at, archived_at, archived_by, archive_reason, creative_state, creative_source)
        VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6::text IS NULL THEN NULL ELSE now() END, $7,
                CASE WHEN $8::text IS NULL THEN NULL ELSE (($8::date)::timestamp + ($9::int * interval '1 minute')) AT TIME ZONE $10 END, $11, $12,
                CASE WHEN $13::boolean THEN 'https://example.invalid/live' ELSE NULL END, CASE WHEN $13::boolean THEN now() ELSE NULL END,
                CASE WHEN $14::boolean THEN now() ELSE NULL END, CASE WHEN $15::boolean THEN now() ELSE NULL END,
-               CASE WHEN $15::boolean THEN $16::uuid ELSE NULL END, CASE WHEN $15::boolean THEN 'archived' ELSE NULL END)`,
+               CASE WHEN $15::boolean THEN $16::uuid ELSE NULL END, CASE WHEN $15::boolean THEN 'archived' ELSE NULL END,
+               -- a post in Creative holds its creative state and source (social_posts_design_ck)
+               CASE WHEN $6::text = 'design' THEN 'in_progress' ELSE NULL END, CASE WHEN $6::text = 'design' THEN 'in_team' ELSE NULL END)`,
       [id, tenant, e.id, title, o.composer ? null : e.cycleId, o.composer ? null : status, o.engine ?? "draft", o.at?.day ?? null, o.at?.minutes ?? 0, config.reportsTz,
        o.simulated ?? false, scheduleVia, live, o.deleted === true, o.archived === true, officer],
     ), SOCIAL);
