@@ -3,6 +3,8 @@
 // guard of the completion window. The DB half (the job completing a running simulated boost once, a young one waiting, a real one
 // never touched, the switch off, a rerun) is ../simulated-boost-job.db.test.ts.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   SIMULATED_BOOST_GOALS, SIMULATED_SPEND_SHARE, simulatedBoostResult, simulatedBoostTotal, type SimulatedBoostFacts,
 } from "./simulated-boost";
@@ -116,5 +118,25 @@ describe("SCP-Se · the completion window setting (config.social.simulatedBoostM
     expect(await minutesFor("3")).toBe(3);
     expect(await minutesFor("1440")).toBe(1440);
     for (const bad of ["", "  ", "abc", "0", "-5", "2.5", "1441", "NaN", "Infinity"]) expect(await minutesFor(bad), JSON.stringify(bad)).toBe(10);
+  });
+});
+
+describe("SCP-Se · the job is wired only inside the switch, and never starts or buys anything", () => {
+  const src = (f: string): string => readFileSync(join(__dirname, "..", "..", "..", f), "utf8");
+
+  it("main.ts starts the boost loop inside the same `isSocialSimulationEnabled()` block as the due job, and nowhere else", () => {
+    const main = src("main.ts");
+    const block = main.slice(main.indexOf("if (isSocialSimulationEnabled()) {"));
+    const closeAt = block.indexOf("\n  }\n");
+    expect(block.slice(0, closeAt)).toMatch(/startSimulatedDueLoop\(SIMULATED_DUE_INTERVAL_MS\);[\s\S]*startSimulatedBoostLoop\(SIMULATED_BOOST_INTERVAL_MS\);/);
+    expect(main.match(/startSimulatedBoostLoop\(/g)).toHaveLength(1);
+  });
+
+  it("the job calls completeBoost with onlySimulated and expectedStatus running, never startBoost, no network, no publisher", () => {
+    const job = src("modules/social/simulated-boost-job.ts");
+    expect(job).toMatch(/onlySimulated: true, expectedStatus: "running"/);
+    expect(job).not.toMatch(/startBoost/);
+    expect(job).toMatch(/isSocialSimulationEnabled\(\)/);
+    expect(job).not.toMatch(/fetch\(|getPublisher|resolvePublisher|resolveSimulatedPublisher|createSimulatedPublisher/);
   });
 });
