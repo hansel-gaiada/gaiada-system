@@ -35,6 +35,8 @@ vi.mock("@/lib/portalSocialActions", () => ({ portalSocialDecide: vi.fn(), porta
 
 import { SIMULATED_MARK_NAME } from "./SimulatedMark";
 import { ClientAccounts } from "./ClientAccounts";
+import { ClientCalendar } from "./ClientCalendar";
+import { ClientHeader } from "./ClientHeader";
 import { ClientPostList } from "./ClientPostList";
 import { FeedPreview } from "./FeedPreview";
 import { HomeTurnList } from "./HomeTurnList";
@@ -42,6 +44,7 @@ import { InboxWorkspace } from "./InboxWorkspace";
 import { PostCard } from "./PostCard";
 import { PostMetricsSection } from "./PostMetrics";
 import { PostPage } from "./PostPage";
+import { SocialCalendar } from "./SocialCalendar";
 import { QuotaStrip } from "./VariantCard";
 import { AnalyticsPanel } from "./AnalyticsPanel";
 import { SocialAccountsBlock } from "@/components/departments/SocialAccountsBlock";
@@ -50,7 +53,10 @@ import { PortalSocialToasts } from "@/components/portal/social/PortalSocialToast
 import { post as portalPost, TENANT } from "@/components/portal/social/portalSocialFixtures";
 import { PIPE_POSTS, demoPipelineRead } from "@/lib/demoSocialPipeline";
 import { asPipelinePost } from "@/lib/socialPipeline";
-import type { ClientPost } from "@/lib/socialClient";
+import { placeItem } from "@/lib/socialCalendar";
+import type { AccountsSummaryView } from "@/lib/socialAccountsSummary";
+import type { AllocationRow } from "@/lib/socialAllocation";
+import type { CalendarItem, ClientPost } from "@/lib/socialClient";
 import type { FeedItem } from "@/lib/socialFeedPreview";
 import type { PipelineCard } from "@/lib/socialHome";
 import type { PostMetrics } from "@/lib/socialMetrics";
@@ -68,7 +74,24 @@ const clientPost = (simulated: boolean): ClientPost => ({
 });
 const feedItem = (simulated: boolean): FeedItem => ({
   postId: "p-1", scheduledAt: "2026-11-10T09:30:00.000Z", thumbFileId: null, pipelineStatus: "live", locked: true, title: "Harvest teaser", format: "feed",
-  phase: "posted", simulated, dateMove: "locked", dateMoveRefusal: "post_is_live",
+  phase: "posted", simulated, dateMove: "locked", dateMoveRefusal: "post_is_live", liveUrl: null, reach: null, reachSource: null,
+});
+const calendarItem = (simulated: boolean): CalendarItem => ({
+  postId: "p-1", clientName: "Kopi Senja", title: "Harvest teaser", format: "feed", scheduledAt: "2026-10-20T01:30:00.000Z", pipelineStatus: "client", phase: "with_client",
+  simulated, dateMove: "locked", dateMoveRefusal: "field_locked",
+});
+const allocationRow: AllocationRow = {
+  engagementId: "e-1", clientId: "c1", clientName: "Kopi Senja", status: "active", officer: { id: "u-2", name: "Sam Officer" }, postsPerCycle: 5, creativeSource: "creatives",
+  deliveryBatch: "A", reportFormat: "email", reportDueDay: 5, platforms: ["instagram"], formats: ["feed"], defaultPostTime: "09:30", stepEstimates: {},
+  thisCycle: { cycleId: "cy-1", month: "2026-10", target: 5, counted: 1, extra: 0, stories: 0 }, canPlan: false,
+};
+/** The client's accounts read back: a synced account whose numbers are the simulator's, or a real one's pulled ones. */
+const accountsSummary = (simulated: boolean): AccountsSummaryView => ({
+  accounts: [{
+    accountId: "a-ig", network: "instagram", handle: "@mock-kopi-senja", simulated, followers: 500, followersDelta30d: 20, reach30d: 900, impressions30d: 1200,
+    lastSyncedAt: "2026-10-15T03:00:00.000Z", source: simulated ? "simulated" : "pull",
+  }],
+  totals: { followers: 500, reach30d: 900 }, simulated, lastSyncedAt: "2026-10-15T03:00:00.000Z",
 });
 const card = (simulated: boolean): PipelineCard => ({
   id: "p-1", engagementId: "e-1", clientName: "Kopi Senja", title: "Harvest teaser", format: "feed", isExtra: false, isStory: false, thumbFileId: null,
@@ -117,6 +140,13 @@ const COVERED: Record<string, Case> = {
   "components/social/FeedPreview.tsx": (s) => render(<FeedPreview deptId="d-soc" engagementId="e-1" items={[feedItem(s)]} liveHidden={0} />),
   "components/social/HomeTurnList.tsx": (s) => render(<HomeTurnList cards={[card(s)]} deptId="d-soc" hasMore={false} nowIso="2026-10-16T04:00:00.000Z" />),
   "components/social/PostCard.tsx": (s) => render(<PostCard post={clientPost(s)} href="/departments/d-soc/posts/p-1" />),
+  "components/social/ClientHeader.tsx": (s) => render(<ClientHeader row={allocationRow} cycle={null} tone={null} summary={{ kind: "ok", data: accountsSummary(s) }} />),
+  "components/social/ClientCalendar.tsx": (s) => render(
+    <ClientCalendar deptId="d-soc" engagementId="e-1" month="2026-10" today="2026-10-16" items={[calendarItem(s)]} dayOf={(iso) => iso.slice(0, 10)} timeOf={() => "09:30"} />,
+  ),
+  "components/social/SocialCalendar.tsx": (s) => render(
+    <SocialCalendar deptId="d-soc" month="2026-10" today="2026-10-16" items={[placeItem(calendarItem(s))]} composer={[]} notes={{}} clients={null} summary="1 pipeline post." />,
+  ),
   "components/social/ClientPostList.tsx": (s) => render(<ClientPostList deptId="d-soc" posts={[clientPost(s)]} />),
   "components/social/AnalyticsPanel.tsx": (s) => render(<AnalyticsPanel dailySeries={[daily(s)]} postMetrics={[postRow(s)]} />),
   "components/portal/social/PortalSocialPostCard.tsx": (s) => render(
@@ -126,13 +156,8 @@ const COVERED: Record<string, Case> = {
   ),
 };
 
-/** Files that read the flag but cannot carry the mark yet, and why. Each must NOT draw the mark yet: when it does, move it to COVERED with a render case. */
-const PENDING: Record<string, string> = {
-  "components/social/ClientCalendar.tsx":
-    "the calendar is being rebuilt by the scp/3e2 session, which owns this file. The change it needs: replace "
-    + "`{it.simulated && <span className=\"scp-cal__sim\"> SIMULATED</span>}` with `{it.simulated && <> <SimulatedMark /></>}` and import "
-    + "`{ SimulatedMark } from \"./SimulatedMark\"`.",
-};
+/** Files that read the flag but cannot carry the mark yet, and why. Each must NOT draw the mark yet: when it does, move it to COVERED with a render case. None is pending now. */
+const PENDING: Record<string, string> = {};
 
 // ── 1. The registry ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -146,7 +171,9 @@ const rel = (p: string) => relative(SRC, p).split(sep).join("/");
 /** The code without its comments (a comment that says SIMULATED, or names `.simulated`, is not a render). */
 const codeOnly = (src: string): string => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 const FILES = ROOTS.flatMap(sources).map((f) => ({ file: rel(f), code: codeOnly(readFileSync(f, "utf8")) }));
-const readsSimulated = (code: string): boolean => /\.simulated\b/.test(code) || /source\s*===\s*"simulated"/.test(code);
+/** A read of the flag: `x.simulated`, a `source === "simulated"` metric, or a destructured `{ simulated } = …` (SCP-Sg's header reads the summary's flag that way). */
+const readsSimulated = (code: string): boolean =>
+  /\.simulated\b/.test(code) || /source\s*===\s*"simulated"/.test(code) || /\{[^{}]*\bsimulated\b[^{}]*\}\s*=[^=>]/.test(code);
 
 describe("SCP-Sf · the registry: every component that reads a simulated flag is pinned", () => {
   it("found the Social Media components", () => {

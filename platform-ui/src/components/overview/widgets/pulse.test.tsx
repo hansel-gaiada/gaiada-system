@@ -296,14 +296,14 @@ describe("Pulse, Social Media and IT (the widget)", () => {
     // Boosts waiting (SCP-4a) and Unanswered inbox are placeholders: never drawn, never a 0.
     expect(screen.queryByText("Boosts waiting")).toBeNull();
     expect(screen.queryByText("Unanswered inbox")).toBeNull();
-    expect(screen.queryByText("SIMULATED")).toBeNull();
+    expect(screen.queryByRole("img", { name: "Simulated" })).toBeNull();
   });
 
   it("marks every tile SIMULATED while the server says the tiles count simulated rows", async () => {
     overview.mockResolvedValue({ kind: "ok", data: overviewOf({}, true) });
     render(await Pulse(props(social2())));
-    expect(screen.getAllByText("SIMULATED")).toHaveLength(5);
-    expect(within(tile("Late")).getByText("SIMULATED")).toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: "Simulated" })).toHaveLength(5);
+    expect(within(tile("Late")).getByRole("img", { name: "Simulated" })).toHaveTextContent("SIMULATED");
   });
 
   it("a refused read says No access on every pipeline tile, with no link and no figure", async () => {
