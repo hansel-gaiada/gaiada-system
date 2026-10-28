@@ -67,4 +67,13 @@ describe("AIP-03b · usage-event", () => {
     expect(usageEvent(base, 200, { provider: "openai", model: "a model with spaces", usage }).model).toBeNull();
     expect(usageEvent(base, 429, { provider: "openai", model: "z-ai/glm-5.3-flash" }).model).toBeNull();
   });
+
+  it("AIP-07: the answer's tier rides on the event only when it is fast, standard or strong; a failed call or any other value is null", () => {
+    const base = { tenantId: "00000000-0000-4000-8000-000000000001", surface: "agent" as const, capability: "llm" as const };
+    const usage = { promptTokens: 5, completionTokens: 2, source: "provider" };
+    for (const t of ["fast", "standard", "strong"]) expect(usageEvent(base, 200, { provider: "openai", tier: t, usage }).tier).toBe(t);
+    expect(usageEvent(base, 200, { provider: "openai", usage }).tier).toBeNull();
+    for (const bad of ["turbo", "Fast", "", 2, null]) expect(usageEvent(base, 200, { provider: "openai", tier: bad, usage }).tier).toBeNull();
+    expect(usageEvent(base, 429, { tier: "fast" }).tier).toBeNull();
+  });
 });
