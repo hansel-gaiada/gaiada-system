@@ -1,4 +1,4 @@
-# Runbook - the social simulator: turn it on beside Postiz, seed the mock clients, turn it off, purge (SCP-Sa, SCP-Sb, SCP-Sa2)
+# Runbook - the social simulator: turn it on beside Postiz, seed the mock clients, turn it off, purge (SCP-Sa, SCP-Sb, SCP-Sa2, SCP-Sf)
 
 **Status: PLANNED.** Nothing here has been run on a server. The orchestrator or the owner runs every live step, one at a
 time, and pastes the real output into the hand-back. Plan: `docs/plans/2026-10-15-social-content-pipeline.md` section 5
@@ -207,9 +207,9 @@ variant refuses `simulation_disabled` at dispatch, and the simulator is not regi
 Postiz exactly as before, and the reverse fence still keeps Postiz off the simulated rows. The seed route refuses
 `simulation_disabled` too; the teardown route (step 6) still works.
 
-## 6. Purge the simulated rows (before real client data)
+## 6. Remove unused simulated accounts of one client (optional, any time)
 
-Switch off first (step 5). Then, per client, as one of the four approvers:
+With the switch on or off, per client, as one of the four approvers:
 
 ```sh
 # DELETE /api/<tenantId>/modules/social/engagements/<engagementId>/simulated-accounts[?networks=tiktok,facebook]
@@ -218,10 +218,111 @@ Switch off first (step 5). Then, per client, as one of the four approvers:
 
 It soft-deletes only the client's `simulated = true` accounts (a real account is never read by the statement) and answers
 `409 simulated_account_in_use` with the account ids, removing nothing, while **any** variant references one of them. A
-simulated account that was used (it carries simulated posts) therefore stays until its simulated posts and metrics are purged
-by the purge script of SCP-Sf (the plan lists it under "Before real clients use the portal"); this runbook does not delete
-those rows. A soft-deleted simulated account keeps its kind (the database never lets it become real), and a later seed
-revives the same row.
+soft-deleted simulated account keeps its kind (the database never lets it become real), and a later seed revives the same
+row. A simulated account that was used stays until step 7 removes it with everything that hangs off it.
+
+## 7. Turn off and purge before real client data (SCP-Sf)
+
+This is the step "Before real clients use the portal" names. It removes the simulator's whole footprint and nothing else, and
+it runs **after** the switch is off. The rules are in `platform-nest/src/seed/social-simulation-purge-plan.ts` (its header);
+the script is `platform-nest/src/seed/social-simulation-purge.ts`.
+
+**What it removes, per company, in one transaction.** Every simulated account (soft-deleted ones too) and everything that
+hangs off it: every variant on it (published by the simulator or not), those variants' metric rows (`simulated`, and `manual`
+numbers a person typed about them: the dry run counts these separately), their client reviews, their undecided publish
+approvals (withdrawn to `cancelled`, as an unschedule does, never deleted), the account's `simulated` daily rows and its
+best-time suggestion, and the publisher orgs SCP-Sb created for the simulator (`simulated:no-key`, `simulated-<client id>`)
+once no account names them.
+
+**What it never touches.** A real account, a variant on a real account, a `pull` metric or daily row, an OAuth grant or state,
+an inbox thread, a usage-ledger row, a post's content or date, a cycle, and every history row (`activities`, `work_activity`,
+notifications, decided approvals). It never deletes a post and never turns a simulated row real.
+
+**What happens to the posts.**
+
+| The post | After the purge |
+|---|---|
+| planned to final, changes, blocked | unchanged; the next `final_approve` makes its variants afresh on the accounts that exist then |
+| client, approved, scheduled or live through the simulator, with no variant left on a real account | back to `final` (the approver's final check), `schedule_via`, `live_url` and `went_live_at` cleared, `simulated` false. The approver's `final_approve` puts it on the client's real accounts and asks the client again |
+| scheduled or marked live **by hand** | unchanged (a person's record of something done outside the ERP); only its rows on simulated accounts go |
+| on both kinds (a real account beside a simulated one) | status unchanged; a live one loses its simulated mark and, if its link was the simulator's, takes the first real link |
+| Composer, archived or deleted | unchanged |
+
+**What it refuses** (exit `2`; nothing changes in that company; other companies go on): a row breaking the account-kind rule;
+a `simulated` variant, metric or daily row on a real account; a `pull` metric or daily row, an OAuth grant or state, an inbox
+thread or a usage-ledger row on a simulated account; a provider post id or a published link on a simulated account's variant
+that is not the simulator's (a hand-posted link is fine); a post marked simulated that is not a simulated go-live; a post live
+through the publisher on simulated accounts whose link is not the simulator's. Each refusal is printed with the row ids. Every
+one of them is impossible through the simulator's fences, so it is a bug or a hand edit to look at: a person decides each row,
+then the purge runs again. Two refusals stop the whole run before any company is read: the switch still on, and a table the
+purge does not know pointing at an account, a variant or an org (a new table must be classified in the plan file first).
+
+### 7.1 Switch off
+
+Step 5, exactly: back up `.env`, remove (or blank) `SOCIAL_SIMULATION_ENABLED`, and the recreate with `GAIADA_TAG` and
+`APP_VERSION` passed inline (portal-go-live.md, house rules 2 and 3: a stale `.env` tag silently rolls the release back).
+
+```sh
+cd ~/gaiada/infra/compose
+cp .env .env.bak-sim-off-<yyyymmdd>
+docker inspect gaiada-platform-1 --format '{{.Config.Image}}'                                     # the running tag
+docker inspect gaiada-platform-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^APP_VERSION='
+# remove or blank SOCIAL_SIMULATION_ENABLED in .env, then:
+COMPOSE="docker compose -f docker-compose.vps.yml -f docker-compose.hostdata.yml --profile bot --profile auth"
+GAIADA_TAG=<running tag> APP_VERSION=<running version> $COMPOSE up -d --no-deps platform
+docker inspect gaiada-platform-1 --format '{{.Config.Image}}'                                     # the SAME tag as before
+docker exec gaiada-platform-1 printenv SOCIAL_SIMULATION_ENABLED                                    # empty, or 0
+curl -s <the platform health URL> | grep -o '"socialSimulation":[a-z]*'                           # "socialSimulation":false
+```
+
+### 7.2 Back up, then the dry run
+
+```sh
+~/gaiada/infra/scripts/backup.sh                                   # note the file names
+docker exec gaiada-platform-1 node dist/seed/social-simulation-purge.js
+echo "exit=$?"        # 0 = nothing refused; 2 = a refusal (or an error, or the switch is still on)
+```
+
+It prints one block per company that holds anything: the counts per table (`social_accounts (simulated)`,
+`social_post_variants (on a simulated account)`, `social_post_variants (simulated mark)`, `social_posts (simulated mark)`,
+`social_post_metrics (source simulated)`, `social_metrics_daily (source simulated)`, `social_publisher_orgs (the simulator's)`)
+with what it would remove, the typed-in metric rows it would remove, every post it would move back (`WOULD MOVE BACK <id>
+<client> "<title>" <from> -> final`), repair or keep, and every org it leaves and why. Read it. Go on only if it is what you
+expect and the exit is `0`.
+
+### 7.3 Apply
+
+```sh
+docker exec gaiada-platform-1 node dist/seed/social-simulation-purge.js --apply
+echo "exit=$?"
+```
+
+Each company's block now reads `before -> after`. Every statement checks its row count against the plan, so a row that moved
+between the dry run and the apply rolls that company back with a message naming the table; run the dry run again. One activity
+row per company (`simulation_purged`) and one per post moved back or repaired (`simulated_variants_removed`) are written.
+
+### 7.4 Verify zero simulated rows
+
+A second dry run must print no company block (and exit `0`). Then the owner's superuser read on the ERP database (an app-role
+read sees zero rows through RLS and would prove nothing); every count must be `0`:
+
+```sql
+SELECT (SELECT count(*) FROM social_accounts WHERE simulated)                          AS simulated_accounts,
+       (SELECT count(*) FROM social_post_variants WHERE simulated)                     AS simulated_variants,
+       (SELECT count(*) FROM social_post_variants v JOIN social_accounts a ON a.id = v.account_id
+         WHERE a.simulated)                                                            AS variants_on_simulated_accounts,
+       (SELECT count(*) FROM social_posts WHERE simulated)                             AS simulated_posts,
+       (SELECT count(*) FROM social_post_metrics WHERE source = 'simulated')           AS simulated_post_metrics,
+       (SELECT count(*) FROM social_metrics_daily WHERE source = 'simulated')          AS simulated_daily_metrics,
+       (SELECT count(*) FROM social_post_variants WHERE published_url LIKE 'https://simulated.invalid/%'
+                                                     OR provider_post_id LIKE 'simulated:%') AS simulator_links_or_ids,
+       (SELECT count(*) FROM social_posts WHERE live_url LIKE 'https://simulated.invalid/%') AS simulator_live_links;
+-- the simulator's orgs: 0, or only the ones the dry run listed as LEFT (they hold a real account)
+SELECT id, client_id FROM social_publisher_orgs WHERE api_key_ref = 'simulated:no-key';
+```
+
+**Revert.** There is no undo short of the backup from 7.2: the purge deletes. Restoring that backup restores every table it
+covers, so it is a last resort, decided by the owner. The switch-off itself reverts with step 2.
 
 ## Everything in one place: what each command may and may not do
 
@@ -231,4 +332,6 @@ revives the same row.
 | `social-simulation-prepare.js --apply` | `simulated = true` + `simulated:<network>` on the CP-21 seed fingerprint only, plus an activity row | no | never; real accounts are counted, rows breaking the rule and grants on simulated accounts are printed and left |
 | `POST .../simulated-accounts` | simulated accounts and, if absent, the client's publisher org | on | refuses (409) rather than sit on a real account's network |
 | `DELETE .../simulated-accounts` | soft-deletes unused simulated accounts | no | no |
+| `social-simulation-purge.js` (dry run) | nothing | must be OFF | no |
+| `social-simulation-purge.js --apply` | deletes the simulator's footprint (step 7), withdraws its undecided publish approvals, moves posts the simulator carried back to `final`, plus activity rows | must be OFF | never; it refuses the company instead of guessing |
 | Postiz connect / sync, LinkedIn and YouTube connect | real accounts only | no (allowed with it on since SCP-Sa2) | yes, never a simulated one (409 `simulated_account_on_real_publisher`, or a named skip in the sync) |
