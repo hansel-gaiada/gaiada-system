@@ -12,6 +12,11 @@ import { config } from "../../../config";
 import type { Audience, IngestDocument } from "./types";
 
 const HTTP_TIMEOUT_MS = 30_000;
+/** /ingest embeds every new chunk of the source before it answers, one local embedding at a time (about 0.6 s each
+ *  on the live box, a long transcript up to ~55 chunks). Giving up after 30 s did not stop that work: the knowledge
+ *  service kept embedding the abandoned source while the sweep sent the next one, so the embedder's queue grew and
+ *  each call slowed (0.6 s to 40 s on 2026-10-28) until calls timed out. The sweep is a background job, so it waits. */
+const INGEST_TIMEOUT_MS = 300_000;
 
 export class KnowledgeUnavailableError extends Error {}
 
@@ -36,9 +41,9 @@ export function knowledgeConfigured(): boolean {
   return !!(config.services.knowledge.url && config.services.knowledge.token);
 }
 
-async function post(path: string, body: unknown): Promise<Response> {
+async function post(path: string, body: unknown, timeoutMs = HTTP_TIMEOUT_MS): Promise<Response> {
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), HTTP_TIMEOUT_MS);
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
     return await fetch(`${base()}${path}`, {
       method: "POST",
@@ -67,7 +72,7 @@ export async function ingestDocument(doc: IngestDocument): Promise<number> {
     provenance: doc.provenance ?? "human",
     trust: "trusted",
     audience: doc.audience,
-  });
+  }, INGEST_TIMEOUT_MS);
   if (res.status === 429) throw new EmbeddingBudgetExhaustedError();
   if (!res.ok) throw new Error(`knowledge /ingest ${res.status}: ${await res.text().catch(() => "")}`);
   return ((await res.json()) as { written?: number }).written ?? doc.chunks.length;

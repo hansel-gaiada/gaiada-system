@@ -39,11 +39,13 @@ export async function runIngestSweep(): Promise<IngestRunResult[]> {
       (a, r) => ({ sources: a.sources + r.sources, chunks: a.chunks + r.chunks, errors: a.errors + r.errors.length, retired: a.retired + r.retired }),
       { sources: 0, chunks: 0, errors: 0, retired: 0 },
     );
-    if (lastResults.some((r) => r.aborted)) {
-      // ONE line, counts only: the gateway's embedding budget is spent, so the sweep stopped at the
-      // first refusal and retired nothing for the tier it was in. The next tick resumes.
+    const stopped = lastResults.find((r) => r.aborted);
+    if (stopped) {
+      // ONE line, counts only: the sweep stopped (the gateway's embedding budget is spent, or the
+      // store or its embedder is down) and retired nothing for the tier it was in. The next tick resumes.
+      const why = stopped.abortReason === "consecutive_failures" ? "failures (documents failing in a row)" : "embedding budget (gateway 429)";
       console.warn(
-        `knowledge ingest: STOPPED on embedding budget (gateway 429) after ${totals.sources} sources written, ${totals.chunks} chunks, ${totals.retired} retired; ${lastResults.length} tiers started`,
+        `knowledge ingest: STOPPED on ${why} after ${totals.sources} sources written, ${totals.chunks} chunks, ${totals.retired} retired; ${lastResults.length} tiers started`,
       );
     } else {
       console.log(`knowledge ingest: ${totals.sources} sources, ${totals.chunks} chunks, ${totals.errors} errors`);

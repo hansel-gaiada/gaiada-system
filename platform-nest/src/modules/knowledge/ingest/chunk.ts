@@ -96,6 +96,22 @@ export function chunkText(input: string, opts: ChunkOpts = {}): string[] {
   return chunks;
 }
 
+/** Longest header repeated in front of every chunk. Both tiers prepend a header that names the record to each
+ *  chunk, so an unbounded one inflates EVERY chunk of that record. On the live box 975 PM tasks carried a
+ *  9,006-character title: each of their chunks was 4,529 tokens against the embedder's 2,048-token context, ollama
+ *  refused them all, and three refusals in a row opened the gateway's breaker for every other document. With this
+ *  bound a chunk stays near 1,700 characters (header + a ~1,400-character body piece), inside the context even
+ *  at one token per character. */
+export const MAX_HEADER_CHARS = 300;
+
+/** The header to repeat on each chunk, and the body to chunk. A header within MAX_HEADER_CHARS is returned
+ *  untouched (byte-identical, so stored chunks still match and are not re-embedded). A longer one is cut with "…"
+ *  and its full text leads the body instead, so none of it is lost from the index. */
+export function boundHeader(header: string, body: string): { header: string; body: string } {
+  if (header.length <= MAX_HEADER_CHARS) return { header, body };
+  return { header: `${header.slice(0, MAX_HEADER_CHARS - 1).trimEnd()}…`, body: `${header}\n\n${body}` };
+}
+
 /** Render a labelled field block ("Status: active") skipping empty values, then chunk it. Used by
  *  the ERP ingester so every record becomes self-describing prose — an embedding of a bare value
  *  like "blocked" is meaningless, but "Status: blocked" next to the project name is retrievable. */

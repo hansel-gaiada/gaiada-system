@@ -14,7 +14,7 @@
 // robots.txt is not consulted: these are our own origins and this is first-party content ingestion,
 // not a crawl of someone else's property. That reasoning stops being true the moment the allowlist
 // contains a host we do not own.
-import { chunkText, normalizeText } from "./chunk";
+import { boundHeader, chunkText, normalizeText } from "./chunk";
 import type { IngestDocument } from "./types";
 
 const FETCH_TIMEOUT_MS = 20_000;
@@ -237,8 +237,8 @@ export function stripBoilerplate(pages: CrawledPage[]): CrawledPage[] {
 export function pagesToDocuments(pages: CrawledPage[], tenantId: string): IngestDocument[] {
   const docs: IngestDocument[] = [];
   for (const page of stripBoilerplate(pages)) {
-    const header = page.title ? `${page.title} (${page.url})` : page.url;
-    const chunks = chunkText(page.text).map((c) => `${header}\n\n${c}`);
+    const h = boundHeader(page.title ? `${page.title} (${page.url})` : page.url, page.text);
+    const chunks = chunkText(h.body).map((c) => `${h.header}\n\n${c}`);
     if (chunks.length === 0) continue;
     docs.push({
       tenantId,

@@ -3,7 +3,7 @@
 // covered by the platform's RLS suites and the store's own D9 tests, and the allowlist is exercised
 // against an injected fetch so the SSRF rule is tested rather than assumed.
 import { describe, it, expect } from "vitest";
-import { chunkText, normalizeText, renderFields } from "./chunk";
+import { boundHeader, chunkText, MAX_HEADER_CHARS, normalizeText, renderFields } from "./chunk";
 import { allowedHosts, canonicalUrl, crawlSite, extractLinks, htmlToText, isAllowed, pagesToDocuments, parseSitemap, stripBoilerplate } from "./web-source";
 import { flattenJson } from "./erp-source";
 
@@ -51,6 +51,45 @@ describe("chunkText", () => {
 
   it("renderFields drops empty values and labels the rest", () => {
     expect(renderFields([["Status", "active"], ["Owner", ""], ["Due", null], ["Priority", "high"]])).toBe("Status: active\nPriority: high");
+  });
+});
+
+// 2026-10-28: 975 PM tasks on the live box carried a 9,006-character title. The title is the header repeated in front
+// of every chunk, so each chunk was 4,529 tokens against the embedder's 2,048-token context; ollama refused them, and
+// three refusals in a row opened the gateway's breaker for every other document.
+describe("boundHeader", () => {
+  it("leaves a header within the bound byte-identical, so stored chunks still match and are not re-embedded", () => {
+    const header = "Task: Draft the Q4 content calendar (project Viceroy social)";
+    expect(boundHeader(header, "Status: open")).toEqual({ header, body: "Status: open" });
+    const edge = "h".repeat(MAX_HEADER_CHARS);
+    expect(boundHeader(edge, "b").header).toBe(edge);
+  });
+
+  it("cuts an oversized header and moves its full text into the body, so nothing is lost from the index", () => {
+    const title = `Task: ${"very long title words ".repeat(430)}(project P)`; // ~9,000 characters
+    const h = boundHeader(title, "Status: open");
+    expect(h.header.length).toBeLessThanOrEqual(MAX_HEADER_CHARS);
+    expect(h.header.endsWith("…")).toBe(true);
+    expect(h.body.startsWith(title)).toBe(true);
+    expect(h.body.endsWith("Status: open")).toBe(true);
+  });
+
+  it("a page with a giant title gives chunks that all fit the embedder, and the whole title is still indexed", () => {
+    const title = "Spring offer ".repeat(700).trim(); // ~9,000 characters
+    const pages = [
+      { url: "https://gaiada.com/offer", title, text: "Our spring offer covers SEO and content. Prices start at IDR 5m a month." },
+      { url: "https://gaiada.com/about", title: "About", text: "Gaiada is a digital agency in Bali." },
+    ];
+    const docs = pagesToDocuments(pages, TENANT);
+    const offer = docs.find((d) => d.sourceRef === "web:https://gaiada.com/offer");
+    expect(offer).toBeDefined();
+    // header (<= MAX_HEADER_CHARS) + blank line + one chunk body (<= ~1,400 characters with the overlap carry)
+    for (const c of offer!.chunks) expect(c.length).toBeLessThanOrEqual(MAX_HEADER_CHARS + 2 + 1400);
+    const indexed = offer!.chunks.map((c) => c.slice(c.indexOf("\n\n") + 2)).join(" ");
+    expect(indexed.split("Spring offer").length - 1).toBeGreaterThanOrEqual(700);
+    expect(indexed).toContain("Prices start at IDR 5m");
+    // The ordinary page is untouched by the bound.
+    expect(docs.find((d) => d.sourceRef === "web:https://gaiada.com/about")!.chunks[0].startsWith("About (https://gaiada.com/about)\n\n")).toBe(true);
   });
 });
 

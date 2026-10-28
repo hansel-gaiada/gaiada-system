@@ -23,7 +23,7 @@ import { withGlobal } from "../../../db";
 import { buildErpDocuments } from "./erp-source";
 import { extractFileText } from "./file-text";
 import { EmbeddingBudgetExhaustedError, eraseSource, ingestDocument, knowledgeConfigured, listSourceRefs } from "./ingest-client";
-import type { IngestDocument, IngestRunResult } from "./types";
+import type { AbortReason, IngestDocument, IngestRunResult } from "./types";
 import { emptyResult } from "./types";
 import { crawlSite, pagesToDocuments } from "./web-source";
 
@@ -32,27 +32,39 @@ interface IngestOutcome {
   written: Set<string>;
   chunks: number;
   errors: string[];
-  /** The gateway refused an embed with 429. Nothing after the refusal was attempted. */
+  /** The sweep stopped early (see abortReason). Nothing after the stop was attempted. */
   aborted: boolean;
+  abortReason?: AbortReason;
 }
+
+/** This many documents failing in a row means the knowledge service or its embedder is down, not that the
+ *  documents are bad: one bad record is followed by good ones. Every further call would fail the same way, and a
+ *  sweep is ~16,000 documents on the live box, so the sweep stops as it does on a budget refusal. */
+export const MAX_CONSECUTIVE_FAILURES = 25;
 
 async function ingestAll(docs: IngestDocument[]): Promise<IngestOutcome> {
   const written = new Set<string>();
   const errors: string[] = [];
   let chunks = 0;
+  let failedInARow = 0;
   for (const d of docs) {
     try {
       chunks += await ingestDocument(d);
       written.add(d.sourceRef);
+      failedInARow = 0;
     } catch (err) {
       if (err instanceof EmbeddingBudgetExhaustedError) {
         // Every further embed would be refused as well. Stop at once: no more documents. The
         // document that was cut off is NOT in `written`, and the caller must not retire.
         errors.push(`${d.sourceRef} (${d.label}): ${err.message}`);
-        return { written, chunks, errors, aborted: true };
+        return { written, chunks, errors, aborted: true, abortReason: "embedding_budget" };
       }
       // Per-document isolation: one oversized record or one transient 5xx must not strand the rest.
       errors.push(`${d.sourceRef} (${d.label}): ${(err as Error).message}`);
+      if (++failedInARow >= MAX_CONSECUTIVE_FAILURES) {
+        errors.push(`stopped: ${MAX_CONSECUTIVE_FAILURES} documents in a row failed (the knowledge service or its embedder is down)`);
+        return { written, chunks, errors, aborted: true, abortReason: "consecutive_failures" };
+      }
     }
   }
   return { written, chunks, errors, aborted: false };
@@ -106,6 +118,7 @@ export async function runPublicIngest(): Promise<IngestRunResult> {
   result.chunks = out.chunks;
   result.errors.push(...out.errors);
   result.aborted = out.aborted;
+  if (out.abortReason) result.abortReason = out.abortReason;
 
   // Retire only after a clean, non-empty crawl — see the file header. An aborted run is never clean.
   if (!out.aborted && out.errors.length === 0 && docs.length > 0) {
@@ -142,6 +155,7 @@ export async function runInternalIngest(tenantId: string): Promise<IngestRunResu
   result.chunks = out.chunks;
   result.errors.push(...out.errors);
   result.aborted = out.aborted;
+  if (out.abortReason) result.abortReason = out.abortReason;
 
   if (!out.aborted && out.errors.length === 0 && docs.length > 0) {
     try {
