@@ -1192,6 +1192,16 @@ const configBase = {
         return Number.isFinite(n) && n >= 60_000 ? n : 24 * 3600 * 1000;
       })(),
     },
+    // SCP-Se — how long a SIMULATED boost stays `running` before the simulator completes it (plan §5: "completes after a short,
+    // configurable time"), in minutes. Read at call time by `simulated-boost-job.ts`, which runs only while SOCIAL_SIMULATION_ENABLED is
+    // on. An empty, non-numeric or out-of-range value (compose passes `${VAR:-}`, and `Number("")` is 0, which would complete every boost
+    // on the very next tick) falls back to 10; the range is a whole number of minutes from 1 to 1440 (a day).
+    simulatedBoostMinutes: (() => {
+      const raw = process.env.SOCIAL_SIMULATED_BOOST_MINUTES;
+      if (raw === undefined || raw.trim() === "") return 10;
+      const n = Number(raw);
+      return Number.isInteger(n) && n >= 1 && n <= 1440 ? n : 10;
+    })(),
     // SMM-16 — AI triage (`smm-inbox-triage`) + the SLA/spike guard (`smm-inbox-sla-guard`, named in
     // 0105's own `ix_social_inbox_threads_sla` comment). Both dark by default, same convention as
     // `inboxPull`/`inboxRetention` above.
