@@ -133,7 +133,7 @@ export function asPortalSpend(raw: unknown): PortalSpend {
 
 /** "October 2026" from `YYYY-MM` (pure: no Date, so no zone), else the text as it came. */
 function monthName(m: string): string {
-  const x = /^(d{4})-(d{2})$/.exec(m);
+  const x = /^(\d{4})-(\d{2})$/.exec(m);
   const names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   return x && Number(x[2]) >= 1 && Number(x[2]) <= 12 ? `${names[Number(x[2]) - 1]} ${x[1]}` : m;
 }
