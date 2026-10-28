@@ -6,6 +6,7 @@
 // (`scpStageMachine.json`) through `scpActionsFromStatus` and `editableFieldsOf`, and restates no status or transition.
 import { scpActionsFromStatus } from "./scpStageMachine";
 import { editableFieldsOf, refusalText, statusLabel } from "./socialPipeline";
+import { countText } from "./socialAccountsSummary";
 
 const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
@@ -52,9 +53,20 @@ export interface FeedItem {
   simulated: boolean;
   dateMove: DateMoveKind;
   dateMoveRefusal: DateMoveRefusal | null;
+  /** SCP-Sg: the address a live post went live on (null for a post that is not live); a simulated post's opens nothing real (`liveLinkOf`). */
+  liveUrl: string | null;
+  /** SCP-Sg: a live post's reach; null when nobody reported one (never drawn as 0). */
+  reach: number | null;
+  /** SCP-Sg: where that reach came from (`pull`, `manual` or `simulated`), null with none. */
+  reachSource: "pull" | "manual" | "simulated" | null;
 }
 
-export interface FeedPreviewView { items: FeedItem[]; liveHidden: number }
+export interface FeedPreviewView {
+  items: FeedItem[];
+  liveHidden: number;
+  /** SCP-Sg: the newest sync of the client's accounts (an ISO instant); null when none has synced ("Not synced yet"). */
+  lastSyncedAt: string | null;
+}
 
 /** `GET engagements/:engagementId/feed-preview`. Throws on a body that is not one (a wrong shape must read as "cannot tell", never as an empty grid). */
 export function asFeedPreview(raw: unknown): FeedPreviewView {
@@ -70,10 +82,42 @@ export function asFeedPreview(raw: unknown): FeedPreviewView {
       title: str(i.title) ?? "Untitled post", format: str(i.format), phase: str(i.phase), simulated: i.simulated === true,
       dateMove: locked ? "locked" : move.move,
       dateMoveRefusal: locked ? "post_is_live" : move.move === "locked" ? move.refusal ?? "field_locked" : null,
+      // SCP-Sg: a server that predates the read-back omits all three, which reads as "none", never as a 0 reach.
+      liveUrl: str(i.liveUrl), reach: typeof i.reach === "number" && Number.isFinite(i.reach) ? i.reach : null,
+      reachSource: i.reachSource === "pull" || i.reachSource === "manual" || i.reachSource === "simulated" ? i.reachSource : null,
     };
   });
-  return { items, liveHidden: typeof raw.liveHidden === "number" && raw.liveHidden > 0 ? Math.floor(raw.liveHidden) : 0 };
+  return {
+    items, liveHidden: typeof raw.liveHidden === "number" && raw.liveHidden > 0 ? Math.floor(raw.liveHidden) : 0, lastSyncedAt: str(raw.lastSyncedAt),
+  };
 }
+
+// ── SCP-Sg: the live feed read back ──────────────────────────────────────────────────────────────────────────────────────────
+
+/** The host the social simulator puts its posts on (`https://simulated.invalid/…`): the `.invalid` TLD never resolves, so the link would open nothing. */
+const UNREACHABLE_TLD = ".invalid";
+
+/** What a live tile offers for its post: a real link, "Simulated post" (a simulated post's address is not one to open), or nothing (no address). */
+export type LiveLink = { kind: "link"; href: string } | { kind: "simulated" } | null;
+
+/** The live tile's link. A simulated post, or one whose address is on an `.invalid` host, is never linked out. Only an http(s) address is ever linked. */
+export function liveLinkOf(i: Pick<FeedItem, "liveUrl" | "simulated" | "locked">): LiveLink {
+  if (!i.locked) return null;
+  let host: string | null = null;
+  let href: string | null = null;
+  if (i.liveUrl) {
+    try {
+      const u = new URL(i.liveUrl);
+      // A trailing dot (`simulated.invalid.`) names the same host.
+      if (u.protocol === "http:" || u.protocol === "https:") { host = u.hostname.toLowerCase().replace(/\.$/, ""); href = u.toString(); }
+    } catch { /* an address that is not one is no link */ }
+  }
+  if (i.simulated || (host !== null && host.endsWith(UNREACHABLE_TLD))) return { kind: "simulated" };
+  return href ? { kind: "link", href } : null;
+}
+
+/** "Reach 3,100", or "Reach not reported" (never "Reach 0") for a live post nobody reported a reach for; empty for a post that is not live. */
+export const reachText = (i: Pick<FeedItem, "reach" | "locked">): string => (!i.locked ? "" : i.reach === null ? "Reach not reported" : `Reach ${countText(i.reach)}`);
 
 /** Newest date first, then the id: the order the server sends, kept after a local change. */
 export const byNewest = (a: Pick<FeedItem, "scheduledAt" | "postId">, b: Pick<FeedItem, "scheduledAt" | "postId">): number =>

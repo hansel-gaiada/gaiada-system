@@ -3,6 +3,8 @@
 // and, for the four approvers, offers "Seed simulated accounts" when the client lacks an Instagram, Facebook or TikTok account (`POST
 // engagements/:engagementId/simulated-accounts`; idempotent). The button is not hidden by role: the server's 403 is the boundary and is shown in words, as is its 409
 // while the simulator is switched off on the server. A failed or refused READ is said as such, never drawn as "no accounts".
+// SCP-Sg: each account also says its followers and when it last synced ("Not synced yet" for one no sweep has reached), from `GET accounts-summary`; a summary that
+// could not be read is said once under the list, and an account is never drawn with "0 followers" it was not measured to have.
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { SimulatedAccountChip } from "./SimulatedAccountChip";
@@ -11,10 +13,13 @@ import { seedSimulatedAccounts } from "@/lib/socialSimulatedAccountsActions";
 import { networksMissingAccount } from "@/lib/socialSimulatedAccounts";
 import { NETWORK_LABEL } from "@/lib/socialAllocation";
 import { SIMULATED_ACCOUNT_NOTE, type SocialAccount } from "@/lib/socialShared";
+import { SUMMARY_FORBIDDEN_TEXT, SUMMARY_UNAVAILABLE_TEXT, accountStatText, type AccountsSummaryRead } from "@/lib/socialAccountsSummary";
 
 export type ClientAccountsRead = { kind: "ok"; accounts: readonly SocialAccount[] } | { kind: "forbidden" } | { kind: "unavailable" };
 
-export function ClientAccounts({ engagementId, read, canPlan }: { engagementId: string; read: ClientAccountsRead; canPlan: boolean }) {
+export function ClientAccounts({
+  engagementId, read, canPlan, summary,
+}: { engagementId: string; read: ClientAccountsRead; canPlan: boolean; summary?: AccountsSummaryRead }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +42,7 @@ export function ClientAccounts({ engagementId, read, canPlan }: { engagementId: 
   }
 
   const accounts = read.kind === "ok" ? read.accounts : [];
+  const stats = new Map((summary?.kind === "ok" ? summary.data.accounts : []).map((a) => [a.accountId, a]));
   const missing = read.kind === "ok" ? networksMissingAccount(accounts) : [];
   return (
     <section className="scp-accts" aria-label="Social accounts">
@@ -54,11 +60,14 @@ export function ClientAccounts({ engagementId, read, canPlan }: { engagementId: 
               <b>{NETWORK_LABEL[a.network] ?? a.network}</b>
               <span className="scp-accts__handle">{a.handle}</span>
               {a.simulated && <SimulatedAccountChip />}
+              {summary?.kind === "ok" && <span className="scp-accts__stat">{accountStatText(stats.get(a.id) ?? { followers: null, lastSyncedAt: null })}</span>}
             </li>
           ))}
         </ul>
       )}
       {accounts.some((a) => a.simulated) && <p className="scp-note">{SIMULATED_ACCOUNT_NOTE}</p>}
+      {read.kind === "ok" && accounts.length > 0 && summary?.kind === "forbidden" && <p className="scp-note">{SUMMARY_FORBIDDEN_TEXT}</p>}
+      {read.kind === "ok" && accounts.length > 0 && summary?.kind === "unavailable" && <p className="scp-note" role="status">{SUMMARY_UNAVAILABLE_TEXT}</p>}
       {read.kind === "ok" && missing.length > 0 && canPlan && (
         <div className="scp-accts__row">
           <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={seed} disabled={pending}>

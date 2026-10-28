@@ -12,4 +12,5 @@
 .scp-accts__list { display: flex; flex-wrap: wrap; gap: 6px 14px; list-style: none; margin: 0; padding: 0; }
 .scp-accts__item { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font: 400 13px var(--font-body); color: var(--text-primary); }
 .scp-accts__handle { color: var(--erp-ink-60); }
+.scp-accts__stat { font: 400 12px var(--font-body); color: var(--erp-ink-60); font-variant-numeric: tabular-nums; }
 .scp-accts__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }

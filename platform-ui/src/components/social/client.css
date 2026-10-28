@@ -111,6 +111,12 @@
 .scp-feed__sim { position: absolute; top: 4px; right: 4px; padding: 1px 6px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); font: 700 9px var(--font-body); color: var(--status-warning-fg); }
 .scp-feed__open { position: absolute; right: 4px; bottom: 28px; padding: 1px 6px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); font: 600 11px var(--font-body); color: var(--accent-fg); text-decoration: none; }
 .scp-feed__open:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 1px; }
+/* SCP-Sg: the live tile's reach, and its link to the post on the network (or the "Simulated post" label, which is not a link). */
+.scp-feed__reach { font-weight: 600; font-variant-numeric: tabular-nums; }
+.scp-feed__sync { margin: 0; }
+.scp-feed__live { position: absolute; left: 4px; bottom: 28px; padding: 1px 6px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); font: 600 11px var(--font-body); color: var(--accent-fg); text-decoration: none; }
+.scp-feed__live--sim { color: var(--status-warning-fg); border-style: dashed; }
+a.scp-feed__live:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 1px; }
 .scp-feed__confirm { display: grid; gap: 8px; max-width: 640px; padding: 12px 14px; border: 0.5px solid var(--status-warning-fg); border-radius: var(--radius-md); background: var(--surface-card); }
 .scp-feed__confirm-title { margin: 0; font: 700 13px var(--font-body); color: var(--text-primary); }
 .scp-feed__confirm-body { margin: 0; font: 400 13px/1.45 var(--font-body); color: var(--text-primary); }
