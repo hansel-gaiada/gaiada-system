@@ -120,6 +120,10 @@ export interface StageFacts {
   // variants and accounts
   /** The client's accounts per network: how many `social_accounts` rows the client has on each. */
   accountsByNetwork?: Record<string, number>;
+  /** SCP-Sa3: the networks of the accounts this action would dispatch through, split by KIND (`social_accounts.simulated`).
+   *  `final_approve`: the client's accounts on the post's placement; `schedule_publisher`: the accounts of the post's live
+   *  variants. Already scoped by the caller, so the guard only asks whether both lists have a network. */
+  accountKinds?: { simulated: string[]; real: string[] };
   /** The post's `reviewHash` now (BFF §63.6.2). */
   reviewHash?: string | null;
   everyReviewPending?: boolean;
@@ -897,6 +901,18 @@ export const GUARDS: Record<string, GuardImpl> = {
     run: (env) => {
       const networks = placementFor(env).filter((n) => (env.facts.accountsByNetwork![n] ?? 0) > 1);
       return networks.length ? fail("ambiguous_account", { detail: { networks } }) : null;
+    },
+  },
+  // SCP-Sa3 (SCP-D9: "a post is wholly simulated or wholly real"). Since Sa2 a client may hold a simulated account on one network
+  // and a real one on another; a post placed on both would publish partly into the simulator and partly for real, and the calendar
+  // would say "live" while only some networks got it. Refused where the post first commits to its accounts (`final_approve` creates
+  // the variants) and again where it is handed to an engine (`schedule_publisher`), because an account can be re-marked in
+  // between. `schedule` by hand and `reschedule` dispatch nothing; a reschedule's new placement is judged at the next final step.
+  account_kinds_not_mixed: {
+    facts: ["accountKinds"], body: false,
+    run: ({ facts }) => {
+      const k = facts.accountKinds!;
+      return k.simulated.length > 0 && k.real.length > 0 ? fail("publisher_kinds_mixed", { detail: { simulated: k.simulated, real: k.real } }) : null;
     },
   },
   seen_hash_matches: {

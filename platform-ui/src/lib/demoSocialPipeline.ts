@@ -12,7 +12,7 @@
 // tests pin the clock to mid-month before importing it.
 import { createHash } from "node:crypto";
 import { todayIsoInDisplayZone } from "./format";
-import { demoNetworksWithoutAccount } from "./demoSocialAccounts";
+import { demoAccountKinds, demoNetworksWithoutAccount } from "./demoSocialAccounts";
 import type { BrandBook } from "./socialBrandBook";
 import fixture from "./scpStageMachine.json";
 import {
@@ -596,6 +596,12 @@ function probeGuardRefusal(guards: ReadonlyArray<{ guard: string; refusal: strin
       case "one_account_per_placement_network": {
         // SCP-Sb: the client's ACCOUNTS decide (the simulated accounts of `demoSocialAccounts.ts`), as the server's `loadClientAccounts` count does.
         if (demoNetworksWithoutAccount(store.engagements.find((e) => e.id === p.engagementId)?.clientId ?? "", p.placement).length > 0) return g.refusal;
+        break;
+      }
+      case "account_kinds_not_mixed": {
+        // SCP-Sa3 (SCP-D9): a post is wholly simulated or wholly real, judged over the client's accounts on the placement (as the runner's guard does).
+        const kinds = demoAccountKinds(store.engagements.find((e) => e.id === p.engagementId)?.clientId ?? "", p.placement);
+        if (kinds.simulated.length > 0 && kinds.real.length > 0) return g.refusal;
         break;
       }
       case "approved_time_not_passed": {
