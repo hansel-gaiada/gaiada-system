@@ -471,6 +471,7 @@ export function boostApi(store: BoostStore) {
       return {
         boostId: b.id, clientName: engagementOf(b.engagementId)?.clientName ?? "", postTitle: p?.title ?? "", thumbFileId: p && isPortalVisible(p) ? `${p.id}-f1` : null,
         totalBudgetMinor: b.totalBudgetMinor, days: b.days, startsOn: b.startsOn, currency: b.currency, minorUnit: MINOR_UNIT, remainingMinor: remaining(b.cycleId),
+        simulated: b.simulated,
       };
     });
     const history = [

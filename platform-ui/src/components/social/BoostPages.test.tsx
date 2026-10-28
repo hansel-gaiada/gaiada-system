@@ -104,7 +104,7 @@ describe("the Boosting page's body", () => {
     const list = screen.getByRole("list", { name: "Boosts" });
     expect(within(list).getAllByRole("listitem").length).toBeGreaterThanOrEqual(5);
     expect(within(list).getByRole("link", { name: "Harvest collection arrives" })).toHaveAttribute("href", `/departments/d-soc/posts/${postOf("Harvest collection arrives").id}`);
-    const sim = within(list).getByText("SIMULATED").closest("li")!;
+    const sim = within(list).getByRole("img", { name: "Simulated" }).closest("li")!;
     expect(sim.textContent).toContain("Weekend brunch is back");
     // status
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "completed" } });
@@ -366,7 +366,7 @@ describe("the boost card", () => {
   it("draws the status in words, the budget, the dates and SIMULATED on a simulated boost", () => {
     mount(boost({ status: "requested", approvedVia: null, approvedAt: null, simulated: true, audience: "custom", audienceNote: "Cyclists in Ubud", reachEstimate: { low: 1200, high: 2600 } }), { canRun: true, canRecord: false });
     expect(screen.getByText("Waiting for the client")).toHaveAttribute("data-status", "requested");
-    expect(screen.getByText("SIMULATED")).toHaveClass("scp-chip--sim");
+    expect(screen.getByRole("img", { name: "Simulated" })).toHaveTextContent("SIMULATED");
     expect(screen.getByText("IDR 300,000 (IDR 100,000 a day, 3 days)")).toBeInTheDocument();
     expect(screen.getByText("28 Oct 2026")).toBeInTheDocument();
     expect(screen.getByText("A custom audience: Cyclists in Ubud")).toBeInTheDocument();

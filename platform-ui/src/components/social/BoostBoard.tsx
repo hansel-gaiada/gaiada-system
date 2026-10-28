@@ -10,6 +10,7 @@ import { useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BoostChip } from "@/components/social/BoostCard";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { BoostRequestDialog } from "@/components/social/BoostRequestDialog";
 import {
   BOOST_GOAL_LABEL, BOOST_STATUSES, boostStatusLabel, daysText, formatBoostCount, formatBoostMoney, plainDate, ratePercent, type BoostCandidate, type BoostGoal, type BoostList, type BoostRow,
@@ -98,7 +99,7 @@ export function BoostBoard({ deptId, data, nextHref }: { deptId: string; data: B
                     )}
                   </span>
                 </div>
-                <div className="scp-boostrow__side"><span><BoostChip status={b.status} simulated={b.simulated} /></span></div>
+                <div className="scp-boostrow__side"><span><BoostChip status={b.status} />{b.simulated && <> <SimulatedMark of="boost" /></>}</span></div>
               </li>
             ))}
           </ul>

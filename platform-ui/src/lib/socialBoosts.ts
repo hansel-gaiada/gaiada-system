@@ -105,7 +105,7 @@ export const ESTIMATE_BASIS_WORDS: Readonly<Record<BoostEstimate["basis"], strin
 // ── The portal's spend read (GET portal/social/spend) ──────────────────────────────────────────────────────────────────────
 
 export interface PortalBudgetItem { proposalId: string; clientName: string; month: string; amountMinor: number; agreedMinor: number | null; committedMinor: number; currency: string; minorUnit: number; note: string | null; requestedAt: string | null }
-export interface PortalBoostItem { boostId: string; clientName: string; postTitle: string; thumbFileId: string | null; totalBudgetMinor: number; days: number; startsOn: string; currency: string; minorUnit: number; remainingMinor: number }
+export interface PortalBoostItem { boostId: string; clientName: string; postTitle: string; thumbFileId: string | null; totalBudgetMinor: number; days: number; startsOn: string; currency: string; minorUnit: number; remainingMinor: number; simulated: boolean }
 /** A settled item of the client's own, as the page lists it. The contract names `history` without a shape: every field is read leniently. */
 export interface PortalSpendHistory { id: string; kind: "budget" | "boost"; title: string; status: string; amountMinor: number | null; currency: string; minorUnit: number; decidedAt: string | null }
 export interface PortalSpend { budgets: PortalBudgetItem[]; boosts: PortalBoostItem[]; history: PortalSpendHistory[]; canDecide: boolean }
@@ -121,6 +121,7 @@ export function asPortalSpend(raw: unknown): PortalSpend {
     boosts: raw.boosts.filter(isObj).filter((b) => typeof b.boostId === "string").map((b) => ({
       boostId: b.boostId as string, clientName: str(b.clientName) ?? "", postTitle: str(b.postTitle) ?? "", thumbFileId: str(b.thumbFileId), totalBudgetMinor: num(b.totalBudgetMinor) ?? 0,
       days: num(b.days) ?? 0, startsOn: str(b.startsOn) ?? "", currency: cur(b), minorUnit: num(b.minorUnit) ?? minorUnitOf(cur(b)), remainingMinor: num(b.remainingMinor) ?? 0,
+      simulated: b.simulated === true,
     })),
     history: arr(raw.history).filter(isObj).map((h, i): PortalSpendHistory => ({
       id: str(h.id) ?? str(h.boostId) ?? str(h.proposalId) ?? `h${i}`, kind: h.kind === "boost" || typeof h.boostId === "string" ? "boost" : "budget",

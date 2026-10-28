@@ -10,6 +10,7 @@ import { useEffect, useId, useState, useTransition } from "react";
 import Link from "next/link";
 import { Modal } from "@/components/overlay/Modal";
 import { RefusalNote } from "@/components/social/PostRefusal";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { formatDateTime } from "@/lib/format";
 import { runBoostAction, type BoostAnswer } from "@/lib/socialBoostsActions";
 import {
@@ -27,7 +28,7 @@ export function BoostChip({ status, simulated }: { status: string; simulated?: b
   return (
     <>
       <span className="scp-boostchip" data-status={status}>{boostStatusLabel(status)}</span>
-      {simulated && <span className="scp-chip scp-chip--sim">SIMULATED</span>}
+      {simulated && <> <SimulatedMark of="boost" /></>}
     </>
   );
 }

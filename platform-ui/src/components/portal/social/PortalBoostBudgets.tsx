@@ -15,6 +15,7 @@ import { decideBoost, decideBoostBudget } from "@/lib/portalSpendActions";
 import { monthLabel, portalSocialFileHref, whenLabel } from "@/lib/portalSocial";
 import { PORTAL_VIEWER_LINE, daysText, formatBoostMoney, plainDate, type PortalBoostItem, type PortalBudgetItem, type PortalSpend } from "@/lib/socialBoosts";
 import { NOTE_MAX } from "@/lib/socialPipeline";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import "./portalSocial.css";
 import "./portalBoosts.css";
 
@@ -119,7 +120,7 @@ export function PortalBoostBudgets({ spend, tenant }: { spend: PortalSpend; tena
                   <img className="pb-thumb" src={portalSocialFileHref(tenant, b.thumbFileId)} alt={`Your post: ${b.postTitle}`} loading="lazy" width={72} height={72} />
                 )}
                 <div className="pb-item__main">
-                  <p className="pb-item__title">{b.postTitle || "Your post"}</p>
+                  <p className="pb-item__title">{b.postTitle || "Your post"}{b.simulated && <> <SimulatedMark of="boost" /></>}</p>
                   <p className="pb-item__line">A boost of <strong>{money(b.totalBudgetMinor)}</strong> over {daysText(b.days)}, starting {plainDate(b.startsOn)}.</p>
                   <p className="pb-item__sub">It is over this month&apos;s agreed budget. What is left of the month: {money(b.remainingMinor)}.</p>
                 </div>

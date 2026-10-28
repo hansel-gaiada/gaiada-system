@@ -109,7 +109,7 @@ describe("as a signer", () => {
     // the boost is approved above; the server answers a replay `{alreadyDecided: true}`
     const replay = spendFor("demo-client");
     const gone = replay.history.find((h) => h.kind === "boost")!;
-    const spend: PortalSpend = { ...replay, boosts: [{ boostId: gone.id, clientName: "Northwind Traders", postTitle: "Reader favourite reshare", thumbFileId: null, totalBudgetMinor: 600_000, days: 6, startsOn: "2026-10-27", currency: "IDR", minorUnit: 0, remainingMinor: 0 }], budgets: [] };
+    const spend: PortalSpend = { ...replay, boosts: [{ boostId: gone.id, clientName: "Northwind Traders", postTitle: "Reader favourite reshare", thumbFileId: null, totalBudgetMinor: 600_000, days: 6, startsOn: "2026-10-27", currency: "IDR", minorUnit: 0, remainingMinor: 0, simulated: false }], budgets: [] };
     mount("demo-client", spend);
     fireEvent.click(screen.getByRole("button", { name: "Approve the boost of Reader favourite reshare" }));
     await screen.findByText(/Reader favourite reshare, approved: this was already decided, so nothing changed\./);
@@ -117,7 +117,7 @@ describe("as a signer", () => {
   });
 
   it("a refusal is said in words beside the item, and the item stays", async () => {
-    mount("demo-client", { budgets: [], boosts: [{ boostId: "no-such-boost", clientName: "Northwind Traders", postTitle: "A post", thumbFileId: null, totalBudgetMinor: 5, days: 1, startsOn: "2026-10-27", currency: "IDR", minorUnit: 0, remainingMinor: 0 }], history: [], canDecide: true });
+    mount("demo-client", { budgets: [], boosts: [{ boostId: "no-such-boost", clientName: "Northwind Traders", postTitle: "A post", thumbFileId: null, totalBudgetMinor: 5, days: 1, startsOn: "2026-10-27", currency: "IDR", minorUnit: 0, remainingMinor: 0, simulated: false }], history: [], canDecide: true });
     fireEvent.click(screen.getByRole("button", { name: "Decline the boost of A post" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("That boost no longer exists.");
     expect(screen.getByRole("button", { name: "Decline the boost of A post" })).toBeInTheDocument();

@@ -24,6 +24,8 @@ export const SIMULATED_NOTES = {
   variant: "Simulated: the social simulator served this network. Nothing reached a real account.",
   metrics: "Simulated numbers from the social simulator, for the dev review. They are not a network's figures.",
   action: "Runs the social simulator only. Nothing reaches a real account.",
+  // SCP-4b: a boost of a simulated post (a boost is wholly simulated or wholly real, as its post: SCP-D9).
+  boost: "Simulated: the social simulator runs this boost for the dev review. No ad is bought on a real account.",
 } as const;
 export type SimulatedNoteKind = keyof typeof SIMULATED_NOTES;
 
