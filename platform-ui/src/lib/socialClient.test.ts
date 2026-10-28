@@ -140,10 +140,12 @@ describe("parsing the server's answers", () => {
     expect(() => asCycleView([])).toThrow();
   });
   it("reads GET calendar, and refuses a body that is not a list", () => {
-    const items = asCalendarItems({ items: [{ postId: "p-1", clientName: "A", title: "T", format: null, scheduledAt: "2026-10-03T09:00:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: true }] });
-    expect(items).toEqual([{ postId: "p-1", clientName: "A", title: "T", format: null, scheduledAt: "2026-10-03T09:00:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: true }]);
+    const items = asCalendarItems({ items: [{ postId: "p-1", clientName: "A", title: "T", format: null, scheduledAt: "2026-10-03T09:00:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: true, dateMove: "locked", dateMoveRefusal: "field_locked" }] });
+    expect(items).toEqual([{ postId: "p-1", clientName: "A", title: "T", format: null, scheduledAt: "2026-10-03T09:00:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: true, dateMove: "locked", dateMoveRefusal: "field_locked" }]);
     expect(() => asCalendarItems({})).toThrow();
     expect(() => asCalendarItems({ items: [{ title: "x" }] })).toThrow();
+    // SCP-3e: an item that does not say what a date move does is refused, never guessed.
+    expect(() => asCalendarItems({ items: [{ postId: "p", scheduledAt: "2026-10-03T09:00:00.000Z" }] })).toThrow(/dateMove/);
   });
 });
 
@@ -184,7 +186,7 @@ describe("the calendar grid", () => {
     expect(monthTitle("2026-10")).toBe("October 2026");
   });
   it("groups items by day in the zone asked, in time order", () => {
-    const mk = (postId: string, scheduledAt: string): CalendarItem => ({ postId, clientName: "A", title: postId, format: null, scheduledAt, pipelineStatus: "client", phase: "with_client", simulated: false });
+    const mk = (postId: string, scheduledAt: string): CalendarItem => ({ postId, clientName: "A", title: postId, format: null, scheduledAt, pipelineStatus: "client", phase: "with_client", simulated: false, dateMove: "locked", dateMoveRefusal: "field_locked" });
     const by = itemsByDay([mk("late", "2026-10-03T15:00:00Z"), mk("early", "2026-10-03T08:00:00Z"), mk("next", "2026-10-04T08:00:00Z")], (iso) => iso.slice(0, 10));
     expect(by.get("2026-10-03")!.map((i) => i.postId)).toEqual(["early", "late"]);
     expect(by.get("2026-10-04")!.map((i) => i.postId)).toEqual(["next"]);

@@ -4,169 +4,131 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getDepartment } from "@/lib/departments";
-import { can } from "@/lib/rbac";
+import { activeCompany } from "@/lib/companyContext";
+import { workspaceFor } from "@/lib/workspaces";
+import { todayIsoInDisplayZone } from "@/lib/format";
+import { getDeptCalendar } from "@/lib/deptCalendar-data";
+import { getAllocation } from "@/lib/socialAllocation-data";
+import { getCycleTable } from "@/lib/socialCycles-data";
+import { getComposerPosts, getSocialCalendar } from "@/lib/socialCalendar-data";
+import { monthTitle, parseMonth, shiftMonth } from "@/lib/socialClient";
+import { calendarHref, calendarWindow, composerInWindow, holidayAwayByDay, hrLegNotes, planClients } from "@/lib/socialCalendar";
 import { Card } from "@/components/ui";
-import { TeachState } from "@/components/departments/TeachState";
-import { AccessDenied } from "@/components/social/AccessDenied";
-import { CalendarGrid, type CalendarGridDay } from "@/components/social/CalendarGrid";
-import {
-  listPosts, listEngagements, getEngagementScope, getClientReview, type SocialPost, type ClientReviewStatus,
-} from "@/lib/social";
-import "@/components/departments/departments.css";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
+import { CalendarLegend } from "@/components/social/CalendarLegend";
+import { SocialCalendar } from "@/components/social/SocialCalendar";
+import "@/components/social/cycles.css";
+import "@/components/social/allocation.css";
+import "@/components/social/client.css";
+import "@/components/social/post-page.css";
+import "@/components/social/social-calendar.css";
 
 type Params = Promise<{ deptId: string }>;
-type SearchParams = Promise<{ month?: string; engagementId?: string }>;
+type SearchParams = Promise<{ month?: string | string[]; engagementId?: string | string[] }>;
 
-function parseMonth(raw: string | undefined): { year: number; month: number } {
-  if (raw && /^\d{4}-\d{2}$/.test(raw)) {
-    const [y, m] = raw.split("-").map(Number);
-    if (m >= 1 && m <= 12) return { year: y, month: m - 1 };
-  }
-  const now = new Date();
-  return { year: now.getFullYear(), month: now.getMonth() };
-}
+const first = (v: string | string[] | undefined): string | undefined => (typeof v === "string" ? v : v?.[0]);
 
-function monthKey(year: number, month: number): string {
-  return `${year}-${String(month + 1).padStart(2, "0")}`;
-}
-
-function adjacentMonth(year: number, month: number, delta: number): { year: number; month: number } {
-  const d = new Date(year, month + delta, 1);
-  return { year: d.getFullYear(), month: d.getMonth() };
-}
-
-/** Sunday-first 6-row grid, always 42 cells so the layout never reflows week to week. */
-function buildGridDays(year: number, month: number): Date[] {
-  const first = new Date(year, month, 1);
-  const startOffset = first.getDay();
-  const days: Date[] = [];
-  for (let i = 0; i < 42; i++) days.push(new Date(year, month, 1 - startOffset + i));
-  return days;
-}
-
-function dateKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-// Calendar (SMM-11, drag-to-reschedule + quota-aware composer added in SMM-12) — the month grid of
-// posts and their per-network variant chips, driven entirely by `GET posts` (lib/social.ts's
-// `listPosts`), which already carries the variant roll-up (status, schedule, published URL,
-// metered cost) — no N+1 read per post. This server component builds the grid/day-grouping as
-// plain data and hands it to `CalendarGrid` (a client component — see its own header) for the
-// interactive part: dragging a post card to another day.
+// SCP-3e (BFF §63.10, §59, §63.17; plan §6.2, §8 row 3e): the Social Media calendar, the pinned Calendar row of the Social menu and the Publish row's Calendar tab
+// (the URL and the registry tab are as SMM-11 made them). Every client's pipeline posts for the month, Monday first, each a chip coloured by its phase with a legend,
+// linking to the post's page; the department's holidays and approved leave beside them; and the Composer's own posts, kept so nothing the page showed before is lost.
 //
-// ⚠ The roll-up does NOT carry network/handle (only `accountId`) — `social.controller.ts`'s
-// `listPosts` joins nothing beyond `social_post_variants`, unlike `getPost`'s detail join against
-// `social_accounts`. Chips here are therefore STATUS chips, not network chips; open a post in the
-// Composer to see which network each variant targets. Flagged in this ticket's final report as a
-// real (if minor) BFF-surface gap, not a UI oversight.
-export default async function DepartmentCalendarPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
+// Reads, in parallel: `GET calendar` for the grid's window (the page's one required read: a refusal or a failure is said, never an empty grid), the department
+// calendar (§59.1, for the HR legs only) and `GET posts` (the Composer's), each of which may fail on its own and then says so in a line above the grid, and
+// `GET allocation` with `GET cycles?month=` for the "+" on a day. "Nothing is on" is claimed only for a read that succeeded.
+//
+// Writes live in the grid (`SocialCalendar`): dragging or "Move to date…" (the server's `dateMove` on each item) and planning a post on a day, offered only to the
+// client's officer and the four approvers. The server decides each one.
+export default async function SocialCalendarPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   const { deptId } = await params;
   if (!tenant) notFound();
-
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
+  const company = activeCompany(me, tenant);
+  // The posts calendar belongs to the Social Media workspace only (its toolkit is the only one that lists a `calendar` tab).
+  if (workspaceFor(company?.vertical, dept.name).key !== "social-media") notFound();
 
   const sp = await searchParams;
-  const { year, month } = parseMonth(sp.month);
-  const prev = adjacentMonth(year, month, -1);
-  const next = adjacentMonth(year, month, 1);
+  const today = todayIsoInDisplayZone();
+  const month = parseMonth(sp.month, today.slice(0, 7));
+  const rawClient = first(sp.engagementId);
+  const engagementId = rawClient && /^[\w-]{1,64}$/.test(rawClient) ? rawClient : null;
+  const window = calendarWindow(month);
 
-  const engagements = await listEngagements(userId, tenant);
-  const posts = await listPosts(userId, tenant, { engagementId: sp.engagementId });
-  // `social.manage` — the same capability that gates authoring a post/variant in the Composer.
-  // Drag-to-reschedule calls `updatePost`/`updateVariant` under the hood, so it rides that same
-  // capability rather than inventing a `social.reschedule` key the permission catalog never named.
-  const canReschedule = can(me, "social.manage", tenant);
+  const [calendar, dept_, composerRead, allocation, cycles] = await Promise.all([
+    getSocialCalendar(userId, tenant, { ...window, engagementId }),
+    getDeptCalendar(userId, tenant, deptId, window),
+    getComposerPosts(userId, tenant, engagementId),
+    getAllocation(userId, tenant),
+    getCycleTable(userId, tenant, month),
+  ]);
 
-  // A 403 on EITHER read is a denial, not "nothing scheduled" — surface it honestly and stop,
-  // rather than rendering an empty-looking grid that reads as "no posts this month."
-  if (engagements.forbidden || posts.forbidden) {
-    return (
-      <Card title="Calendar">
-        <AccessDenied what="view the content calendar" />
-      </Card>
-    );
+  if (calendar.kind === "forbidden") {
+    return <ReadRefusal subject="the content calendar" kind="forbidden" detail="Reading it needs a Social Media read tier (the social_staff role, or a manager)." />;
   }
+  if (calendar.kind === "unavailable") return <ReadRefusal subject="The content calendar" kind="unavailable" reason={calendar.reason} />;
 
-  // SMM-31/32 — client-review chips. Bounded fetch, not an N+1 over every variant in view:
-  // 1. Which of the ENGAGEMENTS in view actually require client sign-off (a handful of calls, not
-  //    one per post) — `SocialEngagement` (the list shape) carries no `toolScope`, only
-  //    `getEngagementScope`'s detail read does.
-  // 2. Only THEN fetch each variant's own review under a requiring engagement — the rest default to
-  //    "not requested" without a call, since that IS the steady state for them.
-  const engagementIds = [...new Set(posts.data.map((p) => p.engagementId))];
-  const scopes = await Promise.all(engagementIds.map((id) => getEngagementScope(userId, tenant, id)));
-  const requiresClientOkByEngagement = new Map(engagementIds.map((id, i) => [id, scopes[i].data.toolScope.posting.requiresClientOk]));
-  const variantIdsNeedingReview = posts.data
-    .filter((p) => requiresClientOkByEngagement.get(p.engagementId))
-    .flatMap((p) => p.variants.map((v) => v.id));
-  const reviews = await Promise.all(variantIdsNeedingReview.map((id) => getClientReview(userId, tenant, id)));
-  const reviewByVariantId: Record<string, ClientReviewStatus> = {};
-  variantIdsNeedingReview.forEach((id, i) => { reviewByVariantId[id] = reviews[i].data.status; });
+  // What did not load, one line each. A leg that failed has no marks on the grid, so a missing mark is never read as "nobody is away" or "no Composer posts".
+  const notes: string[] = [];
+  if (dept_.kind === "ok") notes.push(...hrLegNotes(dept_.data));
+  else if (dept_.kind === "forbidden") notes.push("The department's calendar could not be read for you, so holidays and who is away are not shown.");
+  else notes.push("The department's calendar could not be loaded, so holidays and who is away are not shown.");
+  if (composerRead.kind === "forbidden") notes.push("Composer posts could not be read for you, so they are not shown.");
+  else if (composerRead.kind === "unavailable") notes.push("Composer posts could not be loaded, so they are not shown.");
+  if (allocation.kind !== "ok") notes.push("The clients could not be loaded, so a post cannot be planned from here and the client filter is off.");
 
-  // A plain object, not a Map — `CalendarGrid` is a client component, and props crossing the
-  // server/client boundary must be plain serializable values.
-  const byDay: Record<string, SocialPost[]> = {};
-  const unscheduled: SocialPost[] = [];
-  for (const p of posts.data) {
-    if (!p.scheduledAt) { unscheduled.push(p); continue; }
-    const k = dateKey(new Date(p.scheduledAt));
-    (byDay[k] ??= []).push(p);
-  }
+  const rows = allocation.kind === "ok" ? allocation.data : null;
+  const clients = rows ? planClients(rows, cycles.kind === "ok" ? cycles.data : null, month, me.userId) : null;
+  const composer = composerRead.kind === "ok" ? composerInWindow(composerRead.data, window, engagementId) : [];
+  const items = calendar.data;
+  const clientCount = new Set(items.map((i) => i.clientName)).size;
+  const summary = `${items.length === 0 ? "No pipeline posts are scheduled" : `${items.length} pipeline ${items.length === 1 ? "post" : "posts"} from ${clientCount} ${clientCount === 1 ? "client" : "clients"}`} in view${composer.length > 0 ? `, and ${composer.length} Composer ${composer.length === 1 ? "post" : "posts"}` : ""}.`;
 
-  const gridDays: CalendarGridDay[] = buildGridDays(year, month).map((d) => ({
-    key: dateKey(d), dayNumber: d.getDate(), inMonth: d.getMonth() === month,
-  }));
-  const monthLabel = new Date(year, month, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  const filterHref = (m: { year: number; month: number }) =>
-    `/departments/${deptId}/calendar?month=${monthKey(m.year, m.month)}${sp.engagementId ? `&engagementId=${sp.engagementId}` : ""}`;
-
+  const href = (m: string) => calendarHref(deptId, m, today, engagementId);
   return (
-    <Card
-      title="Calendar"
-      headerRight={
-        <nav aria-label="Month" style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <Link href={filterHref(prev)} className="lux-btn lux-btn--ghost lux-btn--sm">‹ Prev</Link>
-          <span style={{ font: "700 13px var(--font-body)", color: "var(--text-primary)" }}>{monthLabel}</span>
-          <Link href={filterHref(next)} className="lux-btn lux-btn--ghost lux-btn--sm">Next ›</Link>
-        </nav>
-      }
-    >
-      {engagements.data.length > 1 && (
-        <form method="get" aria-label="Engagement filter" style={{ marginBottom: 14 }}>
-          <input type="hidden" name="month" value={monthKey(year, month)} />
-          <label className="lux-filters__field" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-            <span style={{ font: "600 11px var(--font-body)", color: "var(--erp-ink-60)" }}>Engagement</span>
-            <select name="engagementId" defaultValue={sp.engagementId ?? ""}>
-              <option value="">All engagements</option>
-              {engagements.data.map((e) => (
-                <option key={e.id} value={e.id}>{e.name}</option>
-              ))}
-            </select>
-          </label>
-          <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm" style={{ marginLeft: 8 }}>Filter</button>
-        </form>
-      )}
+    <Card title="Calendar">
+      <div className="scp-calpage">
+        <div className="scp-calbar">
+          <nav className="scp-monthnav" aria-label="Month">
+            <Link className="scp-monthnav__btn" href={href(shiftMonth(month, -1))} aria-label={`Previous month, ${monthTitle(shiftMonth(month, -1))}`}>&lsaquo;</Link>
+            <h3 className="scp-monthnav__title">{monthTitle(month)}</h3>
+            <Link className="scp-monthnav__btn" href={href(shiftMonth(month, 1))} aria-label={`Next month, ${monthTitle(shiftMonth(month, 1))}`}>&rsaquo;</Link>
+            {month !== today.slice(0, 7) && <Link className="scp-monthnav__btn" href={href(today.slice(0, 7))}>This month</Link>}
+          </nav>
+          {rows && rows.length > 0 && (
+            <form method="get" className="scp-calfilter" aria-label="Client filter">
+              {month !== today.slice(0, 7) && <input type="hidden" name="month" value={month} />}
+              <label className="scp-field">
+                Client
+                <select name="engagementId" className="scp-input" defaultValue={engagementId ?? ""}>
+                  <option value="">All clients</option>
+                  {rows.map((r) => <option key={r.engagementId} value={r.engagementId}>{r.clientName}</option>)}
+                </select>
+              </label>
+              <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Filter</button>
+            </form>
+          )}
+        </div>
 
-      {posts.data.length === 0 ? (
-        <TeachState
-          glyph="◷"
-          title="No posts yet"
-          body="Draft a master post and its per-network variants in the Composer — once it carries a scheduled date it appears here."
-          ctaLabel="Open Composer"
-          ctaHref={`/departments/${deptId}/composer`}
+        <CalendarLegend composer hr />
+        {notes.length > 0 && (
+          <ul className="scp-calnotes" aria-label="What could not be loaded">
+            {notes.map((n) => <li key={n}>{n}</li>)}
+          </ul>
+        )}
+
+        {clients !== null && !clients.some((c) => c.canCreate) && (
+          <p className="scp-note">A post is planned by the client&apos;s officer or one of the four Social Media approvers, so the days have no &quot;+&quot; for you.</p>
+        )}
+
+        <SocialCalendar
+          deptId={deptId} month={month} today={today} items={items} composer={composer}
+          notes={dept_.kind === "ok" ? holidayAwayByDay(dept_.data) : {}} clients={clients} summary={summary}
         />
-      ) : (
-        <CalendarGrid
-          tenantId={tenant} deptId={deptId} gridDays={gridDays} byDay={byDay}
-          unscheduled={unscheduled} canReschedule={canReschedule} reviewByVariantId={reviewByVariantId}
-        />
-      )}
+      </div>
     </Card>
   );
 }

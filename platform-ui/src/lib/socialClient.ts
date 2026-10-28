@@ -184,16 +184,24 @@ export interface CalendarItem {
   pipelineStatus: string;
   phase: string | null;
   simulated: boolean;
+  /** SCP-3e: what dragging the post to another day does, the server's answer (the fixture's `date_moves` rule): an edit, `reschedule`, or locked. */
+  dateMove: "edit" | "reschedule" | "locked";
+  /** The refusal a move would get: `post_is_live` or `field_locked` when locked, else null. */
+  dateMoveRefusal: "post_is_live" | "field_locked" | null;
 }
 
-/** `GET calendar`'s `{items}`. Throws on a body that is not one. */
+/** `GET calendar`'s `{items}`. Throws on a body that is not one, an item with no `dateMove` included: the calendar never guesses whether a date may move. */
 export function asCalendarItems(raw: unknown): CalendarItem[] {
   if (!isObj(raw) || !Array.isArray(raw.items)) throw new Error("calendar: not a list");
   return raw.items.map((i): CalendarItem => {
     if (!isObj(i) || typeof i.postId !== "string" || typeof i.scheduledAt !== "string") throw new Error("calendar: not an item");
+    if (i.dateMove !== "edit" && i.dateMove !== "reschedule" && i.dateMove !== "locked") throw new Error("calendar: an item without dateMove");
     return {
       postId: i.postId, clientName: str(i.clientName) ?? "", title: str(i.title) ?? "Untitled post", format: str(i.format), scheduledAt: i.scheduledAt,
       pipelineStatus: str(i.pipelineStatus) ?? "", phase: str(i.phase), simulated: i.simulated === true,
+      dateMove: i.dateMove,
+      // A locked post always says why (`field_locked` unless the server says it is live); a movable one has no refusal.
+      dateMoveRefusal: i.dateMove !== "locked" ? null : i.dateMoveRefusal === "post_is_live" ? "post_is_live" : "field_locked",
     };
   });
 }
