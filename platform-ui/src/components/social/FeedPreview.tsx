@@ -11,19 +11,30 @@
 // The server decides everything (the date-move rule, Cerbos, the locks): `dateMove` and the words here are hints so the page can say what will happen before
 // the drop; a refusal comes back in the contract's own code and is shown in words. The swap is all or nothing on the server, and this page changes nothing
 // on its own until the server has answered.
+//
+// SCP-Sg (plan §5): the grid is also the client's live feed as the network, or the simulator, reports it. "Last synced <time>" (or "Not synced yet") sits above it;
+// each live tile says its reach ("Reach not reported", never "Reach 0", when nobody reported one) and links to the post on the network. A simulated post's address
+// (`simulated.invalid`) opens nothing real, so the tile says "Simulated post" instead of linking out.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState, useTransition, type CSSProperties, type DragEvent, type KeyboardEvent } from "react";
 import { swapFeedPreview } from "@/lib/socialClientActions";
 import { formatDateTime } from "@/lib/format";
+import { lastSyncedText } from "@/lib/socialAccountsSummary";
 import { PHASE_LEGEND, formatWords, phaseStyle, postHref, statusLabel } from "@/lib/socialClient";
 import {
-  FEED_PREVIEW_LIVE_CAP, byNewest, isMovable, moveWords, swapAsksClient, swapDoneText, swapInput, type FeedItem, type SwappedPost,
+  FEED_PREVIEW_LIVE_CAP, byNewest, isMovable, liveLinkOf, moveWords, reachText, swapAsksClient, swapDoneText, swapInput, type FeedItem, type SwappedPost,
 } from "@/lib/socialFeedPreview";
 
 type Note = { kind: "info" | "ok" | "error"; text: string };
 
-export function FeedPreview({ deptId, engagementId, items, liveHidden }: { deptId: string; engagementId: string; items: readonly FeedItem[]; liveHidden: number }) {
+export function FeedPreview({
+  deptId, engagementId, items, liveHidden, lastSyncedAt,
+}: {
+  deptId: string; engagementId: string; items: readonly FeedItem[]; liveHidden: number;
+  /** SCP-Sg: the newest sync of the client's accounts; null says "Not synced yet", and a caller that does not read it omits it (nothing is claimed). */
+  lastSyncedAt?: string | null;
+}) {
   const router = useRouter();
   const [list, setList] = useState<FeedItem[]>(() => [...items]);
   const [picked, setPicked] = useState<string | null>(null);
@@ -156,6 +167,7 @@ export function FeedPreview({ deptId, engagementId, items, liveHidden }: { deptI
 
   return (
     <section aria-label="Feed preview" className="scp-feedwrap">
+      {lastSyncedAt !== undefined && <p className="scp-note scp-feed__sync" data-synced={lastSyncedAt ? "true" : "false"}>{lastSyncedText(lastSyncedAt)}</p>}
       <p id={helpId} className="scp-note scp-feed__help">
         This is the client&apos;s grid, newest first. Drag a post onto another to swap their dates. With the keyboard, press Enter on a post, then Enter on the one to
         swap with; Escape lets go. A post that is approved or scheduled goes back to the client when its date moves. Live posts are locked.
@@ -185,8 +197,9 @@ export function FeedPreview({ deptId, engagementId, items, liveHidden }: { deptI
           const movable = isMovable(it);
           const label = [
             it.title, formatWords(it.format), statusLabel(it.pipelineStatus), formatDateTime(it.scheduledAt), it.simulated ? "Simulated" : null,
-            moveWords(it), picked === it.postId ? "Selected" : null,
+            reachText(it) || null, moveWords(it), picked === it.postId ? "Selected" : null,
           ].filter(Boolean).join(". ");
+          const live = liveLinkOf(it);
           return (
             <li
               key={it.postId} className="scp-feed__cell" style={phaseStyle(it.phase) as CSSProperties} data-phase={it.phase ?? ""} data-locked={it.locked ? "true" : undefined}
@@ -206,12 +219,19 @@ export function FeedPreview({ deptId, engagementId, items, liveHidden }: { deptI
                   <span className="scp-feed__dot" />
                   <span className="scp-feed__st">{statusLabel(it.pipelineStatus)}</span>
                   <span className="scp-feed__when">{formatDateTime(it.scheduledAt)}</span>
+                  {it.locked && <span className="scp-feed__reach">{reachText(it)}</span>}
                 </span>
                 {it.locked && <span className="scp-feed__lock" aria-hidden="true">Live · locked</span>}
                 {!it.locked && !movable && <span className="scp-feed__lock" aria-hidden="true">Date locked</span>}
                 {it.simulated && <span className="scp-feed__sim" aria-hidden="true">SIMULATED</span>}
               </button>
               <Link href={postHref(deptId, it.postId)} className="scp-feed__open" aria-label={`Open ${it.title}`} draggable={false}>Open</Link>
+              {live?.kind === "link" && (
+                <a href={live.href} className="scp-feed__live" target="_blank" rel="noopener noreferrer" draggable={false} aria-label={`View ${it.title} on the network (opens in a new tab)`}>
+                  View post
+                </a>
+              )}
+              {live?.kind === "simulated" && <span className="scp-feed__live scp-feed__live--sim" title="A simulated post: its address opens nothing real.">Simulated post</span>}
             </li>
           );
         })}

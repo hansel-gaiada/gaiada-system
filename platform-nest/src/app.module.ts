@@ -160,6 +160,8 @@ import { SocialCyclesController } from "./modules/social/pipeline/cycles.control
 import { SocialCalendarController } from "./modules/social/pipeline/calendar.controller";
 // SCP-3d: the client's feed preview, its grid and the swap of two posts' dates (BFF §63.10), on its own controller under the same prefix.
 import { SocialFeedPreviewController } from "./modules/social/pipeline/feed-preview.controller";
+// SCP-Sg: the client's accounts read back, followers, 30-day reach and "Last synced" (BFF §63.10), on its own controller under the same prefix.
+import { SocialAccountsSummaryController } from "./modules/social/pipeline/accounts-summary.controller";
 import { SocialAllocationController } from "./modules/social/pipeline/allocation.controller";
 import { SocialSimulatedAccountsController } from "./modules/social/simulated-accounts.controller";
 import { SocialFeedController } from "./modules/social/pipeline/feed.controller";
@@ -290,6 +292,8 @@ import { AiUsageIngestController } from "./modules/ai-usage/ingest.controller";
     SocialCalendarController,
     // SCP-3d: `GET/POST engagements/:engagementId/feed-preview[/swap]` (BFF §63.10).
     SocialFeedPreviewController,
+    // SCP-Sg: `GET engagements/:engagementId/accounts-summary` (BFF §63.10).
+    SocialAccountsSummaryController,
     SocialDesignQueueController,
     SocialMetricsController,
     // SMM-38 phase 38c: LinkedIn's OAuth grant flow — `LinkedInOAuthController` shares

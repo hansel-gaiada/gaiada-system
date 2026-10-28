@@ -11,6 +11,13 @@
 // `title`, `format`, `phase`, `simulated` and what a date move would do to this post (`dateMove` and, when it is locked,
 // `dateMoveRefusal`), so the page can say what will happen before a drop.
 //
+// SCP-Sg, THE LIVE FEED READ BACK (plan §5; every addition is additive, the answer above is unchanged). A live post also carries `liveUrl` (the address it
+// went live on: for a simulated post a `simulated.invalid` one, which opens nothing real, so the page says "Simulated post" instead of linking), `reach`
+// (its variants' NEWEST snapshots of `social_post_metrics`, summed as `GET posts/:postId/metrics` sums them: `combineSnapshots`; null when no variant
+// reported one, never 0) and `reachSource` (`pull`, `manual` or `simulated`, the snapshot's own mark). A post that is not live has all three null. The
+// answer's `lastSyncedAt` is the newest `updated_at` among the client's counted `social_metrics_daily` rows (`readClientLastSyncedAt`, the same value
+// `GET accounts-summary` answers), null when no account of the client has synced: the page says "Not synced yet".
+//
 // THE DATE-MOVE RULE (fixture `systemRules.date_moves`), read from the fixture's own `from` and `editRules`, never restated:
 //   - `reschedule` when the machine's `reschedule` accepts the status (approved, scheduled): the client is asked again;
 //   - `edit` when `edit` accepts it and its `editRules` allow `scheduledAt` (planned, drafting, and the team copy `changes`
@@ -53,6 +60,8 @@ import { editableFields, fromMatches, isIsoDateTime, isUuid, phaseOf, type Pipel
 import { isUuidText, loadEngagement, loadPostRow, stateOf, type PostRow } from "./pipeline-data";
 import { ScpRouteError, cancelQueuedDispatchesBeforeTx } from "./pipeline-effects";
 import { postPhase } from "./schedule-health";
+import { readClientLastSyncedAt } from "./accounts-summary";
+import { combineSnapshots, type MetricSource, type Snapshot } from "./post-metrics";
 import {
   afterCommit, applyStageInTx, authorizeStage, cerbosDecisionsFor, prepareStage, type Prepared, type StageRequest, type StageTxResult,
 } from "./pipeline.service";
@@ -101,35 +110,57 @@ export interface FeedPreviewItem {
   simulated: boolean;
   dateMove: DateMoveKind;
   dateMoveRefusal: "post_is_live" | "field_locked" | null;
+  /** SCP-Sg: the address a live post went live on; null for a post that is not live. */
+  liveUrl: string | null;
+  /** SCP-Sg: a live post's reach (its variants' newest snapshots, summed); null for a post that is not live or with no reported reach. */
+  reach: number | null;
+  /** SCP-Sg: the mark of the snapshots `reach` came from; null with no snapshot. */
+  reachSource: MetricSource | null;
 }
 
 export interface FeedPreview {
   items: FeedPreviewItem[];
   /** Live posts older than the newest `FEED_PREVIEW_LIVE_CAP`, left out of `items`. */
   liveHidden: number;
+  /** SCP-Sg: the newest sync of the client's accounts' metrics (an ISO instant), or null when none has synced. */
+  lastSyncedAt: string | null;
 }
 
 interface FeedRow {
   id: string; title: string; format: string | null; scheduled_at: Date | string; pipeline_status: string;
   change_by: string | null; change_kind: string | null; return_to: string | null; changed_only: boolean;
   blocked_from: string | null; block_waiting_on: string | null; simulated: boolean;
-  thumb_file_id: string | null; live_total: string;
+  thumb_file_id: string | null; live_total: string; live_url: string | null;
+}
+
+interface ReachRow { post_id: string; reach: number | null; source: MetricSource; fetched_at: Date | string }
+
+/** PURE. A live post's reach and its mark from its variants' newest snapshots (`combineSnapshots`' rule: the sum of what each reported). */
+export function liveReachOf(rows: readonly Pick<ReachRow, "reach" | "source" | "fetched_at">[]): { reach: number | null; source: MetricSource | null } {
+  const snaps = rows.map((r): Snapshot => ({
+    reach: r.reach, impressions: null, likes: null, comments: null, shares: null, saves: null, videoViews: null, clicks: null,
+    source: r.source, capturedAt: new Date(r.fetched_at),
+  }));
+  const latest = combineSnapshots(snaps);
+  return latest ? { reach: latest.reach, source: latest.source } : { reach: null, source: null };
 }
 
 /** `GET engagements/:engagementId/feed-preview`. 404 `engagement_not_found`; the caller's `social_post` · `read` is judged first. */
 export async function readFeedPreview(principal: Principal, tenantId: string, engagementId: string): Promise<FeedPreview> {
   await authorize(principal, { kind: "social_post", tenantId, module: "social" }, "read");
   if (!isUuidText(engagementId)) throw new ScpRouteError(404, "engagement_not_found");
-  const rows = await withTenants([tenantId], async (c) => {
+  const read = await withTenants([tenantId], async (c) => {
     await declareSocialModuleScope(c);
-    const eng = await c.query(`SELECT 1 FROM social_engagements WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`, [tenantId, engagementId]);
+    const eng = await c.query<{ client_id: string }>(
+      `SELECT client_id::text AS client_id FROM social_engagements WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`, [tenantId, engagementId],
+    );
     if (!eng.rowCount) return null;
     // The window ranks live and not-live posts apart (newest first in each), so the cap keeps every not-yet-live post and the
     // newest live ones. The thumbnail (the first stored design's file, as the feed card's) is read for the kept rows only.
     const { rows: found } = await c.query<FeedRow>(
       `WITH base AS (
          SELECT p.id, p.tenant_id, p.title, p.format, p.scheduled_at, p.pipeline_status, p.change_by, p.change_kind, p.return_to,
-                p.changed_only, p.blocked_from, p.block_waiting_on, p.simulated,
+                p.changed_only, p.blocked_from, p.block_waiting_on, p.simulated, p.live_url,
                 row_number() OVER (PARTITION BY (p.pipeline_status = 'live') ORDER BY p.scheduled_at DESC, p.id DESC) AS rn,
                 count(*) FILTER (WHERE p.pipeline_status = 'live') OVER () AS live_total
            FROM social_posts p
@@ -137,7 +168,7 @@ export async function readFeedPreview(principal: Principal, tenantId: string, en
             AND p.deleted_at IS NULL AND p.archived_at IS NULL AND p.format IS DISTINCT FROM 'story'
        )
        SELECT b.id::text AS id, b.title, b.format, b.scheduled_at, b.pipeline_status, b.change_by, b.change_kind, b.return_to,
-              b.changed_only, b.blocked_from, b.block_waiting_on, b.simulated, b.live_total::text AS live_total,
+              b.changed_only, b.blocked_from, b.block_waiting_on, b.simulated, b.live_url, b.live_total::text AS live_total,
               (SELECT d.file_id::text FROM social_post_designs d
                 WHERE d.tenant_id = b.tenant_id AND d.post_id = b.id AND d.removed_at IS NULL AND d.file_id IS NOT NULL
                 ORDER BY d.position, d.added_at LIMIT 1) AS thumb_file_id
@@ -146,15 +177,33 @@ export async function readFeedPreview(principal: Principal, tenantId: string, en
         ORDER BY b.scheduled_at DESC, b.id DESC`,
       [tenantId, engagementId, FEED_PREVIEW_LIVE_CAP],
     );
-    return found;
+    // SCP-Sg: each kept live post's variants' newest snapshots (one read for the page), and the client's last sync.
+    const liveIds = found.filter((r) => r.pipeline_status === "live").map((r) => r.id);
+    const { rows: snaps } = liveIds.length === 0 ? { rows: [] as ReachRow[] } : await c.query<ReachRow>(
+      `SELECT v.post_id::text AS post_id, m.reach, m.source, m.fetched_at
+         FROM social_post_variants v
+         JOIN LATERAL (
+           SELECT x.reach, x.source, x.fetched_at FROM social_post_metrics x
+            WHERE x.tenant_id = v.tenant_id AND x.variant_id = v.id
+            ORDER BY x.fetched_at DESC, x.created_at DESC, x.id DESC LIMIT 1
+         ) m ON true
+        WHERE v.tenant_id = $1 AND v.post_id = ANY($2::uuid[]) AND v.deleted_at IS NULL`,
+      [tenantId, liveIds],
+    );
+    return { rows: found, snaps, lastSyncedAt: await readClientLastSyncedAt(c, tenantId, eng.rows[0].client_id) };
   }, SOCIAL);
-  if (!rows) throw new ScpRouteError(404, "engagement_not_found");
+  if (!read) throw new ScpRouteError(404, "engagement_not_found");
+  const { rows } = read;
+  const snapsOf = new Map<string, ReachRow[]>();
+  for (const s of read.snaps) snapsOf.set(s.post_id, [...(snapsOf.get(s.post_id) ?? []), s]);
 
   const items = rows.map((r): FeedPreviewItem => {
     const move = dateMoveOf({
       pipelineStatus: r.pipeline_status, changeBy: r.change_by, changeKind: r.change_kind, returnTo: r.return_to,
       scheduleVia: null, blockWaitingOn: r.block_waiting_on, creativeState: null,
     });
+    const live = r.pipeline_status === "live";
+    const seen = live ? liveReachOf(snapsOf.get(r.id) ?? []) : { reach: null, source: null };
     return {
       postId: r.id,
       scheduledAt: new Date(r.scheduled_at).toISOString(),
@@ -170,11 +219,14 @@ export async function readFeedPreview(principal: Principal, tenantId: string, en
       simulated: r.simulated === true,
       dateMove: move.move,
       dateMoveRefusal: move.refusal,
+      liveUrl: live ? r.live_url : null,
+      reach: seen.reach,
+      reachSource: seen.source,
     };
   });
   const liveShown = items.filter((i) => i.locked).length;
   const liveTotal = rows.length ? Number(rows[0].live_total) : 0;
-  return { items, liveHidden: Math.max(0, liveTotal - liveShown) };
+  return { items, liveHidden: Math.max(0, liveTotal - liveShown), lastSyncedAt: read.lastSyncedAt };
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

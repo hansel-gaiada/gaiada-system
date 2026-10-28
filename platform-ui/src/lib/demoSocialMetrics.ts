@@ -76,6 +76,12 @@ function seed(): MetricsStore {
 }
 const store = (): MetricsStore => ((globalThis as Record<symbol, unknown>)[KEY] ??= seed()) as MetricsStore;
 
+/** SCP-Sg: a live post's reach for the Feed preview, as the server answers it: its variants' newest snapshots summed (`combineSnapshots`); null with none reported. */
+export function demoLiveReach(p: PipePost): { reach: number | null; source: MetricSource | null } {
+  const latest = combineSnapshots(newestPerVariant(p));
+  return latest ? { reach: latest.reach, source: latest.source } : { reach: null, source: null };
+}
+
 /** The newest snapshot of each variant of `p`, as `Snapshot`s. */
 function newestPerVariant(p: PipePost): Snapshot[] {
   const out: Snapshot[] = [];

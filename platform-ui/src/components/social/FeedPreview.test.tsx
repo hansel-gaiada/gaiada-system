@@ -15,7 +15,7 @@ import { FeedPreview } from "./FeedPreview";
 
 const item = (over: Partial<FeedItem>): FeedItem => ({
   postId: "p-1", scheduledAt: "2026-11-10T09:30:00.000Z", thumbFileId: null, pipelineStatus: "planned", locked: false, title: "Harvest teaser", format: "feed", phase: "brief",
-  simulated: false, dateMove: "edit", dateMoveRefusal: null, ...over,
+  simulated: false, dateMove: "edit", dateMoveRefusal: null, liveUrl: null, reach: null, reachSource: null, ...over,
 });
 // Newest first, as the server sends them.
 const ITEMS: FeedItem[] = [
@@ -30,7 +30,8 @@ const ITEMS: FeedItem[] = [
 const swap = vi.mocked(swapFeedPreview);
 beforeEach(() => { swap.mockReset(); refresh.mockReset(); });
 
-const mount = (items: readonly FeedItem[] = ITEMS, liveHidden = 0) => render(<FeedPreview deptId="d-soc" engagementId="e-1" items={items} liveHidden={liveHidden} />);
+const mount = (items: readonly FeedItem[] = ITEMS, liveHidden = 0, lastSyncedAt?: string | null) =>
+  render(<FeedPreview deptId="d-soc" engagementId="e-1" items={items} liveHidden={liveHidden} lastSyncedAt={lastSyncedAt} />);
 /** The grid cell and its tile button of a post, by title. */
 const tile = (title: string) => screen.getByRole("button", { name: new RegExp(`^${title}\\.`) });
 const cell = (title: string) => tile(title).closest("li") as HTMLLIElement;
@@ -272,5 +273,58 @@ describe("the keyboard path", () => {
     fireEvent.keyDown(tile("Planned post"), { key: "ArrowUp" }); // nothing above the first row
     expect(tile("Planned post")).toHaveFocus();
     expect(grid).toBeInTheDocument();
+  });
+});
+
+// SCP-Sg: the grid is the client's live feed as the network (or the simulator) reports it.
+describe("the live feed read back", () => {
+  const LIVE: FeedItem[] = [
+    item({ postId: "l-real", title: "Real live post", pipelineStatus: "live", phase: "posted", locked: true, dateMove: "locked", dateMoveRefusal: "post_is_live", liveUrl: "https://www.example.com/p/abc", reach: 3100, reachSource: "pull", scheduledAt: "2026-10-30T09:30:00.000Z" }),
+    item({ postId: "l-sim", title: "Simulated live post", pipelineStatus: "live", phase: "posted", locked: true, dateMove: "locked", dateMoveRefusal: "post_is_live", simulated: true, liveUrl: "https://simulated.invalid/p/xyz", reach: 1250, reachSource: "simulated", scheduledAt: "2026-10-29T09:30:00.000Z" }),
+    item({ postId: "l-none", title: "Live without numbers", pipelineStatus: "live", phase: "posted", locked: true, dateMove: "locked", dateMoveRefusal: "post_is_live", liveUrl: "https://www.example.com/p/none", reach: null, scheduledAt: "2026-10-28T09:30:00.000Z" }),
+    item({ postId: "p-plan", title: "Planned post", scheduledAt: "2026-11-12T09:30:00.000Z" }),
+  ];
+
+  it("says when the accounts last synced, or that they have not", () => {
+    const { unmount } = mount(LIVE, 0, "2026-10-28T02:00:00.000Z");
+    expect(screen.getByText("Last synced 28 Oct, 10:00")).toBeInTheDocument(); // the display zone (Singapore)
+    unmount();
+    mount(LIVE, 0, null);
+    expect(screen.getByText("Not synced yet")).toBeInTheDocument();
+    expect(screen.queryByText(/Last synced/)).toBeNull();
+  });
+
+  it("claims nothing about a sync when the caller does not read it", () => {
+    mount(LIVE);
+    expect(screen.queryByText(/Last synced/)).toBeNull();
+    expect(screen.queryByText("Not synced yet")).toBeNull();
+  });
+
+  it("says each live tile's reach, in its name too, and 'Reach not reported' (never 'Reach 0') when nobody reported one; a post that is not live says no reach", () => {
+    mount(LIVE);
+    expect(within(cell("Real live post")).getByText("Reach 3,100")).toBeInTheDocument();
+    expect(tile("Real live post").getAttribute("aria-label")).toContain("Reach 3,100");
+    expect(within(cell("Live without numbers")).getByText("Reach not reported")).toBeInTheDocument();
+    expect(tile("Live without numbers").getAttribute("aria-label")).toContain("Reach not reported");
+    expect(screen.queryByText("Reach 0")).toBeNull();
+    expect(within(cell("Planned post")).queryByText(/Reach/)).toBeNull();
+  });
+
+  it("links a real live post to the network in a new tab, with a name that says so", () => {
+    mount(LIVE);
+    const link = screen.getByRole("link", { name: "View Real live post on the network (opens in a new tab)" });
+    expect(link).toHaveAttribute("href", "https://www.example.com/p/abc");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+  });
+
+  it("labels a simulated post 'Simulated post' and links nothing out (its address opens nothing real)", () => {
+    mount(LIVE);
+    expect(within(cell("Simulated live post")).getByText("Simulated post")).toBeInTheDocument();
+    expect(within(cell("Simulated live post")).queryByRole("link", { name: /on the network/ })).toBeNull();
+    expect(document.querySelector('a[href*="simulated.invalid"]')).toBeNull();
+    // A post that is not live offers no link to the network at all.
+    expect(within(cell("Planned post")).queryByRole("link", { name: /on the network/ })).toBeNull();
+    expect(within(cell("Planned post")).queryByText("Simulated post")).toBeNull();
   });
 });

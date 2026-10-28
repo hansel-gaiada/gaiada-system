@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  asFeedPreview, asSwapAnswer, byNewest, dateMoveForPost, isMovable, moveWords, swapAsksClient, swapDoneText, swapInput, swapRefusalText, type FeedItem,
+  asFeedPreview, asSwapAnswer, byNewest, dateMoveForPost, isMovable, liveLinkOf, moveWords, reachText, swapAsksClient, swapDoneText, swapInput, swapRefusalText, type FeedItem,
 } from "./socialFeedPreview";
 import { SCP_STATUSES } from "./scpStageMachine";
 
@@ -40,8 +40,9 @@ describe("asFeedPreview", () => {
     expect(v.liveHidden).toBe(3);
     expect(v.items[0]).toEqual({
       postId: "p-1", scheduledAt: "2026-10-20T09:30:00.000Z", thumbFileId: "f-1", pipelineStatus: "approved", locked: false, title: "Harvest teaser", format: "feed",
-      phase: "client_approved", simulated: false, dateMove: "reschedule", dateMoveRefusal: null,
+      phase: "client_approved", simulated: false, dateMove: "reschedule", dateMoveRefusal: null, liveUrl: null, reach: null, reachSource: null,
     });
+    expect(v.lastSyncedAt).toBeNull(); // a server that predates SCP-Sg omits it: "Not synced yet" is the honest reading, never a made-up time
   });
   it("a live post is locked whatever else the answer says, and never offered a move", () => {
     const i = asFeedPreview({ items: [raw({ pipelineStatus: "live", locked: false, dateMove: "edit", dateMoveRefusal: null })] }).items[0];
@@ -123,5 +124,48 @@ describe("the swap's answer and its words", () => {
       .toBe("The two dates are swapped.");
     expect(swapDoneText([{ postId: "p-1", scheduledAt: null, pipelineStatus: "client", askedClient: true }, { postId: "p-2", scheduledAt: null, pipelineStatus: "client", askedClient: true }], title))
       .toBe("The two dates are swapped. The client will be asked to approve Harvest teaser and Studio day again.");
+  });
+});
+
+// SCP-Sg: the live feed read back.
+describe("asFeedPreview: the read-back fields", () => {
+  const live = raw({ pipelineStatus: "live", locked: true, dateMove: "locked", dateMoveRefusal: "post_is_live", liveUrl: "https://www.example.com/p/1", reach: 3100, reachSource: "pull" });
+  it("reads liveUrl, reach, its source and the answer's lastSyncedAt", () => {
+    const v = asFeedPreview({ items: [live], lastSyncedAt: "2026-10-28T02:00:00.000Z" });
+    expect(v.items[0]).toMatchObject({ liveUrl: "https://www.example.com/p/1", reach: 3100, reachSource: "pull" });
+    expect(v.lastSyncedAt).toBe("2026-10-28T02:00:00.000Z");
+  });
+  it("reads an absent, null or wrongly typed reach as null (never 0), and an unknown source as none", () => {
+    for (const reach of [undefined, null, "3100", Number.NaN]) expect(asFeedPreview({ items: [{ ...live, reach }] }).items[0].reach, String(reach)).toBeNull();
+    expect(asFeedPreview({ items: [{ ...live, reach: 0 }] }).items[0].reach).toBe(0); // a reported zero is a number
+    expect(asFeedPreview({ items: [{ ...live, reachSource: "guess" }] }).items[0].reachSource).toBeNull();
+    expect(asFeedPreview({ items: [{ ...live, liveUrl: "" }] }).items[0].liveUrl).toBeNull();
+  });
+});
+
+describe("liveLinkOf", () => {
+  const base = { locked: true, simulated: false, liveUrl: "https://www.example.com/p/1" };
+  it("links a real live post", () => {
+    expect(liveLinkOf(base)).toEqual({ kind: "link", href: "https://www.example.com/p/1" });
+  });
+  it("never links a simulated post, nor an address on the .invalid host the simulator uses: it says 'simulated' instead", () => {
+    expect(liveLinkOf({ ...base, simulated: true })).toEqual({ kind: "simulated" });
+    expect(liveLinkOf({ ...base, liveUrl: "https://simulated.invalid/p/1" })).toEqual({ kind: "simulated" });
+    expect(liveLinkOf({ ...base, liveUrl: "https://Simulated.Invalid./p/1" })).toEqual({ kind: "simulated" }); // a trailing dot is the same host
+  });
+  it("offers nothing for a post that is not live, has no address, or has one that is not http(s)", () => {
+    expect(liveLinkOf({ ...base, locked: false })).toBeNull();
+    expect(liveLinkOf({ ...base, liveUrl: null })).toBeNull();
+    expect(liveLinkOf({ ...base, liveUrl: "javascript:alert(1)" })).toBeNull();
+    expect(liveLinkOf({ ...base, liveUrl: "not a url" })).toBeNull();
+  });
+});
+
+describe("reachText", () => {
+  it("says the reach with separators, 'Reach not reported' for none (never 'Reach 0'), and nothing for a post that is not live", () => {
+    expect(reachText({ locked: true, reach: 3100 })).toBe("Reach 3,100");
+    expect(reachText({ locked: true, reach: 0 })).toBe("Reach 0"); // a measured zero
+    expect(reachText({ locked: true, reach: null })).toBe("Reach not reported");
+    expect(reachText({ locked: false, reach: 3100 })).toBe("");
   });
 });

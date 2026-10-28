@@ -89,3 +89,33 @@ describe("Seed simulated accounts", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 });
+
+// SCP-Sg: each account says its followers and its last sync, from the accounts read back.
+describe("followers and last sync (SCP-Sg)", () => {
+  const stat = (accountId: string, o: Record<string, unknown> = {}) => ({
+    accountId, network: "instagram", handle: "@mock-brand-alpha", simulated: true, followers: 12400, followersDelta30d: 250, reach30d: 100, impressions30d: 200,
+    lastSyncedAt: "2026-10-28T02:00:00.000Z", source: "simulated" as const, ...o,
+  });
+  const summary = (accounts: ReturnType<typeof stat>[]) => ({
+    kind: "ok" as const, data: { accounts, totals: { followers: null, reach30d: null }, simulated: true, lastSyncedAt: null },
+  }) as never;
+
+  it("shows an account's followers and when it last synced, and 'Not synced yet' for one with no numbers or no row", () => {
+    render(<ClientAccounts engagementId="e1" read={{ kind: "ok", accounts: all }} canPlan={false} summary={summary([
+      stat("a-instagram"), stat("a-facebook", { followers: null, lastSyncedAt: null, source: null }),
+    ])} />);
+    expect(screen.getByText("12,400 followers · Last synced 28 Oct, 10:00")).toBeInTheDocument();
+    expect(screen.getAllByText("Not synced yet")).toHaveLength(2); // the facebook row with nothing, and tiktok with no row at all
+    expect(screen.queryByText(/\b0 followers/)).toBeNull();
+  });
+
+  it("draws no numbers when the summary was not read, and says why once (never as 'Not synced yet' or 0)", () => {
+    const { rerender } = render(<ClientAccounts engagementId="e1" read={{ kind: "ok", accounts: all }} canPlan={false} summary={{ kind: "unavailable" }} />);
+    expect(screen.getByText("Followers and reach could not be read just now.")).toBeInTheDocument();
+    expect(screen.queryByText("Not synced yet")).toBeNull();
+    rerender(<ClientAccounts engagementId="e1" read={{ kind: "ok", accounts: all }} canPlan={false} summary={{ kind: "forbidden" }} />);
+    expect(screen.getByText("Followers and reach need a Social Media read tier.")).toBeInTheDocument();
+    rerender(<ClientAccounts engagementId="e1" read={{ kind: "ok", accounts: all }} canPlan={false} />);
+    expect(screen.queryByText(/Followers and reach/)).toBeNull(); // a caller that does not read it claims nothing
+  });
+});
