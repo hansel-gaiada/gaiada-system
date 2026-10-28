@@ -5,13 +5,14 @@ import { asOverview, readingOfOverview, type SocialOverview } from "./socialOver
 // failed read apart from a count, and carry the SIMULATED mark only while the server says the tiles count simulated rows.
 
 const body = (over: Record<string, unknown> = {}) => ({
-  tiles: { inProduction: 4, withClient: 2, late: 1, scheduledThisWeek: 3, failedPosts: 0, boostsWaiting: null }, simulatedIncluded: false, ...over,
+  tiles: { inProduction: 4, withClient: 2, late: 1, scheduledThisWeek: 3, failedPosts: 0, boostsWaiting: 1 }, simulatedIncluded: false, ...over,
 });
 
 describe("asOverview", () => {
-  it("reads the six tiles and the simulated flag; a null boosts tile stays null, never 0", () => {
+  it("reads the six tiles and the simulated flag; a boosts tile that is not a count is refused", () => {
     expect(asOverview(body())).toEqual(body());
     expect(asOverview(body({ tiles: { ...body().tiles, boostsWaiting: 2 } })).tiles.boostsWaiting).toBe(2);
+    expect(() => asOverview(body({ tiles: { ...body().tiles, boostsWaiting: null as unknown as number } }))).toThrow();
   });
 
   it("a real zero is a zero (the server counted nothing)", () => {

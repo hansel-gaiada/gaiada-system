@@ -32,6 +32,10 @@ vi.mock("@/lib/socialPipelineActions", () => ({
   addPostDesign: vi.fn(), removePostDesign: vi.fn(), enterPostMetrics: vi.fn(), loadPostMetrics: vi.fn(),
 }));
 vi.mock("@/lib/portalSocialActions", () => ({ portalSocialDecide: vi.fn(), portalSocialUndo: vi.fn(), portalSocialReloadPost: vi.fn(), portalSocialApproveAll: vi.fn() }));
+vi.mock("@/lib/socialBoostsActions", () => ({
+  runBoostAction: vi.fn(), proposeBudget: vi.fn(), recordBudget: vi.fn(), withdrawProposal: vi.fn(), loadBoostEstimate: vi.fn(), loadBudgetForPost: vi.fn(), requestBoost: vi.fn(),
+}));
+vi.mock("@/lib/portalSpendActions", () => ({ decideBoost: vi.fn(), decideBoostBudget: vi.fn() }));
 
 import { SIMULATED_MARK_NAME } from "./SimulatedMark";
 import { ClientAccounts } from "./ClientAccounts";
@@ -50,6 +54,10 @@ import { AnalyticsPanel } from "./AnalyticsPanel";
 import { SocialAccountsBlock } from "@/components/departments/SocialAccountsBlock";
 import { PortalSocialPostCard } from "@/components/portal/social/PortalSocialPostCard";
 import { PortalSocialToasts } from "@/components/portal/social/PortalSocialToasts";
+import { PortalBoostBudgets } from "@/components/portal/social/PortalBoostBudgets";
+import { BoostBoard } from "./BoostBoard";
+import { BoostCard } from "./BoostCard";
+import { asBoostRow, type BoostRow, type PortalSpend } from "@/lib/socialBoosts";
 import { post as portalPost, TENANT } from "@/components/portal/social/portalSocialFixtures";
 import { PIPE_POSTS, demoPipelineRead } from "@/lib/demoSocialPipeline";
 import { asPipelinePost } from "@/lib/socialPipeline";
@@ -124,6 +132,17 @@ const pipelineRead = (simulated: boolean, variantOnly = false) => {
   });
 };
 
+// SCP-4b: a boost is wholly simulated or wholly real, as its post (SCP-D9).
+const boostRow = (simulated: boolean): BoostRow => asBoostRow({
+  id: "b-1", postId: "p-1", postTitle: "A post", clientName: "Northwind Traders", cycleId: "c-1", status: "running", goal: "website", audience: "automatic", audienceNote: null,
+  dailyBudgetMinor: 100_000, days: 3, totalBudgetMinor: 300_000, currency: "IDR", minorUnit: 0, startsOn: "2026-10-16", approvedVia: "budget", approvedAt: "2026-10-15T01:00:00Z",
+  startedAt: "2026-10-16T01:00:00Z", endedAt: null, spendMinor: null, paidReach: null, clicks: null, reachEstimate: null, simulated,
+});
+const portalSpend = (simulated: boolean): PortalSpend => ({
+  budgets: [], history: [], canDecide: false,
+  boosts: [{ boostId: "b-2", clientName: "Northwind Traders", postTitle: "A post", thumbFileId: null, totalBudgetMinor: 600_000, days: 6, startsOn: "2026-10-20", currency: "IDR", minorUnit: 0, remainingMinor: 0, simulated }],
+});
+
 type Case = (simulated: boolean) => RenderResult;
 /** Every component that reads a simulated flag, by file, and how to draw it. */
 const COVERED: Record<string, Case> = {
@@ -149,6 +168,11 @@ const COVERED: Record<string, Case> = {
   ),
   "components/social/ClientPostList.tsx": (s) => render(<ClientPostList deptId="d-soc" posts={[clientPost(s)]} />),
   "components/social/AnalyticsPanel.tsx": (s) => render(<AnalyticsPanel dailySeries={[daily(s)]} postMetrics={[postRow(s)]} />),
+  "components/social/BoostCard.tsx": (s) => render(<BoostCard boost={boostRow(s)} canRun={false} canRecord={false} />),
+  "components/social/BoostBoard.tsx": (s) => render(
+    <BoostBoard deptId="d-soc" data={{ items: [boostRow(s)], candidates: [], totals: { committedMinor: 300_000, spendMinor: 0, currency: "IDR" }, nextCursor: null }} />,
+  ),
+  "components/portal/social/PortalBoostBudgets.tsx": (s) => render(<PortalBoostBudgets spend={portalSpend(s)} tenant={TENANT} />),
   "components/portal/social/PortalSocialPostCard.tsx": (s) => render(
     <PortalSocialToasts>
       <PortalSocialPostCard post={portalPost({ state: "live", liveUrl: "https://simulated.invalid/instagram/1", simulated: s, decision: null })} tenant={TENANT} onReloaded={vi.fn()} onDecided={vi.fn()} />

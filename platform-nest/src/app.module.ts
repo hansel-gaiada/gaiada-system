@@ -49,6 +49,7 @@ import { WebdevChangeRequestsPortalController } from "./core/webdev-change-reque
 // precedent: a distinct subject (social's client-review stage), same `api` prefix, no route collision.
 import { SocialClientReviewPortalController } from "./core/social-client-review-portal.controller";
 import { SocialPipelinePortalController } from "./core/social-pipeline-portal.controller";
+import { SocialSpendPortalController } from "./core/social-spend-portal.controller";
 // PV4-03: client Conversation — the portal surface (portal read/converse) and the staff surface (`conversation` kind).
 import { PortalConversationController } from "./core/portal-conversation.controller";
 import { ConversationController } from "./core/conversation.controller";
@@ -169,6 +170,7 @@ import { SocialFeedController } from "./modules/social/pipeline/feed.controller"
 import { SocialDesignQueueController } from "./modules/social/pipeline/design-queue.controller";
 // SCP-3c: a post's metrics (BFF §63.10 `POST variants/:variantId/metrics`, `GET posts/:postId/metrics`), on its own controller, same prefix.
 import { SocialMetricsController } from "./modules/social/pipeline/metrics.controller";
+import { SocialBoostsController } from "./modules/social/pipeline/boosts.controller";
 // SMM-38 phase 38c — LinkedIn's OAuth grant flow. `LinkedInOAuthController` shares SocialController's
 // route prefix (same reasoning as SocialReportsController above); `LinkedInOAuthCallbackController`
 // is tenant-agnostic at a FIXED path, mirroring SearchGoogleOauthCallbackController below for the
@@ -267,7 +269,7 @@ import { AiUsageIngestController } from "./modules/ai-usage/ingest.controller";
 @Module({
   controllers: [
     HealthController, IdentityController, StepUpController, CoreController, CustomFieldsController,
-    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, BillingProfileController, BillingProfileAgentController, BillingNumberingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalHealthController, PortalReportsController, PortalCommerceController, PortalDocumentsController, ClientDocumentsController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, SocialPipelinePortalController, PortalConversationController, ConversationController, WorkRequestsController, WorkRequestsOutboundController, CalendarEventsController, DeptNoticesController, DeptCalendarController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, PaymentWebhookController, PaymentEventsController, SignatureWebhookController, CertifiedSigningController, SimulatedPsreController, MidtransSimulatorController, SimulatedPaymentPortalController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, ActivitySeriesController, IntegrationsController, ClaudeSeatsController, AdminIdentityController, FigmaController, GoogleDriveController, GoogleDriveOauthCallbackController, GmailController, GmailOauthCallbackController,
+    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, BillingProfileController, BillingProfileAgentController, BillingNumberingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalHealthController, PortalReportsController, PortalCommerceController, PortalDocumentsController, ClientDocumentsController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, SocialPipelinePortalController, SocialSpendPortalController, PortalConversationController, ConversationController, WorkRequestsController, WorkRequestsOutboundController, CalendarEventsController, DeptNoticesController, DeptCalendarController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, PaymentWebhookController, PaymentEventsController, SignatureWebhookController, CertifiedSigningController, SimulatedPsreController, MidtransSimulatorController, SimulatedPaymentPortalController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, ActivitySeriesController, IntegrationsController, ClaudeSeatsController, AdminIdentityController, FigmaController, GoogleDriveController, GoogleDriveOauthCallbackController, GmailController, GmailOauthCallbackController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ItSecurityController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, AutomationFailuresController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController, KnowledgeSearchController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, FinanceController, FinanceAccountsController, FreelancerBillsController, ClientsController, ClientReportsController, ClientsCentreController, CentreDiscoveryController, HrController, LoansController,
@@ -296,6 +298,7 @@ import { AiUsageIngestController } from "./modules/ai-usage/ingest.controller";
     SocialAccountsSummaryController,
     SocialDesignQueueController,
     SocialMetricsController,
+    SocialBoostsController,
     // SMM-38 phase 38c: LinkedIn's OAuth grant flow — `LinkedInOAuthController` shares
     // SocialController's route prefix (same reasoning as SocialReportsController above);
     // `LinkedInOAuthCallbackController` is tenant-agnostic at a fixed path, same reason as

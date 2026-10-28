@@ -11,7 +11,8 @@ import { can } from "@/lib/rbac";
 import { DISPLAY_TZ, todayIsoInDisplayZone } from "@/lib/format";
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { getClientBrandBook, getClientCalendar, getCycleView, getEngagementProjectId, getFeedPreview } from "@/lib/socialClient-data";
-import { gridRange, parseClientTab, parseMonth, type ClientPost } from "@/lib/socialClient";
+import { gridRange, monthTitle, parseClientTab, parseMonth, type ClientPost } from "@/lib/socialClient";
+import { getBoostBudget } from "@/lib/socialBoosts-data";
 import { getClientAccounts } from "@/lib/socialSimulatedAccounts-data";
 import { getAccountsSummary } from "@/lib/socialAccountsSummary-data";
 import type { AccountsSummaryRead } from "@/lib/socialAccountsSummary";
@@ -22,6 +23,7 @@ import { ClientHeader } from "@/components/social/ClientHeader";
 import { ClientAccounts, type ClientAccountsRead } from "@/components/social/ClientAccounts";
 import { ClientTabs } from "@/components/social/ClientTabs";
 import { ClientPlan } from "@/components/social/ClientPlan";
+import { BoostBudgetCard } from "@/components/social/BoostBudgetCard";
 import { ClientStories } from "@/components/social/ClientStories";
 import { ClientCalendar } from "@/components/social/ClientCalendar";
 import { FeedPreview } from "@/components/social/FeedPreview";
@@ -94,6 +96,8 @@ export default async function SocialClientPage({ params, searchParams }: { param
   ]);
   const calendar = tab === "calendar" ? await getClientCalendar(userId, tenant, { ...gridRange(month), engagementId }) : null;
   const feed = tab === "preview" ? await getFeedPreview(userId, tenant, engagementId) : null;
+  // SCP-4c (BFF §63.11): the Plan tab carries the current cycle's Boost budget card.
+  const boostBudget = tab === "plan" && cycleId ? await getBoostBudget(userId, tenant, cycleId) : null;
 
   const cycleView = cycle?.kind === "ok" ? cycle.data : null;
   const posts: ClientPost[] = cycleView?.posts ?? [];
@@ -143,7 +147,16 @@ export default async function SocialClientPage({ params, searchParams }: { param
       ) : cycle?.kind === "unavailable" ? (
         <ReadRefusal subject="This cycle's posts" kind="unavailable" reason={cycle.reason} inline />
       ) : tab === "plan" ? (
-        <ClientPlan deptId={deptId} engagementId={engagementId} posts={posts} target={row.postsPerCycle} canAdd />
+        <>
+          <ClientPlan deptId={deptId} engagementId={engagementId} posts={posts} target={row.postsPerCycle} canAdd />
+          {boostBudget?.kind === "ok" ? (
+            <BoostBudgetCard cycleId={cycleId} monthTitle={monthTitle(row.thisCycle?.month ?? month)} budget={boostBudget.data} />
+          ) : boostBudget?.kind === "forbidden" ? (
+            <ReadRefusal subject="this cycle's boost budget" kind="forbidden" inline />
+          ) : boostBudget?.kind === "unavailable" ? (
+            <ReadRefusal subject="This cycle's boost budget" kind="unavailable" reason={boostBudget.reason} inline />
+          ) : null}
+        </>
       ) : tab === "stories" ? (
         <ClientStories deptId={deptId} posts={posts} />
       ) : (

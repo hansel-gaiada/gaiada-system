@@ -9,8 +9,8 @@ export interface SocialOverviewTiles {
   late: number;
   scheduledThisWeek: number;
   failedPosts: number;
-  /** `null` until the boosts table exists (SCP-4a): the tile stays a placeholder, never 0. */
-  boostsWaiting: number | null;
+  /** Boosts requested, plus approved and not yet started (§63.7). */
+  boostsWaiting: number;
 }
 export interface SocialOverview {
   tiles: SocialOverviewTiles;
@@ -18,8 +18,8 @@ export interface SocialOverview {
   simulatedIncluded: boolean;
 }
 
-/** The five tiles the Pulse draws from this read (`boostsWaiting` is a placeholder until SCP-4a). */
-export type OverviewTileKey = "inProduction" | "withClient" | "late" | "scheduledThisWeek" | "failedPosts";
+/** The tiles the Pulse draws from this read. */
+export type OverviewTileKey = "inProduction" | "withClient" | "late" | "scheduledThisWeek" | "failedPosts" | "boostsWaiting";
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const count = (v: unknown, name: string): number => {
@@ -35,7 +35,7 @@ export function asOverview(raw: unknown): SocialOverview {
     tiles: {
       inProduction: count(t.inProduction, "inProduction"), withClient: count(t.withClient, "withClient"), late: count(t.late, "late"),
       scheduledThisWeek: count(t.scheduledThisWeek, "scheduledThisWeek"), failedPosts: count(t.failedPosts, "failedPosts"),
-      boostsWaiting: t.boostsWaiting === null || t.boostsWaiting === undefined ? null : count(t.boostsWaiting, "boostsWaiting"),
+      boostsWaiting: count(t.boostsWaiting, "boostsWaiting"),
     },
     simulatedIncluded: raw.simulatedIncluded,
   };

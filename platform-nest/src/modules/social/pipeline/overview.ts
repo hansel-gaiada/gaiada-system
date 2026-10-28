@@ -17,8 +17,8 @@ export interface OverviewTiles {
   late: number;
   scheduledThisWeek: number;
   failedPosts: number;
-  /** `null` until the boosts table exists (SCP-4a): the UI draws a placeholder, never 0. */
-  boostsWaiting: number | null;
+  /** Boosts requested, plus approved and not yet started (§63.7). */
+  boostsWaiting: number;
 }
 
 export interface OverviewAnswer {
@@ -49,7 +49,7 @@ export function composeOverview(
     if (healthOfCandidate(c, ctx.today, ctx.calendar, ctx.samples, slowerCache)?.state === "late") late += 1;
   }
   return {
-    tiles: { inProduction, withClient, late, scheduledThisWeek: facts.scheduledThisWeek, failedPosts: facts.failedPosts, boostsWaiting: null },
+    tiles: { inProduction, withClient, late, scheduledThisWeek: facts.scheduledThisWeek, failedPosts: facts.failedPosts, boostsWaiting: facts.boostsWaiting },
     simulatedIncluded: ctx.includeSimulated,
   };
 }

@@ -3,7 +3,7 @@
 //
 // THE CLAIMS UNDER TEST
 //   1. `inProduction` and `withClient` are the posts in that phase (the fixture's phase map); `late` is the number of posts whose health the FEED
-//      says is `late` (the same rule, read back through `GET feed?view=all`); `boostsWaiting` is null (the boosts table is SCP-4a's).
+//      says is `late` (the same rule, read back through `GET feed?view=all`); `boostsWaiting` counts requested and approved-not-started boosts (SCP-4d).
 //   2. `scheduledThisWeek` is the `scheduled` pipeline posts whose time falls Monday to Sunday in the company's zone: the first instant of Monday
 //      is in, the last minute of Sunday is in, the next Monday's first instant and the minute before this Monday are out; an approved post
 //      with a time this week is not scheduled.
@@ -41,7 +41,7 @@ const week = weekOf(today);
 const monthStart = (iso: string): string => `${iso.slice(0, 7)}-01`;
 
 interface Tiles {
-  inProduction: number; withClient: number; late: number; scheduledThisWeek: number; failedPosts: number; boostsWaiting: number | null;
+  inProduction: number; withClient: number; late: number; scheduledThisWeek: number; failedPosts: number; boostsWaiting: number;
 }
 interface Answer { tiles: Tiles; simulatedIncluded: boolean }
 interface Card { id: string; phase: string | null; health: { state: string } | null; simulated: boolean }
@@ -160,6 +160,26 @@ describe.skipIf(!TEST_URL)("SCP-3f · GET overview (BFF §63.7)", () => {
     return id;
   }
 
+  interface BoostOpts { simulated?: boolean }
+  /** One boost row of a post, written straight to the table (the recorded-approval shape, which needs no budget). */
+  async function seedBoost(tenant: string, e: Eng, postId: string, status: string, o: BoostOpts = {}): Promise<void> {
+    const approved = ["approved", "running", "stopped", "completed"].includes(status);
+    const started = ["running", "stopped", "completed"].includes(status);
+    const ended = ["stopped", "completed"].includes(status);
+    await withTenants([tenant], (c) => c.query(
+      `INSERT INTO social_boosts (tenant_id, post_id, client_id, status, goal, audience, daily_budget_minor, days, currency, starts_on, requested_by, simulated,
+                                  approved_via, approved_by, approved_at, approval_channel, approval_note, started_at, ended_at, spend_minor, paid_reach,
+                                  cancelled_at, cancelled_by)
+       VALUES ($1, $2, $3, $4, 'profile_visits', 'automatic', 50000, 5, 'IDR', $5::date, $6, $7,
+               CASE WHEN $8::boolean THEN 'recorded' END, CASE WHEN $8::boolean THEN $6::uuid END, CASE WHEN $8::boolean THEN now() END,
+               CASE WHEN $8::boolean THEN 'email' END, CASE WHEN $8::boolean THEN 'Mock recorded approval' END,
+               CASE WHEN $9::boolean THEN now() END, CASE WHEN $10::boolean THEN now() END, CASE WHEN $10::boolean THEN 1000 END,
+               CASE WHEN $4::text = 'completed' THEN 10 END,
+               CASE WHEN $4::text = 'cancelled' THEN now() END, CASE WHEN $4::text = 'cancelled' THEN $6::uuid END)`,
+      [tenant, postId, e.clientId, status, shift(today, 3), officer, o.simulated ?? false, approved, started, ended],
+    ));
+  }
+
   beforeAll(async () => {
     await initTestDb();
     config.serviceToken = "svc-token";
@@ -226,6 +246,18 @@ describe.skipIf(!TEST_URL)("SCP-3f · GET overview (BFF §63.7)", () => {
       at: { day: shift(week.to, 7), minutes: 600 }, engine: "failed", scheduleVia: "publisher", variant: { status: "failed", simulated: true },
     });
 
+    // ── boosts (SCP-4d): one open boost per post, so each row has its own live post ──
+    const boostPost = (tenant: string, e: Eng, n: string, o: SeedOpts = {}) => seed(tenant, e, `Mock boost post ${n}`, "live", o);
+    await seedBoost(A, late, await boostPost(A, late, "requested"), "requested");                    // waiting
+    await seedBoost(A, late, await boostPost(A, late, "approved"), "approved");                      // waiting: approved, not started
+    await seedBoost(A, late, await boostPost(A, late, "running"), "running");                        // not waiting
+    await seedBoost(A, late, await boostPost(A, late, "completed"), "completed");                    // not waiting
+    await seedBoost(A, late, await boostPost(A, late, "cancelled"), "cancelled");                    // not waiting
+    await seedBoost(A, late, await boostPost(A, late, "deleted", { deleted: true }), "requested");   // its post is deleted: not counted
+    await seedBoost(A, late, await boostPost(A, late, "archived", { archived: true }), "requested"); // its post is archived: not counted
+    await seedBoost(A, calm, await boostPost(A, calm, "simulated", { simulated: true }), "requested", { simulated: true }); // counted only with the switch on
+    await seedBoost(B, other, await boostPost(B, other, "other"), "requested");                      // another company's: never counted in A
+
     app = await buildApp();
   });
   afterAll(async () => {
@@ -235,14 +267,14 @@ describe.skipIf(!TEST_URL)("SCP-3f · GET overview (BFF §63.7)", () => {
   });
 
   // Seeded, real rows only (simulated left out): in production 4 + 1, with client 1 + 1, failed 1 + 1 + 1, scheduled 3 (Monday 00:00, Sunday 23:30, the publisher post).
-  const REAL: Tiles = { inProduction: 5, withClient: 2, late: 0 /* checked against the feed */, scheduledThisWeek: 3, failedPosts: 3, boostsWaiting: null };
+  const REAL: Tiles = { inProduction: 5, withClient: 2, late: 0 /* checked against the feed */, scheduledThisWeek: 3, failedPosts: 3, boostsWaiting: 2 };
 
-  it("OFF: the phase, week and failed tiles on real rows, the boosts tile null, simulated rows left out", async () => {
+  it("OFF: the phase, week and failed tiles on real rows, boosts requested or approved-not-started only, simulated rows left out", async () => {
     config.socialSimulationEnabled = false;
     const r = await overview();
     expect(r.simulatedIncluded).toBe(false);
     expect(r.tiles).toEqual({ ...REAL, late: r.tiles.late });
-    expect(r.tiles.boostsWaiting).toBeNull();
+    expect(r.tiles.boostsWaiting).toBe(2); // requested + approved-not-started; running, completed, cancelled, deleted/archived posts and the other company's do not count
   });
 
   it("`late` is the number of posts the feed's own health calls late, and the calm client has none", async () => {
@@ -279,6 +311,7 @@ describe.skipIf(!TEST_URL)("SCP-3f · GET overview (BFF §63.7)", () => {
     expect(r.tiles.withClient).toBe(REAL.withClient + 1);   // the post marked simulated
     expect(r.tiles.failedPosts).toBe(REAL.failedPosts + 1); // the failed post simulated through its variant
     expect(r.tiles.inProduction).toBe(REAL.inProduction);
+    expect(r.tiles.boostsWaiting).toBe(REAL.boostsWaiting + 1); // the simulated boost
     expect(r.tiles.scheduledThisWeek).toBe(REAL.scheduledThisWeek); // its time is two weeks on
     expect(r.tiles.late).toBe(6);
     // back OFF: the same rows leave again
@@ -287,6 +320,7 @@ describe.skipIf(!TEST_URL)("SCP-3f · GET overview (BFF §63.7)", () => {
     expect(off.simulatedIncluded).toBe(false);
     expect(off.tiles.withClient).toBe(REAL.withClient);
     expect(off.tiles.failedPosts).toBe(REAL.failedPosts);
+    expect(off.tiles.boostsWaiting).toBe(REAL.boostsWaiting);
   });
 
   it("the answer is exactly {tiles, simulatedIncluded}, with exactly the six tiles", async () => {
@@ -300,7 +334,7 @@ describe.skipIf(!TEST_URL)("SCP-3f · GET overview (BFF §63.7)", () => {
     const mine = await overview("staff", A);
     const theirs = await overview("otherStaff", B);
     // B: 1 with client, 1 in production, 2 failed (Composer + publisher), 1 scheduled this week, late: both open posts are late
-    expect(theirs.tiles).toEqual({ inProduction: 1, withClient: 1, late: 2, scheduledThisWeek: 1, failedPosts: 2, boostsWaiting: null });
+    expect(theirs.tiles).toEqual({ inProduction: 1, withClient: 1, late: 2, scheduledThisWeek: 1, failedPosts: 2, boostsWaiting: 1 });
     expect(mine.tiles.withClient).toBe(REAL.withClient);
   });
 

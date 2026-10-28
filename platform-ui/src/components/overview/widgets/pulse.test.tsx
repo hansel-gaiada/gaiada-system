@@ -77,7 +77,7 @@ const sum = (over: Partial<MonitoringSummary> = {}): MonitoringSummary => ({
   total: 10, up: 8, down: 1, degraded: 1, maintenance: 0, unknown: 0, openIncidents: 2, lastSweepAt: "2026-10-13T08:00:00Z", ...over,
 });
 const overviewOf = (over: Partial<SocialOverview["tiles"]> = {}, simulatedIncluded = false): SocialOverview => ({
-  tiles: { inProduction: 7, withClient: 3, late: 2, scheduledThisWeek: 5, failedPosts: 1, boostsWaiting: null, ...over }, simulatedIncluded,
+  tiles: { inProduction: 7, withClient: 3, late: 2, scheduledThisWeek: 5, failedPosts: 1, boostsWaiting: 4, ...over }, simulatedIncluded,
 });
 const account = (state: string) => ({
   userId: state, email: "", name: state, employmentStatus: null, keycloakId: null, enabled: null, emailVerified: null,
@@ -99,7 +99,7 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("the registry's built tiles (DW-3e)", () => {
-  it("builds exactly Web Dev's three, Social Media's five, HR's four, Finance's five and IT's four, and no other", () => {
+  it("builds exactly Web Dev's three, Social Media's six, HR's four, Finance's five and IT's four, and no other", () => {
     const built: string[] = [];
     for (const w of [...WORKSPACES, GENERIC_WORKSPACE]) for (const t of w.pulse) if (!isPlanned(t)) built.push(`${w.key}/${t.key}`);
     expect(built.sort()).toEqual([
@@ -116,6 +116,7 @@ describe("the registry's built tiles (DW-3e)", () => {
       "it/devices-offline",
       "it/failing-workflows",
       "it/threat-alerts",
+      "social-media/boosts-waiting",
       "social-media/failed-posts",
       "social-media/in-production",
       "social-media/late",
@@ -166,7 +167,7 @@ describe("the registry's built tiles (DW-3e)", () => {
 
   it("finds the built tiles of the workspace the subject belongs to, and none for Company, SEO, Creatives or a generic department", () => {
     expect(builtPulseTiles(webDev).map((t) => t.key)).toEqual(["requests-waiting", "sites-with-a-problem", "runs-waiting-approval"]);
-    expect(tilesOf("social-media").map((t) => t.key)).toEqual(["in-production", "with-client", "late", "scheduled-this-week", "failed-posts"]);
+    expect(tilesOf("social-media").map((t) => t.key)).toEqual(["in-production", "with-client", "late", "scheduled-this-week", "failed-posts", "boosts-waiting"]);
     expect(tilesOf("it").map((t) => t.key)).toEqual(["devices-offline", "threat-alerts", "account-requests", "failing-workflows"]);
     expect(tilesOf("hr").map((t) => t.key)).toEqual(["leave-pending", "onboarding", "open-cases", "payroll-status"]);
     // The company Overview the GM sees has no Pulse widget, so the GM reaches failing workflows through IT's tile and the page.
@@ -281,7 +282,7 @@ describe("Pulse, Web Dev (the widget)", () => {
 describe("Pulse, Social Media and IT (the widget)", () => {
   const social2 = () => tilesOf("social-media");
 
-  it("reads GET overview ONCE for all five pipeline tiles and draws each figure with its link", async () => {
+  it("reads GET overview ONCE for all six pipeline tiles and draws each figure with its link", async () => {
     overview.mockResolvedValue({ kind: "ok", data: overviewOf() });
     render(await Pulse(props(social2())));
     expect(overview).toHaveBeenCalledTimes(1);
@@ -289,12 +290,12 @@ describe("Pulse, Social Media and IT (the widget)", () => {
     for (const [label, n, href] of [
       ["In production", "7", "/departments/d-web/profile"], ["With client", "3", "/departments/d-web/profile"], ["Late", "2", "/departments/d-web/profile"],
       ["Scheduled this week", "5", "/departments/d-web/calendar"], ["Failed posts", "1", "/departments/d-web/calendar"],
+      ["Boosts waiting", "4", "/departments/d-web/boosts"],
     ] as const) {
       expect(within(tile(label)).getByText(n), label).toBeInTheDocument();
       expect(within(tile(label)).getByRole("link"), label).toHaveAttribute("href", href);
     }
-    // Boosts waiting (SCP-4a) and Unanswered inbox are placeholders: never drawn, never a 0.
-    expect(screen.queryByText("Boosts waiting")).toBeNull();
+    // Unanswered inbox is still a placeholder: never drawn, never a 0.
     expect(screen.queryByText("Unanswered inbox")).toBeNull();
     expect(screen.queryByRole("img", { name: "Simulated" })).toBeNull();
   });
@@ -302,14 +303,14 @@ describe("Pulse, Social Media and IT (the widget)", () => {
   it("marks every tile SIMULATED while the server says the tiles count simulated rows", async () => {
     overview.mockResolvedValue({ kind: "ok", data: overviewOf({}, true) });
     render(await Pulse(props(social2())));
-    expect(screen.getAllByRole("img", { name: "Simulated" })).toHaveLength(5);
+    expect(screen.getAllByRole("img", { name: "Simulated" })).toHaveLength(6);
     expect(within(tile("Late")).getByRole("img", { name: "Simulated" })).toHaveTextContent("SIMULATED");
   });
 
   it("a refused read says No access on every pipeline tile, with no link and no figure", async () => {
     overview.mockResolvedValue({ kind: "forbidden" });
     render(await Pulse(props(social2())));
-    expect(screen.getAllByText("No access")).toHaveLength(5);
+    expect(screen.getAllByText("No access")).toHaveLength(6);
     expect(within(tile("Late")).queryByRole("link")).toBeNull();
     expect(screen.queryByText("0")).toBeNull();
   });

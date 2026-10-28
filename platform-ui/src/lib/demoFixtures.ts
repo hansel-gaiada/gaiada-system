@@ -14,6 +14,7 @@ import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { clientCentreDemo, demoCentreRegisterClient, demoCentreSetBusinessType, demoIsBusinessType } from "./demoClientCentre";
 import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
 import { socialPortalPostsDemo } from "./demoSocialPortal";
+import { demoPortalSpendRoute } from "./demoSocialBoosts";
 import { demoAssetLibraryRead } from "./demoSocialPipelineRun";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { requestsDemo } from "./demoRequests";
@@ -2782,6 +2783,9 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // (lib/demoSocialPortal.ts), so a decision made here moves the staff side's post. A different path from `portal/social-reviews` above.
   const socialPortalPosts = socialPortalPostsDemo(method, p, url.searchParams, userId, body);
   if (socialPortalPosts) return socialPortalPosts;
+  // SCP-4b (BFF §63.11): the same portal's Boost budgets section (`portal/social/spend...`), from the boost store `demoSocial.ts` shares.
+  const socialPortalSpend = demoPortalSpendRoute(method, p, body, userId);
+  if (socialPortalSpend) return socialPortalSpend;
 
   const socialReviewPortal = socialClientReviewPortalDemo(method, p, userId, body);
   if (socialReviewPortal) return socialReviewPortal;

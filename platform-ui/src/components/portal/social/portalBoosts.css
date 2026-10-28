@@ -1,0 +1,29 @@
+/* SCP-4b — the client portal's "Boost budgets" section of /portal/approvals (BFF §63.11). Tokens only: no colour, radius or shadow literal and no uppercase transform (the tokens guard).
+   PHONE FIRST, like portalSocial.css: one column at 360 px with no horizontal scroll, and a button is at least 44 px tall (`.ps-btn`, imported from portalSocial.css). */
+
+.pb-section { display: grid; gap: 14px; margin: 28px 0 0; min-width: 0; }
+.pb-h { font: 600 20px/1.2 var(--font-display, var(--font-body)); color: var(--ink-strong); margin: 0; }
+.pb-h3 { font: 600 14px var(--font-body); color: var(--ink-strong); margin: 0 0 6px; }
+.pb-lead { font: 400 14px/1.5 var(--font-body); color: var(--ink-subtle); margin: 0; max-width: 70ch; }
+.pb-viewer { font: 400 13px/1.5 var(--font-body); color: var(--ink-strong); border-left: 3px solid var(--status-info); padding: 6px 12px; margin: 0; max-width: 70ch; }
+.pb-calm { font: 400 13px var(--font-body); color: var(--ink-subtle); margin: 0; }
+.pb-settled { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font: 500 13px var(--font-body); color: var(--status-ok-fg); }
+
+.pb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.pb-item { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 14px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); min-width: 0; }
+.pb-item:has(.pb-thumb) { grid-template-columns: 72px minmax(0, 1fr); }
+.pb-item:has(.pb-thumb) .pb-item__decide { grid-column: 1 / -1; }
+.pb-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-md); background: var(--tint-hover); }
+.pb-item__main { display: grid; gap: 4px; min-width: 0; }
+.pb-item__title { font: 600 15px var(--font-body); color: var(--ink-strong); margin: 0; overflow-wrap: anywhere; }
+.pb-item__line { font: 400 14px/1.5 var(--font-body); color: var(--ink-strong); margin: 0; }
+.pb-item__sub { font: 400 13px/1.5 var(--font-body); color: var(--ink-subtle); margin: 0; overflow-wrap: anywhere; }
+.pb-item__decide { display: grid; gap: 10px; }
+.pb-note { display: grid; gap: 4px; font: 500 13px var(--font-body); color: var(--ink-strong); }
+.pb-note textarea { width: 100%; min-height: 64px; box-sizing: border-box; resize: vertical; }
+.pb-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.pb-error { font: 500 13px var(--font-body); color: var(--status-critical-fg); margin: 0; }
+
+.pb-history__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.pb-history__list li { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); font: 400 13px var(--font-body); color: var(--ink-subtle); }
+.pb-history__list li span:first-child { color: var(--ink-strong); font-weight: 500; }
