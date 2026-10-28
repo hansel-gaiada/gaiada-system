@@ -1,11 +1,4 @@
-/* SCP-Sb — the SIMULATED mark of a mock social account, and the client page's accounts line. Tokens only: no colour, radius or shadow literal and no uppercase
-   transform (the tokens guard); the word is written in capitals in the markup, so the label is never colour alone. The chip is the same dashed warning chip the
-   post page uses for a simulated post (post-page.css `.scp-chip--sim`), restated here so the Connections page does not need the post page's stylesheet. */
-.scp-simacct {
-  display: inline-flex; align-items: center; padding: 2px 8px; font: 700 11px var(--font-body); color: var(--status-warning-fg);
-  border: 0.5px dashed var(--erp-hairline); border-radius: var(--radius-md); white-space: nowrap;
-}
-.scp-simacct__note { font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+/* SCP-Sb — the client page's accounts line. The SIMULATED mark itself is SimulatedMark.tsx's own (simulated-mark.css, SCP-Sf). Tokens only. */
 
 .scp-accts { display: grid; gap: 6px; margin: 0; }
 .scp-accts__title { font: 700 13px var(--font-body); color: var(--text-primary); margin: 0; }

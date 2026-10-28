@@ -22,6 +22,7 @@ import { PostFields } from "@/components/social/PostFields";
 import { Activity, CopyLog } from "@/components/social/PostLog";
 import { PostMetricsSection } from "@/components/social/PostMetrics";
 import { PostStepper } from "@/components/social/PostStepper";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { postEntityComment } from "@/lib/collabActions";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { Comment, CommentAnchor } from "@/lib/pm";
@@ -103,7 +104,8 @@ export function PostPage({ deptId, post: initial, comments, assets, metrics, vie
           <span className={`scp-chip${post.pipelineStatus === "changes" ? " scp-chip--changes" : post.pipelineStatus === "blocked" ? " scp-chip--blocked" : ""}`}>{statusChipText(post)}</span>
           {post.phase && <span className="scp-chip scp-chip--phase">{phaseText(post.phase)}</span>}
           <HealthChip health={post.health} />
-          {post.simulated && <span className="scp-chip scp-chip--sim">SIMULATED</span>}
+          {/* SCP-Sf: the post went live through the simulator, or the simulator served one of its networks (a failed or partial simulated publish). */}
+          {(post.simulated || post.variants.some((v) => v.simulated)) && <SimulatedMark of="post" />}
           {post.isExtra && <span className="scp-chip scp-chip--phase">Extra post</span>}
         </div>
         <div className="scp-post__meta">
@@ -218,7 +220,16 @@ export function PostPage({ deptId, post: initial, comments, assets, metrics, vie
         )}
         {post.variants.length > 0 && (
           <p className="scp-field__hint" style={{ margin: "8px 0 0" }}>
-            {`Client review: ${post.variants.map((v) => `${networkLabel(v.network)} ${v.reviewStatus.replace(/_/g, " ") || "not asked yet"}`).join(", ")}.`}
+            {"Client review: "}
+            {post.variants.map((v, i) => (
+              <span key={v.id}>
+                {i > 0 && ", "}
+                {`${networkLabel(v.network)} ${v.reviewStatus.replace(/_/g, " ") || "not asked yet"}`}
+                {/* SCP-Sf: a network the simulator served says so where the network is named (a post may hold both kinds, SCP-D9). */}
+                {v.simulated && <> <SimulatedMark of="variant" /></>}
+              </span>
+            ))}
+            .
           </p>
         )}
       </section>

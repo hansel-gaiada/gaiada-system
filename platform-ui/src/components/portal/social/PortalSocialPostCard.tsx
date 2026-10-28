@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { PinOverlay, pinsFromComments, type Pin } from "@/components/social/PinOverlay";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import {
   decisionLine, networkLabel, portalSocialFileHref, stateLabel, stateTone, surfaceLabel, whenLabel, type PortalSocialPost,
 } from "@/lib/portalSocial";
@@ -109,7 +110,7 @@ export function PortalSocialPostCard({ post, tenant, onReloaded, onDecided, deta
 
       <div className="ps-card__body">
         <Heading id={titleId} className="ps-title">{post.title}</Heading>
-        {post.simulated && <p className="ps-sim">Simulated: this is a rehearsal, not a post on a real account.</p>}
+        {post.simulated && <p className="ps-sim"><SimulatedMark /> This is a rehearsal, not a post on a real account.</p>}
         <p className="ps-caption"><strong>{handle}</strong> {post.caption || <em>No caption yet.</em>}</p>
         {tags.length > 0 && <p className="ps-tags">{tags.map((t) => <span key={t} className="ps-tag">{t}</span>)}</p>}
         {(post.onAssetText || post.cta) && (

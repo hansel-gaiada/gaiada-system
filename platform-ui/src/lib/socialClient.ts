@@ -80,6 +80,8 @@ export interface ClientPost {
   isExtra: boolean;
   format: string | null;
   health: Health | null;
+  /** SCP-Sf: the post went live through the social simulator (`social_posts.simulated`); an older server omits it and it reads `false`. */
+  simulated: boolean;
 }
 
 export interface CycleView {
@@ -115,7 +117,7 @@ export function asCycleView(raw: unknown): CycleView {
     return {
       postId: p.postId, title: str(p.title) ?? "Untitled post", status: p.status, phase: str(p.phase),
       holder: typeof p.holder === "string" && HOLDERS.includes(p.holder) ? (p.holder as HolderRole) : null,
-      isExtra: p.isExtra === true, format: str(p.format), health: asHealth(p.health),
+      isExtra: p.isExtra === true, format: str(p.format), health: asHealth(p.health), simulated: p.simulated === true,
     };
   });
   return {

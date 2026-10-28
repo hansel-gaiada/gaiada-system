@@ -5,7 +5,7 @@
 // while the simulator is switched off on the server. A failed or refused READ is said as such, never drawn as "no accounts".
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { SimulatedAccountChip } from "./SimulatedAccountChip";
+import { SimulatedMark } from "./SimulatedMark";
 import "@/components/social/simulated-account.css";
 import { seedSimulatedAccounts } from "@/lib/socialSimulatedAccountsActions";
 import { networksMissingAccount } from "@/lib/socialSimulatedAccounts";
@@ -53,7 +53,7 @@ export function ClientAccounts({ engagementId, read, canPlan }: { engagementId: 
             <li key={a.id} className="scp-accts__item">
               <b>{NETWORK_LABEL[a.network] ?? a.network}</b>
               <span className="scp-accts__handle">{a.handle}</span>
-              {a.simulated && <SimulatedAccountChip />}
+              {a.simulated && <SimulatedMark of="account" />}
             </li>
           ))}
         </ul>

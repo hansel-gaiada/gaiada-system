@@ -863,6 +863,9 @@ export interface DailyMetricRow {
   engagements: number | null;
   linkClicks: number | null;
   videoViews: number | null;
+  /** SCP-Sf: where the day came from (`social_metrics_daily.source`): `simulated` is the social simulator's and is drawn with the SIMULATED mark. Absent
+   *  from a server that predates it, which reads as not simulated. */
+  source?: "pull" | "simulated";
 }
 
 /** The LATEST known snapshot for one published variant — `social_post_metrics` is an APPEND-ONLY
@@ -884,6 +887,8 @@ export interface PostMetricRow {
   videoViews: number | null;
   clicks: number | null;
   fetchedAt: string;
+  /** SCP-Sf: `social_post_metrics.source`; `simulated` is drawn with the SIMULATED mark (absent: not simulated). */
+  source?: "pull" | "manual" | "simulated";
 }
 
 // ── SMM-22 — the usage panel (X metering, D-9 stop-loss chain) ───────────────────────────────────

@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import { Button, HairlineTable, StatusBadge } from "@/components/ui";
 import { InboxTriageChip } from "./InboxTriageChip";
 import { InboxSlaTimer } from "./InboxSlaTimer";
-import { SimulatedAccountChip } from "./SimulatedAccountChip";
+import { SimulatedMark } from "./SimulatedMark";
 import {
   describeRefusal, type InboxThread, type InboxMessage, type ReplySendPreconditionResult,
 } from "@/lib/socialShared";
@@ -92,7 +92,7 @@ export function InboxWorkspace({
                 </Link>,
                 <span key={`${t.id}-kind`} style={{ font: "400 12px var(--font-body)" }}>
                   {acct ? `${acct.network} · ${t.kind}` : t.kind}
-                  {acct?.simulated && <> <SimulatedAccountChip /></>}
+                  {acct?.simulated && <> <SimulatedMark of="account" /></>}
                 </span>,
                 <InboxTriageChip key={`${t.id}-triage`} thread={t} />,
                 <InboxSlaTimer key={`${t.id}-sla`} slaDueAt={t.slaDueAt} />,
@@ -179,7 +179,7 @@ function InboxThreadPanel({
           <div style={{ font: "700 14px var(--font-body)", color: "var(--text-primary)" }}>
             {thread.authorName ?? thread.authorHandle ?? "Unknown author"}
             {accountInfo && <span style={{ fontWeight: 400, color: "var(--erp-ink-50)" }}> → @{accountInfo.handle.replace(/^@/, "")}</span>}
-            {accountInfo?.simulated && <> <SimulatedAccountChip withNote /></>}
+            {accountInfo?.simulated && <> <SimulatedMark of="account" withNote /></>}
           </div>
           <div style={{ font: "400 11px var(--font-body)", color: "var(--erp-ink-50)", marginTop: 2 }}>
             {thread.network} · {thread.kind}

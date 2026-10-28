@@ -23,7 +23,7 @@ import {
   type AssetLibrary, type MediaDescriptor, type BestTimeSuggestion,
 } from "@/lib/socialShared";
 import { ValidationList } from "./ValidationList";
-import { SimulatedAccountChip } from "./SimulatedAccountChip";
+import { SimulatedMark } from "./SimulatedMark";
 
 export function VariantCard({
   tenantId, variant, canDelete, account, accountsForbidden, clientReview, requiresClientOk,
@@ -333,8 +333,8 @@ export function VariantCard({
 /** The quota strip (SMM-12) — three visibly different states, never collapsed into one another:
  *  a KNOWN live count (bar + numbers), UNKNOWN (registry hasn't synced — never rendered as "0
  *  used"), and NOT MODELED (this network has no live counter at all, a different fact from
- *  "unsynced"). `describeQuota` (socialShared.ts) picks the state; this only draws it. */
-function QuotaStrip({
+ *  "unsynced"). `describeQuota` (socialShared.ts) picks the state; this only draws it. Exported for the SIMULATED render pin (SCP-Sf). */
+export function QuotaStrip({
   network, account, accountsForbidden,
 }: {
   network: SocialPostVariant["network"];
@@ -357,7 +357,7 @@ function QuotaStrip({
   }
   const info = describeQuota(network, account.quota);
   // SCP-Sb: a seeded mock account says so beside its quota line.
-  const simulatedChip = account.simulated ? <SimulatedAccountChip /> : null;
+  const simulatedChip = account.simulated ? <SimulatedMark of="account" /> : null;
   const pct = info.status === "known" && info.cap && info.cap > 0 ? Math.min(100, (info.used! / info.cap) * 100) : 0;
   const color = info.status === "known"
     ? (pct >= 100 ? "var(--status-critical-fg, #b3261e)" : pct >= (100 - (2 / (info.cap || 1)) * 100) ? "var(--status-caution-fg, #9a6700)" : "var(--erp-ink-60)")
