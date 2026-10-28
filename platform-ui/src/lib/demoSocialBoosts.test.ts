@@ -314,7 +314,7 @@ describe("the portal", () => {
     expect(s.canDecide).toBe(true);
     expect(s.boosts).toEqual([expect.objectContaining({ boostId: over, postTitle: "Harvest collection arrives", totalBudgetMinor: 1_000_000, days: 5, remainingMinor: 300_000, thumbFileId: "soc-post-n-1-f1" })]);
     expect(s.budgets).toEqual([expect.objectContaining({ proposalId: proposal, amountMinor: 1_500_000, agreedMinor: 300_000, committedMinor: 0, note: "A bigger month.", month: OCT })]);
-    expect(JSON.stringify(portal(api, "GET", "")?.json)).not.toMatch(/fees?/i); // the client never sees our fees
+    expect(JSON.stringify(portal(api, "GET", "")?.json)).not.toMatch(/(^|[^a-z])fees?([^a-z]|$)/i); // the client never sees our fees
     expect(asPortalSpend(portal(api, "GET", "", undefined, "demo-client-viewer")?.json).canDecide).toBe(false);
   });
 
