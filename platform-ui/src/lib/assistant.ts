@@ -28,6 +28,8 @@ export interface AssistantThread {
   ownerUserId: string;
   title: string | null;
   brainProvider: string | null;
+  /** AIP-08a: the picked tier (Fast / Standard / Strong), sent to the gateway as `tier`. `null` = Auto. Never set together with `brainProvider`. */
+  brainTier: BrainTier | null;
   brainModel: string | null;
   hermesSessionId: string | null;
   status: AssistantThreadStatus;
@@ -146,13 +148,25 @@ export const BRAIN_OPTIONS: BrainOption[] = [
   { value: "claude", label: "Claude" },
 ];
 
+// AIP-08a — the tier half of the picker. A thread stores `brainTier` (fast|standard|strong) OR a `brainProvider`, never both (one
+// picker, one choice). At the gateway a named provider beats a tier, and a tier beats the task's own tier. Auto = neither is set =
+// "the gateway's default for the task", which is `standard`, so Standard is NOT offered as a choice; it is only ever shown as the
+// current value of a thread whose tier was set through the API. Today all three tiers map to one model (ruling AIP-D1), so the
+// copy must not promise more than "quicker and cheaper" / "for harder questions".
+export type BrainTier = "fast" | "standard" | "strong";
+export const BRAIN_TIER_LABELS: Record<BrainTier, string> = { fast: "Fast", standard: "Standard", strong: "Strong" };
+/** The tiers a person may pick, in order. */
+export const BRAIN_TIER_CHOICES: BrainTier[] = ["fast", "strong"];
+export function brainTierLabel(tier: BrainTier): string { return BRAIN_TIER_LABELS[tier]; }
+
 export function brainOptionLabel(value: string | null): string {
   return BRAIN_OPTIONS.find((o) => o.value === value)?.label ?? (value ?? "Auto (failover chain)");
 }
 // AIP-00c — `GET :t/assistant/brains`. `brains: null` means the gateway could not be checked (unknown),
 // which is neither "none available" nor an error.
 export interface BrainAvailability { value: string; available: boolean }
-export interface BrainsResult { brains: BrainAvailability[] | null; checkedAt: string }
+// `tiers` (AIP-08a): the tier names the gateway reports. `[]` = none configured, `null` = unknown (same cases as `brains: null`).
+export interface BrainsResult { brains: BrainAvailability[] | null; tiers: string[] | null; checkedAt: string }
 export interface SendMessageResult { messageId: string; streamUrl: string }
 export interface StopResult { ok: boolean; stopped: boolean }
 
