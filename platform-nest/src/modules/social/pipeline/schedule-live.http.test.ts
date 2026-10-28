@@ -78,7 +78,8 @@ describe.skipIf(!TEST_URL)("SCP-3a/3b · schedule by hand and mark live (BFF §6
       }
       await c.query(
         `INSERT INTO social_cycles (id, tenant_id, engagement_id, month, deadline, ready_by, origin_site)
-         VALUES ($1, $2, $3, '2027-03-01', '2027-02-26', '2027-02-24', 'central')`,
+         -- this month's cycle, its ready-by already passed, so a post dated in the next days is not before it (hand-off check date_before_ready_by)
+         VALUES ($1, $2, $3, date_trunc('month', current_date)::date, current_date - 8, current_date - 10, 'central')`,
         [cycleId, A, engagementId],
       );
     }, SOCIAL);
