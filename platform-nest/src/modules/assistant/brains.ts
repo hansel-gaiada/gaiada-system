@@ -13,9 +13,11 @@
 // key state and every other `/health` field are dropped here and must never reach the browser.
 // `echo` is the test provider and is never offered.
 import { config } from "../../config";
+import { GATEWAY_TIERS } from "../ai-usage/routing";
 
 export interface BrainEntry { value: string; available: boolean }
-export interface BrainsResult { brains: BrainEntry[] | null; checkedAt: string }
+/** `tiers`: the valid tier names `/health` reports (AIP-08a). `[]` = none configured (the key is absent), `null` = unknown. */
+export interface BrainsResult { brains: BrainEntry[] | null; tiers: string[] | null; checkedAt: string }
 
 export const BRAINS_CACHE_TTL_MS = 60_000;
 export const BRAINS_TIMEOUT_MS = 3_000;
@@ -48,6 +50,15 @@ export function mapHealthToBrains(body: unknown): BrainEntry[] | null {
   return out;
 }
 
+/** Pure mapping of a `/health` body to the configured tier names. Only the three known names survive, in the gateway's order;
+ *  an absent or malformed `tiers` key means none are configured (`[]`); a body that is not an object is unreadable (`null`). */
+export function mapHealthToTiers(body: unknown): string[] | null {
+  if (!body || typeof body !== "object") return null;
+  const raw = (body as { tiers?: unknown }).tiers;
+  if (!Array.isArray(raw)) return [];
+  return GATEWAY_TIERS.filter((t) => raw.includes(t));
+}
+
 export async function getBrains(deps: BrainsDeps = {}): Promise<BrainsResult> {
   const now = deps.now ?? Date.now;
   const t = now();
@@ -57,6 +68,7 @@ export async function getBrains(deps: BrainsDeps = {}): Promise<BrainsResult> {
   const base = (deps.gatewayUrl ?? config.services.gateway.url ?? "").replace(/\/$/, "");
   const token = deps.gatewayToken ?? config.services.gateway.token;
   let brains: BrainEntry[] | null = null;
+  let tiers: string[] | null = null;
   if (!base) {
     warn("assistant brains: GATEWAY_URL is unset; brain list is unknown");
   } else {
@@ -68,14 +80,17 @@ export async function getBrains(deps: BrainsDeps = {}): Promise<BrainsResult> {
       if (!res.ok) {
         warn(`assistant brains: gateway /health answered HTTP ${res.status}; brain list is unknown`);
       } else {
-        brains = mapHealthToBrains(await res.json());
+        const health: unknown = await res.json();
+        brains = mapHealthToBrains(health);
+        // Tiers are unknown exactly when the brain list is (same cases); otherwise read from the same body.
+        tiers = brains === null ? null : mapHealthToTiers(health);
         if (brains === null) warn("assistant brains: gateway /health had an unexpected shape; brain list is unknown");
       }
     } catch (e) {
       warn(`assistant brains: gateway /health unreachable (${e instanceof Error ? e.name : "error"}); brain list is unknown`);
     }
   }
-  const value: BrainsResult = { brains, checkedAt: new Date(t).toISOString() };
+  const value: BrainsResult = { brains, tiers, checkedAt: new Date(t).toISOString() };
   cache = { at: t, value };
   return value;
 }
