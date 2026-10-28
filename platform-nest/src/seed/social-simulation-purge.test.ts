@@ -3,11 +3,13 @@
 //
 // What this file pins:
 //   (R1) the footprint: every variant on a simulated account and its dependent rows, the simulated daily rows, the best-time
-//        cache, the simulated accounts, and the simulator's own orgs once empty; never a real account's row;
+//        cache, the simulated accounts, the simulator's own orgs once empty, and the simulated boosts (SCP-Se: they hang off a
+//        simulated POST); never a real account's row, a real boost or a boost budget;
 //   (R2) posts: back to `final` when their variants were all on simulated accounts and the status rested on them; kept as they
 //        are before the client, when scheduled or posted BY HAND, when Composer, archived or deleted; repaired when live on
 //        both kinds; never deleted;
-//   (R3) every refusal code, each on the one shape it names, and a refused plan still says what it would have done;
+//   (R3) every refusal code, each on the one shape it names (a simulated boost on a real post; a real boost on a post the purge
+//        would change), and a refused plan still says what it would have done;
 //   (R4) the schema the purge knows equals the foreign keys the migrations declare (a new table fails here first);
 //   (R5) the purge's own SQL: it deletes only with the kind restated in each statement, updates only approvals and posts,
 //        inserts nothing, and never writes a social_accounts or social_post_variants row;
@@ -19,19 +21,19 @@ import { SIMULATED_ORG_KEY_REF } from "../modules/social/simulated-accounts";
 import {
   KNOWN_DEPENDENTS, REFUSAL_WORDS, RESTORE_ENGINE_STATUS, RESTORE_STATUS, SIMULATOR_ORG_KEY_REF, planIsEmpty, planPurge, renderPurgeReport,
   simulatorOrgId, unknownDependents,
-  type CompanyFacts, type FootprintCounts, type PurgePlan, type PurgePost, type PurgeRefusalCode, type PurgeVariant,
+  type CompanyFacts, type FootprintCounts, type PurgeBoost, type PurgePlan, type PurgePost, type PurgeRefusalCode, type PurgeVariant,
 } from "./social-simulation-purge-plan";
 
 const T = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
 const CLIENT = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a60";
 const ZERO: FootprintCounts = {
   simulatedAccounts: 0, variantsOnSimulatedAccounts: 0, simulatedVariants: 0, simulatedPosts: 0, simulatedPostMetrics: 0,
-  simulatedDailyMetrics: 0, simulatorOrgs: 0,
+  simulatedDailyMetrics: 0, simulatorOrgs: 0, simulatedBoosts: 0,
 };
 const SIM_URL = "https://simulated.invalid/instagram/0190";
 
 const facts = (over: Partial<CompanyFacts> = {}): CompanyFacts => ({
-  tenantId: T, company: "Mock Agency", kindViolations: [], simulatedAccounts: [], variants: [], posts: [], postMetrics: [], dailyMetrics: [],
+  tenantId: T, company: "Mock Agency", kindViolations: [], simulatedAccounts: [], variants: [], posts: [], boosts: [], postMetrics: [], dailyMetrics: [],
   reviews: [], pendingApprovals: [], bestTime: [], grants: [], oauthStates: [], inboxThreads: [], ledger: [], orgs: [], counts: ZERO, ...over,
 });
 const simAcct = (id: string, network = "instagram") => ({
@@ -45,6 +47,7 @@ const post = (id: string, over: Partial<PurgePost> = {}): PurgePost => ({
   id, title: `Post ${id}`, clientName: "Kopi Senja", engagementId: "eng-1", cycleId: "cyc-1", pipelineStatus: "approved", scheduleVia: null,
   liveUrl: null, wentLiveAt: null, simulated: false, archived: false, deleted: false, ...over,
 });
+const boost = (id: string, postId: string, over: Partial<PurgeBoost> = {}): PurgeBoost => ({ id, postId, status: "completed", simulated: true, ...over });
 const simLive = (id: string): { p: PurgePost; v: PurgeVariant } => ({
   p: post(id, { pipelineStatus: "live", scheduleVia: "publisher", liveUrl: SIM_URL, wentLiveAt: "2026-10-20T10:00:00.000Z", simulated: true }),
   v: variant(`v-${id}`, id, { simulated: true, status: "published", providerPostId: `simulated:instagram:1:${id}`, publishedUrl: SIM_URL, publishedAt: "2026-10-20T10:00:00.000Z" }),
@@ -125,6 +128,48 @@ describe("SCP-Sf (R1) · the footprint", () => {
     expect(left["o-real"]).toMatch(/1 real account/);
     expect(left["o-odd"]).toMatch(/not its org id/);
     expect(left["o-cp21"]).toMatch(/not created by the simulator/);
+  });
+});
+
+describe("SCP-Se (R1) · simulated boosts go with their simulated post, in the plan", () => {
+  it("every simulated boost of a simulated post is planned (any status, in id order), and nothing else about a boost is", () => {
+    const { p, v } = simLive("p1");
+    const plan = planPurge(facts({
+      simulatedAccounts: [simAcct("acct-sim-ig")], variants: [v], posts: [p],
+      boosts: [boost("b-2", "p1", { status: "running" }), boost("b-1", "p1", { status: "requested" })],
+    }));
+    expect(plan.refusals).toEqual([]);
+    expect(plan.deleteBoosts).toEqual([
+      { id: "b-1", postId: "p1", status: "requested", simulated: true }, { id: "b-2", postId: "p1", status: "running", simulated: true },
+    ]);
+    expect(planIsEmpty(plan)).toBe(false);
+  });
+
+  it("a REAL boost on a real post the purge keeps is not in the plan, and its post is untouched", () => {
+    const hand = post("p1", { pipelineStatus: "live", scheduleVia: "manual", liveUrl: "https://www.instagram.com/p/MOCK1", wentLiveAt: "2026-10-20T10:00:00.000Z" });
+    const plan = planPurge(facts({
+      variants: [variant("v1", "p1", { nativeImport: true, status: "published", publishedUrl: hand.liveUrl, publishedAt: hand.wentLiveAt })],
+      posts: [hand], boosts: [boost("b-real", "p1", { simulated: false })],
+    }));
+    expect(plan.refusals).toEqual([]);
+    expect(plan.deleteBoosts).toEqual([]);
+    expect(plan.kept.map((k) => k.postId)).toEqual(["p1"]);
+  });
+
+  it("a simulated boost on a post live on both kinds goes; the post is repaired as before, and a real boost on a post whose mark is already clear is kept", () => {
+    const { p, v } = simLive("p1");
+    const li = variant("v-li", "p1", { network: "linkedin", accountId: "acct-li", accountSimulated: false, status: "published", publishedUrl: "https://www.linkedin.com/feed/update/9", publishedAt: "2026-10-20T09:00:00.000Z" });
+    const plan = planPurge(facts({ variants: [v, li], posts: [p], boosts: [boost("b-sim", "p1", { status: "running" })] }));
+    expect(plan.refusals).toEqual([]);
+    expect(plan.deleteBoosts.map((b) => b.id)).toEqual(["b-sim"]);
+    expect(plan.repair.map((r) => r.postId)).toEqual(["p1"]);
+    const clear = planPurge(facts({ variants: [v, li], posts: [{ ...p, simulated: false }], boosts: [boost("b-real", "p1", { simulated: false })] }));
+    expect(clear.refusals).toEqual([]);
+    expect(clear.deleteBoosts).toEqual([]);
+  });
+
+  it("the plan has no place for a boost budget: nothing it can delete or refuse names one", () => {
+    expect(Object.keys(planPurge(facts())).filter((k) => /budget/i.test(k))).toEqual([]);
   });
 });
 
@@ -216,6 +261,15 @@ describe("SCP-Sf (R3) · refusals: any shape it cannot classify changes nothing 
       posts: [post("p1", { pipelineStatus: "live", scheduleVia: "publisher", liveUrl: SIM_URL, simulated: true })],
       variants: [variant("v1", "p1", { simulated: true, status: "published", publishedUrl: SIM_URL }), variant("v2", "p1", { accountSimulated: false, network: "linkedin", status: "published", publishedUrl: null })],
     }],
+    // SCP-Se: a boost copies its post's mark, so these pairings cannot come from the app: a person looks at them.
+    ["simulated_boost_on_real_post", {
+      posts: [post("p1", { pipelineStatus: "live", scheduleVia: "manual", liveUrl: "https://www.instagram.com/p/X" })],
+      variants: [variant("v1", "p1", { nativeImport: true, status: "published", publishedUrl: "https://www.instagram.com/p/X" })],
+      boosts: [boost("b1", "p1")],
+    }],
+    ["real_boost_on_purged_post", {
+      posts: [simLive("p1").p], variants: [simLive("p1").v], boosts: [boost("b1", "p1", { simulated: false })],
+    }],
   ];
   for (const [code, over] of CASES) {
     it(`${code}: refused, in words, naming the rows`, () => {
@@ -228,6 +282,24 @@ describe("SCP-Sf (R3) · refusals: any shape it cannot classify changes nothing 
 
   it("every refusal code has its words, and every code is exercised above", () => {
     expect(new Set(CASES.map(([c]) => c))).toEqual(new Set(Object.keys(REFUSAL_WORDS)));
+  });
+
+  it("a simulated boost whose post is not among the posts read is refused too (never deleted on a guess)", () => {
+    const plan = planPurge(facts({ boosts: [boost("b-lost", "p-missing")] }));
+    expect(codes(plan)).toEqual(["simulated_boost_on_real_post"]);
+    expect(plan.deleteBoosts).toEqual([]);
+  });
+
+  it("a real boost on a post the purge MOVES BACK is refused even when the post's own mark is clear; a simulated one beside it still lists", () => {
+    const plan = planPurge(facts({
+      variants: [variant("v1", "p1")], posts: [post("p1", { pipelineStatus: "approved" })], boosts: [boost("b-real", "p1", { simulated: false })],
+    }));
+    expect(plan.restore.map((r) => r.postId)).toEqual(["p1"]);
+    expect(plan.refusals).toEqual([{ code: "real_boost_on_purged_post", ids: ["b-real"] }]);
+    const { p, v } = simLive("p2");
+    const both = planPurge(facts({ variants: [v], posts: [p], boosts: [boost("b-sim", "p2"), boost("b-real", "p2", { simulated: false })] }));
+    expect(codes(both)).toEqual(["real_boost_on_purged_post"]);
+    expect(both.deleteBoosts.map((b) => b.id)).toEqual(["b-sim"]);
   });
 
   it("a refused plan still lists what it would have done, so the report can show both", () => {
@@ -266,7 +338,19 @@ describe("SCP-Sf (R4) · the purge knows every table that points at what it dele
     expect([...new Set(declared.map((d) => `${d.table} -> ${d.references}`))].sort()).toEqual([...KNOWN_DEPENDENTS].sort());
   });
   it("an unknown table is named", () => {
-    expect(unknownDependents([{ table: "social_boosts", references: "social_post_variants" }])).toEqual(["social_boosts -> social_post_variants"]);
+    expect(unknownDependents([{ table: "social_story_slots", references: "social_post_variants" }])).toEqual(["social_story_slots -> social_post_variants"]);
+  });
+  it("SCP-Se: social_boosts points at companies, users, posts, clients, cycles and budgets only (never an account, a variant or an org), and nothing points at it", () => {
+    const declared = declaredDependents();
+    expect(declared.filter((d) => d.table === "social_boosts" || d.table === "social_boost_budgets")).toEqual([]);
+    const strip = (name: string) => readFileSync(join(MIGRATIONS, name), "utf8").replace(/--.*$/gm, "");
+    const boostFiles = readdirSync(MIGRATIONS).filter((n) => /social_boosts\.sql$/.test(n));
+    expect(boostFiles.length).toBeGreaterThan(0);
+    const targets = boostFiles.flatMap((n) => [...strip(n).matchAll(/\bREFERENCES\s+(\w+)/gi)].map((m) => m[1].toLowerCase()));
+    expect(new Set(targets)).toEqual(new Set(["companies", "users", "social_posts", "clients", "social_cycles", "social_boost_budgets"]));
+    // No migration declares a key INTO a boost: a table that does must be classified before the purge deletes from social_boosts.
+    const intoBoosts = readdirSync(MIGRATIONS).filter((n) => n.endsWith(".sql")).filter((n) => /\bREFERENCES\s+social_boosts\b/i.test(strip(n)));
+    expect(intoBoosts).toEqual([]);
   });
 });
 
@@ -294,7 +378,7 @@ describe("SCP-Sf (R5) · the purge deletes only what it names, with the kind res
     const deletes = statementsAt(PURGE_SRC, /\bDELETE\s+FROM\s+\w+/);
     const tables = deletes.map((s) => /^DELETE\s+FROM\s+(\w+)/.exec(s)![1]).sort();
     expect(tables).toEqual([
-      "social_accounts", "social_best_time_suggestions", "social_metrics_daily", "social_post_client_reviews", "social_post_metrics",
+      "social_accounts", "social_best_time_suggestions", "social_boosts", "social_metrics_daily", "social_post_client_reviews", "social_post_metrics",
       "social_post_variants", "social_publisher_orgs",
     ]);
     for (const s of deletes) {
@@ -306,6 +390,17 @@ describe("SCP-Sf (R5) · the purge deletes only what it names, with the kind res
     expect(byTable.social_metrics_daily).toMatch(/source = 'simulated'/);
     expect(byTable.social_publisher_orgs).toMatch(/postiz_org_id = 'simulated-' \|\| o\.client_id::text/);
     expect(byTable.social_publisher_orgs).toMatch(/NOT EXISTS \(SELECT 1 FROM social_accounts/);
+    // SCP-Se: a boost is deleted only when it AND its post are simulated.
+    expect(byTable.social_boosts).toMatch(/b\.simulated = true/);
+    expect(byTable.social_boosts).toMatch(/sp\.id = b\.post_id AND sp\.tenant_id = b\.tenant_id AND sp\.simulated = true/);
+  });
+
+  it("SCP-Se: the boosts go BEFORE the posts are moved back, and no statement of the purge writes a boost budget", () => {
+    const apply = PURGE_SRC.slice(PURGE_SRC.indexOf("export async function applyPlan("));
+    const at = (needle: string) => apply.indexOf(needle);
+    expect(at("DELETE FROM social_boosts")).toBeGreaterThan(at("DELETE FROM social_best_time_suggestions"));
+    expect(at("DELETE FROM social_boosts")).toBeLessThan(at("UPDATE social_posts"));
+    expect(PURGE_SRC).not.toMatch(/\b(?:DELETE\s+FROM|UPDATE|INSERT\s+INTO)\s+social_boost_budgets\b/);
   });
 
   it("it is the ONLY source file that hard-deletes an account, a variant, an org or a metric row (the module otherwise never hard-deletes)", () => {
@@ -314,7 +409,7 @@ describe("SCP-Sf (R5) · the purge deletes only what it names, with the kind res
       d.isDirectory() ? (d.name === "node_modules" ? [] : walk(join(dir, d.name)))
         : d.name.endsWith(".ts") && !d.name.endsWith(".test.ts") && !d.name.endsWith(".d.ts") ? [join(dir, d.name)] : []);
     const deleters = walk(SRC)
-      .filter((f) => /\bDELETE\s+FROM\s+social_(accounts|post_variants|publisher_orgs|post_metrics|metrics_daily|post_client_reviews)\b/.test(readFileSync(f, "utf8")))
+      .filter((f) => /\bDELETE\s+FROM\s+social_(accounts|post_variants|publisher_orgs|post_metrics|metrics_daily|post_client_reviews|boosts|boost_budgets)\b/.test(readFileSync(f, "utf8")))
       .map((f) => f.slice(SRC.length + 1).split("\\").join("/"));
     expect(deleters).toEqual(["seed/social-simulation-purge.ts"]);
   });
@@ -354,6 +449,25 @@ describe("SCP-Sf (R6) · the report", () => {
     expect(text).toMatch(/social_accounts \(simulated\): 1 \(would remove 1\)/);
     expect(text).toMatch(/WOULD MOVE BACK {2}p1 {2}Kopi Senja {2}"Post p1" {2}live -> final/);
     expect(text).toMatch(/Re-run with --apply/);
+  });
+
+  it("SCP-Se: a dry run lists each simulated boost by id, status and post; the counts and 'would remove' lines name them; budgets stay", () => {
+    const { p, v } = simLive("p1");
+    const plan = planPurge(facts({ simulatedAccounts: [simAcct("acct-sim-ig")], variants: [v], posts: [p], boosts: [boost("b-1", "p1", { status: "running" })] }));
+    const dry = renderPurgeReport({
+      apply: false, globalRefusal: null, refusedCompanies: 0,
+      companies: [{ plan, before: { ...ZERO, simulatedAccounts: 1, simulatedPosts: 1, simulatedBoosts: 1 }, after: null, applied: false }],
+    }).join("\n");
+    expect(dry).toMatch(/social_boosts \(simulated mark\): 1 \(would remove 1\)/);
+    expect(dry).toMatch(/WOULD REMOVE BOOST {2}b-1 {2}running {2}on post p1/);
+    expect(dry).toMatch(/1 simulated boost\(s\) \(the boost budgets stay\)/);
+    const left = renderPurgeReport({
+      apply: true, globalRefusal: null, refusedCompanies: 0,
+      companies: [{ plan, before: { ...ZERO, simulatedBoosts: 1 }, after: { ...ZERO, simulatedBoosts: 1 }, applied: true }],
+    }).join("\n");
+    expect(left).toMatch(/social_boosts \(simulated mark\): 1 -> 1/);
+    expect(left).toMatch(/REMOVED BOOST {2}b-1/);
+    expect(left).toMatch(/Done, but 1 simulated row\(s\) are still counted/); // a boost left behind is never reported as clean
   });
 
   it("an apply prints before -> after, and a refusal says nothing changed in that company", () => {

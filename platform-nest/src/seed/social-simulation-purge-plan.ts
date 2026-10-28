@@ -18,11 +18,17 @@
 //   3. the account's `simulated` daily metrics (`social_metrics_daily.source = 'simulated'`) and its best-time suggestion
 //      (`social_best_time_suggestions`, a cache derived only from that account's simulated numbers);
 //   4. the publisher orgs SCP-Sb created for the simulator (fingerprint: `api_key_ref = 'simulated:no-key'` AND
-//      `postiz_org_id = 'simulated-<client id>'`), once no account (of either kind) names them.
+//      `postiz_org_id = 'simulated-<client id>'`), once no account (of either kind) names them;
+//   5. every `social_boosts` row with `simulated = true` (SCP-4, after this purge was first written). A boost copies its post's
+//      mark when it is requested (a post is wholly simulated or wholly real, SCP-D9), so a simulated boost is the simulator's
+//      record of a boost it ran, and it hangs off the POST, not off an account: no variant, account or org is involved. No foreign
+//      key points AT a boost, and a boost points only at posts, clients, cycles and budgets, none of which the purge deletes, so the
+//      boost goes before the posts are moved back and nothing else about the schema changes (`KNOWN_DEPENDENTS` stays as it is).
+//      The monthly boost BUDGETS (`social_boost_budgets`) are the client's agreements, not simulated rows, and STAY.
 //
 // ── WHAT IT NEVER TOUCHES ──────────────────────────────────────────────────────────────────────────────────────────────
 // A real account, a variant on a real account, a `pull` metric row, a `pull` daily row, an OAuth grant or state, an inbox
-// thread, a usage-ledger row, a post's CONTENT (title, brief, caption, hashtags, designs, files, comments: nothing of the post
+// thread, a usage-ledger row, a REAL boost and every boost budget (`social_boost_budgets`), a post's CONTENT (title, brief, caption, hashtags, designs, files, comments: nothing of the post
 // row but the fields listed under "posts" below), a cycle, a PM task's content, and every history row (`activities`,
 // `work_activity`, notifications, outbox events, decided D14 approvals). It never deletes a post. It never turns a simulated
 // row real (trg_social_accounts_kind_guard would refuse it anyway): a purge DELETES simulated rows, it never relabels them.
@@ -87,6 +93,8 @@ export interface PurgePost {
   id: string; title: string; clientName: string; engagementId: string; cycleId: string | null; pipelineStatus: string | null;
   scheduleVia: string | null; liveUrl: string | null; wentLiveAt: string | null; simulated: boolean; archived: boolean; deleted: boolean;
 }
+/** A boost the purge looks at: every `simulated` boost, plus every boost on a post it looks at (to refuse a real one on a post it would move). */
+export interface PurgeBoost { id: string; postId: string; status: string; simulated: boolean }
 export interface PurgePostMetric { id: string; variantId: string; source: string; accountSimulated: boolean }
 export interface PurgeDailyMetric { id: string; accountId: string; source: string; accountSimulated: boolean }
 export interface PurgeOrg {
@@ -97,7 +105,7 @@ export interface PurgeOrg {
 /** The counts a person reads before and after: one per table the footprint lives in. */
 export interface FootprintCounts {
   simulatedAccounts: number; variantsOnSimulatedAccounts: number; simulatedVariants: number; simulatedPosts: number;
-  simulatedPostMetrics: number; simulatedDailyMetrics: number; simulatorOrgs: number;
+  simulatedPostMetrics: number; simulatedDailyMetrics: number; simulatorOrgs: number; simulatedBoosts: number;
 }
 export const FOOTPRINT_LABELS: Readonly<Record<keyof FootprintCounts, string>> = {
   simulatedAccounts: "social_accounts (simulated)",
@@ -107,6 +115,7 @@ export const FOOTPRINT_LABELS: Readonly<Record<keyof FootprintCounts, string>> =
   simulatedPostMetrics: "social_post_metrics (source simulated)",
   simulatedDailyMetrics: "social_metrics_daily (source simulated)",
   simulatorOrgs: "social_publisher_orgs (the simulator's, api_key_ref simulated:no-key)",
+  simulatedBoosts: "social_boosts (simulated mark)",
 };
 
 export interface CompanyFacts {
@@ -117,6 +126,8 @@ export interface CompanyFacts {
   simulatedAccounts: PurgeAccount[];
   variants: PurgeVariant[];
   posts: PurgePost[];
+  /** Boosts: every `simulated` one, and every boost on a post in `posts`. */
+  boosts: PurgeBoost[];
   /** Post metric rows on a variant of a simulated account, plus every `simulated` row wherever it sits. */
   postMetrics: PurgePostMetric[];
   /** Daily rows on a simulated account, plus every `simulated` row wherever it sits. */
@@ -153,7 +164,9 @@ export type PurgeRefusalCode =
   | "simulated_post_unexpected" // a `simulated` Composer, archived or deleted post
   | "hand_schedule_marked_simulated" // scheduled or live by hand, yet marked simulated
   | "live_link_not_simulated" // live through the publisher on simulated accounts only, with a link that is not the simulator's
-  | "mixed_live_post_without_real_link"; // live on both kinds, its link the simulator's, and no real variant has a link
+  | "mixed_live_post_without_real_link" // live on both kinds, its link the simulator's, and no real variant has a link
+  | "simulated_boost_on_real_post" // a `simulated` boost whose post is not marked simulated: the boost copies its post's mark
+  | "real_boost_on_purged_post"; // a REAL boost on a post marked simulated, or on a post the purge moves back to `final`
 
 export const REFUSAL_WORDS: Readonly<Record<PurgeRefusalCode, string>> = {
   kind_rule_broken: "accounts break the account-kind rule (neither simulated nor real); run social-simulation-prepare.js and decide each first",
@@ -174,6 +187,8 @@ export const REFUSAL_WORDS: Readonly<Record<PurgeRefusalCode, string>> = {
   hand_schedule_marked_simulated: "posts scheduled or marked live BY HAND are also marked simulated",
   live_link_not_simulated: "posts live through the publisher on simulated accounts only have a live link that is not the simulator's",
   mixed_live_post_without_real_link: "posts live on both kinds show the simulator's link, and no real variant has a link to put in its place",
+  simulated_boost_on_real_post: "boosts are marked simulated but their post is not (a boost copies its post's mark when requested); the purge cannot tell which is right",
+  real_boost_on_purged_post: "real (not simulated) boosts sit on a post marked simulated or on a post the purge would move back to final; a real boost is never deleted and a post with one is never moved",
 };
 
 export interface PurgeRefusal { code: PurgeRefusalCode; ids: string[] }
@@ -200,6 +215,8 @@ export interface PurgePlan {
   deleteReviews: string[];
   deleteBestTime: string[];
   deleteVariants: string[];
+  /** The simulated boosts to delete (their post is simulated): shown one by one in the report. */
+  deleteBoosts: PurgeBoost[];
   deleteAccounts: string[];
   deleteOrgs: string[];
   restore: PostRestore[];
@@ -317,6 +334,22 @@ export function planPurge(f: CompanyFacts): PurgePlan {
     });
   }
 
+  // Boosts (header 5). A simulated boost goes with its simulated post; any other pairing is a shape it will not guess at. The REAL
+  // boost on a post the purge changes is refused too: the purge never deletes a real boost, and a post under one must not move.
+  const postById = new Map(f.posts.map((p) => [p.id, p]));
+  const restoring = new Set(restore.map((r) => r.postId));
+  const deleteBoosts: PurgeBoost[] = [];
+  for (const b of f.boosts) {
+    const bp = postById.get(b.postId);
+    if (b.simulated) {
+      if (bp?.simulated) deleteBoosts.push(b);
+      else refuse("simulated_boost_on_real_post", b.id);
+    } else if (restoring.has(b.postId) || bp?.simulated) {
+      refuse("real_boost_on_purged_post", b.id);
+    }
+  }
+  deleteBoosts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
   // Orgs (header 4).
   const deleteOrgs: string[] = [];
   const leftOrgs: PurgePlan["leftOrgs"] = [];
@@ -345,6 +378,7 @@ export function planPurge(f: CompanyFacts): PurgePlan {
     deleteReviews: uniq(f.reviews.filter((r) => footprint.has(r.variantId)).map((r) => r.id)),
     deleteBestTime: uniq(f.bestTime.map((b) => b.id)),
     deleteVariants: [...footprint.keys()],
+    deleteBoosts,
     deleteAccounts: f.simulatedAccounts.map((a) => a.id),
     deleteOrgs,
     restore,
@@ -358,7 +392,7 @@ export function planPurge(f: CompanyFacts): PurgePlan {
 /** Does the plan change anything? */
 export const planIsEmpty = (p: PurgePlan): boolean =>
   p.withdrawApprovals.length + p.deletePostMetrics.length + p.deleteDailyMetrics.length + p.deleteReviews.length + p.deleteBestTime.length
-  + p.deleteVariants.length + p.deleteAccounts.length + p.deleteOrgs.length + p.restore.length + p.repair.length === 0;
+  + p.deleteVariants.length + p.deleteBoosts.length + p.deleteAccounts.length + p.deleteOrgs.length + p.restore.length + p.repair.length === 0;
 
 // ── The schema the purge knows (a NEW dependent table must be classified here before the purge runs) ─────────────────
 
@@ -427,7 +461,7 @@ export function renderPurgeReport(r: PurgeResult): string[] {
     const planned: Partial<Record<keyof FootprintCounts, number>> = o.after ? {} : {
       simulatedAccounts: p.deleteAccounts.length, variantsOnSimulatedAccounts: p.deleteVariants.length,
       simulatedPostMetrics: p.deletePostMetrics.length - p.manualPostMetrics, simulatedDailyMetrics: p.deleteDailyMetrics.length,
-      simulatorOrgs: p.deleteOrgs.length,
+      simulatorOrgs: p.deleteOrgs.length, simulatedBoosts: p.deleteBoosts.length,
     };
     for (const k of Object.keys(FOOTPRINT_LABELS) as Array<keyof FootprintCounts>) {
       out.push(countLine(FOOTPRINT_LABELS[k], o.before[k], o.after ? o.after[k] : null, planned[k] ?? null));
@@ -436,9 +470,10 @@ export function renderPurgeReport(r: PurgeResult): string[] {
     out.push(
       `  ${verb}: ${p.deleteVariants.length} variant(s), ${p.deleteReviews.length} client review(s), ${p.deletePostMetrics.length} post metric row(s)`
       + ` (${p.manualPostMetrics} of them typed in by a person), ${p.deleteDailyMetrics.length} daily row(s), ${p.deleteBestTime.length} best-time`
-      + ` suggestion(s), ${p.deleteAccounts.length} account(s), ${p.deleteOrgs.length} simulator org(s);`
+      + ` suggestion(s), ${p.deleteBoosts.length} simulated boost(s) (the boost budgets stay), ${p.deleteAccounts.length} account(s), ${p.deleteOrgs.length} simulator org(s);`
       + ` ${o.applied ? "withdrew" : "would withdraw"} ${p.withdrawApprovals.length} undecided publish approval(s)`,
     );
+    for (const x of p.deleteBoosts) out.push(`  ${o.applied ? "REMOVED BOOST" : "WOULD REMOVE BOOST"}  ${x.id}  ${x.status}  on post ${x.postId}`);
     for (const x of p.restore) out.push(`  ${o.applied ? "MOVED BACK" : "WOULD MOVE BACK"}  ${x.postId}  ${x.clientName}  "${x.title}"  ${x.from} -> ${RESTORE_STATUS}`);
     for (const x of p.repair) {
       out.push(`  ${o.applied ? "REPAIRED" : "WOULD REPAIR"}  ${x.postId}  "${x.title}"  live on real accounts too: simulated mark cleared${x.linkReplaced ? `, live link now ${x.liveUrl}` : ""}`);
@@ -446,12 +481,12 @@ export function renderPurgeReport(r: PurgeResult): string[] {
     for (const x of p.kept) out.push(`  KEPT  ${x.postId}  "${x.title}"  ${x.status ?? "composer"}: ${x.why}`);
     for (const x of p.leftOrgs) out.push(`  LEFT ORG  ${x.orgId}  ${x.clientName}: ${x.why}`);
   }
-  const totalAfter = r.companies.reduce((n, o) => n + (o.after ? o.after.simulatedAccounts + o.after.variantsOnSimulatedAccounts + o.after.simulatedVariants + o.after.simulatedPosts + o.after.simulatedPostMetrics + o.after.simulatedDailyMetrics : 0), 0);
+  const totalAfter = r.companies.reduce((n, o) => n + (o.after ? o.after.simulatedAccounts + o.after.variantsOnSimulatedAccounts + o.after.simulatedVariants + o.after.simulatedPosts + o.after.simulatedPostMetrics + o.after.simulatedDailyMetrics + o.after.simulatedBoosts : 0), 0);
   out.push("");
   if (r.refusedCompanies > 0) {
     out.push(`${r.refusedCompanies} company(ies) REFUSED: nothing changed in them. Each refusal above names the rows; a person decides them (infra/runbooks/social-simulation.md, "Turn off and purge").`);
   } else if (r.apply) {
-    out.push(totalAfter === 0 ? "Done: no simulated account, variant, post or metric row is left." : `Done, but ${totalAfter} simulated row(s) are still counted above: look before going on.`);
+    out.push(totalAfter === 0 ? "Done: no simulated account, variant, post, boost or metric row is left." : `Done, but ${totalAfter} simulated row(s) are still counted above: look before going on.`);
   } else {
     out.push("Nothing refused. Re-run with --apply to remove the rows listed.");
   }

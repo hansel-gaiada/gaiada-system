@@ -20,12 +20,15 @@
 //             withdraw the undecided D14 publish approvals of the variants (status 'cancelled', the unschedule statement's)
 //             -> social_post_metrics (simulated + manual, on those variants)   -> social_metrics_daily (simulated, on the accounts)
 //             -> social_post_client_reviews (of those variants)                 -> social_best_time_suggestions (of the accounts)
+//             -> social_boosts (simulated; hang off the posts, so they go BEFORE the posts are moved back: each is deleted while
+//                its post still carries the simulated mark the statement restates. No foreign key points at a boost, and the
+//                budgets, `social_boost_budgets`, are the client's agreements and stay)
 //             -> social_posts: the restores and repairs (the variants are still there; the statements do not read them)
 //             -> social_post_variants (on simulated accounts)                   -> social_accounts (simulated)
 //             -> social_publisher_orgs (the simulator's, now empty)             -> the content-month progress of the cycles
 //                                                                                   whose posts moved back (the pipeline's one writer)
 //           Every statement names the exact ids of the plan AND restates the kind in its own WHERE (a simulated account, a
-//           simulated source, the simulator's key alias), so even a planner bug cannot reach a real row; every row count is
+//           simulated source, a simulated boost on a simulated post, the simulator's key alias), so even a planner bug cannot reach a real row; every row count is
 //           checked against the plan, and a mismatch throws, which rolls the whole company back;
 //        d. the counts are read again inside the transaction (what the commit leaves).
 //   2. After each company's commit: one activity row for the company and one per post moved back or repaired (never a caption
@@ -72,13 +75,15 @@ export async function countFootprint(c: PoolClient, tenantId: string): Promise<F
        (SELECT count(*) FROM social_posts p WHERE p.tenant_id = $1 AND p.simulated) AS sp,
        (SELECT count(*) FROM social_post_metrics m WHERE m.tenant_id = $1 AND m.source = 'simulated') AS spm,
        (SELECT count(*) FROM social_metrics_daily m WHERE m.tenant_id = $1 AND m.source = 'simulated') AS sdm,
-       (SELECT count(*) FROM social_publisher_orgs o WHERE o.tenant_id = $1 AND o.api_key_ref = $2) AS so`,
+       (SELECT count(*) FROM social_publisher_orgs o WHERE o.tenant_id = $1 AND o.api_key_ref = $2) AS so,
+       (SELECT count(*) FROM social_boosts b WHERE b.tenant_id = $1 AND b.simulated) AS sb`,
     [tenantId, SIMULATOR_ORG_KEY_REF],
   );
   const x = r.rows[0];
   return {
     simulatedAccounts: Number(x.sa), variantsOnSimulatedAccounts: Number(x.vsa), simulatedVariants: Number(x.sv), simulatedPosts: Number(x.sp),
     simulatedPostMetrics: Number(x.spm), simulatedDailyMetrics: Number(x.sdm), simulatorOrgs: Number(x.so),
+    simulatedBoosts: Number(x.sb),
   };
 }
 
@@ -92,7 +97,9 @@ export async function readCompanyFacts(c: PoolClient, tenantId: string, company:
        FROM social_post_variants v JOIN social_accounts a ON a.id = v.account_id AND a.tenant_id = v.tenant_id
       WHERE v.tenant_id = $1 AND (a.simulated OR v.simulated)
      UNION
-     SELECT p.id FROM social_posts p WHERE p.tenant_id = $1 AND p.simulated`,
+     SELECT p.id FROM social_posts p WHERE p.tenant_id = $1 AND p.simulated
+     UNION
+     SELECT b.post_id FROM social_boosts b WHERE b.tenant_id = $1 AND b.simulated`,
     [tenantId],
   );
   const postIds = touched.rows.map((r) => r.id).sort();
@@ -132,6 +139,15 @@ export async function readCompanyFacts(c: PoolClient, tenantId: string, company:
        LEFT JOIN clients cl ON cl.id = e.client_id AND cl.tenant_id = e.tenant_id
       WHERE p.tenant_id = $1 AND p.id = ANY($2::uuid[])
       ORDER BY p.id`,
+    [tenantId, postIds],
+  );
+  // Every simulated boost, and every boost on a post above (so a REAL boost under a post the purge would move is seen and refused).
+  // The boost row takes the PLAIN tenant wall (the portal writes it), so no module scope is needed to read it; the posts it names
+  // are in `postIds` (locked above), and a boost request takes `FOR SHARE` on its post, so none can slip in under the lock.
+  const boosts = await c.query<{ id: string; post_id: string; status: string; simulated: boolean }>(
+    `SELECT b.id, b.post_id, b.status, b.simulated FROM social_boosts b
+      WHERE b.tenant_id = $1 AND (b.simulated OR b.post_id = ANY($2::uuid[]))
+      ORDER BY b.id`,
     [tenantId, postIds],
   );
   const postMetrics = await c.query<{ id: string; variant_id: string; source: string; account_simulated: boolean }>(
@@ -218,6 +234,7 @@ export async function readCompanyFacts(c: PoolClient, tenantId: string, company:
       pipelineStatus: p.pipeline_status, scheduleVia: p.schedule_via, liveUrl: p.live_url, wentLiveAt: iso(p.went_live_at),
       simulated: p.simulated, archived: p.archived, deleted: p.deleted,
     })),
+    boosts: boosts.rows.map((b) => ({ id: b.id, postId: b.post_id, status: b.status, simulated: b.simulated })),
     postMetrics: postMetrics.rows.map((m) => ({ id: m.id, variantId: m.variant_id, source: m.source, accountSimulated: m.account_simulated })),
     dailyMetrics: daily.rows.map((m) => ({ id: m.id, accountId: m.account_id, source: m.source, accountSimulated: m.account_simulated })),
     reviews: reviews.rows.map((r) => ({ id: r.id, variantId: r.variant_id })),
@@ -266,6 +283,12 @@ export async function applyPlan(c: PoolClient, p: PurgePlan): Promise<void> {
     `DELETE FROM social_best_time_suggestions b USING social_accounts a
       WHERE b.tenant_id = $1 AND b.id = ANY($2::uuid[]) AND a.id = b.account_id AND a.tenant_id = b.tenant_id AND a.simulated = true`,
     [t, p.deleteBestTime]);
+  // Simulated boosts, before their posts are touched: the statement restates the boost's own mark AND its post's (both simulated).
+  await exact(c, "social_boosts", p.deleteBoosts.length,
+    `DELETE FROM social_boosts b USING social_posts sp
+      WHERE b.tenant_id = $1 AND b.id = ANY($2::uuid[]) AND b.simulated = true
+        AND sp.id = b.post_id AND sp.tenant_id = b.tenant_id AND sp.simulated = true`,
+    [t, p.deleteBoosts.map((x) => x.id)]);
   // Posts moved back to the final check: only from a status the variants carried, never one scheduled or posted by hand.
   await exact(c, "social_posts moved back", p.restore.length,
     `UPDATE social_posts
@@ -338,7 +361,7 @@ async function logOutcome(p: PurgePlan): Promise<void> {
   await writeActivity(p.tenantId, null, "simulation_purged", "social_account", null, {
     script: SCRIPT, accountIds: p.deleteAccounts, variants: p.deleteVariants.length, reviews: p.deleteReviews.length,
     postMetrics: p.deletePostMetrics.length, manualPostMetrics: p.manualPostMetrics, dailyMetrics: p.deleteDailyMetrics.length,
-    bestTime: p.deleteBestTime.length, orgIds: p.deleteOrgs, withdrawnApprovalIds: p.withdrawApprovals,
+    bestTime: p.deleteBestTime.length, boosts: p.deleteBoosts.length, boostIds: p.deleteBoosts.map((x) => x.id), orgIds: p.deleteOrgs, withdrawnApprovalIds: p.withdrawApprovals,
     movedBack: p.restore.map((x) => x.postId), repaired: p.repair.map((x) => x.postId),
   });
   for (const x of p.restore) {

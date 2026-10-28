@@ -233,10 +233,13 @@ hangs off it: every variant on it (published by the simulator or not), those var
 numbers a person typed about them: the dry run counts these separately), their client reviews, their undecided publish
 approvals (withdrawn to `cancelled`, as an unschedule does, never deleted), the account's `simulated` daily rows and its
 best-time suggestion, and the publisher orgs SCP-Sb created for the simulator (`simulated:no-key`, `simulated-<client id>`)
-once no account names them.
+once no account names them. Since SCP-Se it also removes every **simulated boost** (`social_boosts.simulated = true`: a boost
+copies its post's simulated mark when it is requested, so the purge deletes it while its post still carries the mark, just before
+the post is moved back). The dry run lists each one (`WOULD REMOVE BOOST <id> <status> on post <post id>`).
 
 **What it never touches.** A real account, a variant on a real account, a `pull` metric or daily row, an OAuth grant or state,
-an inbox thread, a usage-ledger row, a post's content or date, a cycle, and every history row (`activities`, `work_activity`,
+an inbox thread, a usage-ledger row, a **real boost and every boost budget** (`social_boost_budgets`: the client's agreed
+monthly budgets are not simulated rows and stay), a post's content or date, a cycle, and every history row (`activities`, `work_activity`,
 notifications, decided approvals). It never deletes a post and never turns a simulated row real.
 
 **What happens to the posts.**
@@ -253,7 +256,8 @@ notifications, decided approvals). It never deletes a post and never turns a sim
 a `simulated` variant, metric or daily row on a real account; a `pull` metric or daily row, an OAuth grant or state, an inbox
 thread or a usage-ledger row on a simulated account; a provider post id or a published link on a simulated account's variant
 that is not the simulator's (a hand-posted link is fine); a post marked simulated that is not a simulated go-live; a post live
-through the publisher on simulated accounts whose link is not the simulator's. Each refusal is printed with the row ids. Every
+through the publisher on simulated accounts whose link is not the simulator's; a boost marked simulated whose post is not, and a
+**real** boost on a post marked simulated or on a post the purge would move back to `final`. Each refusal is printed with the row ids. Every
 one of them is impossible through the simulator's fences, so it is a bug or a hand edit to look at: a person decides each row,
 then the purge runs again. Two refusals stop the whole run before any company is read: the switch still on, and a table the
 purge does not know pointing at an account, a variant or an org (a new table must be classified in the plan file first).
@@ -286,7 +290,7 @@ echo "exit=$?"        # 0 = nothing refused; 2 = a refusal (or an error, or the 
 
 It prints one block per company that holds anything: the counts per table (`social_accounts (simulated)`,
 `social_post_variants (on a simulated account)`, `social_post_variants (simulated mark)`, `social_posts (simulated mark)`,
-`social_post_metrics (source simulated)`, `social_metrics_daily (source simulated)`, `social_publisher_orgs (the simulator's)`)
+`social_post_metrics (source simulated)`, `social_metrics_daily (source simulated)`, `social_publisher_orgs (the simulator's)`, `social_boosts (simulated mark)`)
 with what it would remove, the typed-in metric rows it would remove, every post it would move back (`WOULD MOVE BACK <id>
 <client> "<title>" <from> -> final`), repair or keep, and every org it leaves and why. Read it. Go on only if it is what you
 expect and the exit is `0`.
@@ -315,6 +319,7 @@ SELECT (SELECT count(*) FROM social_accounts WHERE simulated)                   
        (SELECT count(*) FROM social_posts WHERE simulated)                             AS simulated_posts,
        (SELECT count(*) FROM social_post_metrics WHERE source = 'simulated')           AS simulated_post_metrics,
        (SELECT count(*) FROM social_metrics_daily WHERE source = 'simulated')          AS simulated_daily_metrics,
+       (SELECT count(*) FROM social_boosts WHERE simulated)                            AS simulated_boosts,
        (SELECT count(*) FROM social_post_variants WHERE published_url LIKE 'https://simulated.invalid/%'
                                                      OR provider_post_id LIKE 'simulated:%') AS simulator_links_or_ids,
        (SELECT count(*) FROM social_posts WHERE live_url LIKE 'https://simulated.invalid/%') AS simulator_live_links;
@@ -334,5 +339,5 @@ covers, so it is a last resort, decided by the owner. The switch-off itself reve
 | `POST .../simulated-accounts` | simulated accounts and, if absent, the client's publisher org | on | refuses (409) rather than sit on a real account's network |
 | `DELETE .../simulated-accounts` | soft-deletes unused simulated accounts | no | no |
 | `social-simulation-purge.js` (dry run) | nothing | must be OFF | no |
-| `social-simulation-purge.js --apply` | deletes the simulator's footprint (step 7), withdraws its undecided publish approvals, moves posts the simulator carried back to `final`, plus activity rows | must be OFF | never; it refuses the company instead of guessing |
+| `social-simulation-purge.js --apply` | deletes the simulator's footprint (step 7, simulated boosts included; never a real boost or a budget), withdraws its undecided publish approvals, moves posts the simulator carried back to `final`, plus activity rows | must be OFF | never; it refuses the company instead of guessing |
 | Postiz connect / sync, LinkedIn and YouTube connect | real accounts only | no (allowed with it on since SCP-Sa2) | yes, never a simulated one (409 `simulated_account_on_real_publisher`, or a named skip in the sync) |
