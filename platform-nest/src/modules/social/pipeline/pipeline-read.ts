@@ -2,8 +2,9 @@
 // rows; `actions[]` is decided for the caller by the machine's `probe` (the steps of §63.3.2 that need no body) on one
 // Cerbos call, and `checks[]` by `readChecks`, so the page shows exactly what the routes would answer.
 //
-// Fields a later ticket owns answer their neutral value and say which ticket: `health` (SCP-1c), `boost` (SCP-4). None is a
-// made-up number. `tasks` (SCP-1n) is the PM tasks that point at the post.
+// Fields a later ticket owns answer their neutral value and say which ticket: `health` (SCP-1c). None is a made-up number.
+// `boost` (SCP-4a) is the post's open boost, else its newest, as a `BoostRow` (boosts-data.ts `readPostBoost`, BFF §63.11).
+// `tasks` (SCP-1n) is the PM tasks that point at the post.
 import type { PoolClient } from "pg";
 import type { Principal } from "../../../rbac/principal";
 import type { Resource } from "../../../rbac/cerbos";
@@ -11,6 +12,7 @@ import { SCP } from "./fixture";
 import { readChecks } from "./handoff-checks";
 import { listPostTasks } from "./post-tasks";
 import { readSimulatedPublishOffer } from "./simulated-publish";
+import { readPostBoost } from "./boosts-data";
 import {
   actionsFromStatus, cerbosActionsToAsk, changeCaseOf, engineStatusOf, holderOf, phaseOf, postStateFromRow, primaryActionOf, probe,
   type PipelinePostState,
@@ -190,7 +192,7 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
     approvedSchedule: approvedScheduleOf(state, variants),
     reviewHash: reviewHashOf(variants),
     liveUrl: row.live_url, wentLiveAt: iso(row.went_live_at), simulated: row.simulated, archivedAt: iso(row.archived_at),
-    boost: null, // SCP-4: boosts (BFF §63.11)
+    boost: await readPostBoost(c, tenantId, row.id), // SCP-4a: the open boost, else the newest, or null (BFF §63.6.2, §63.11)
     tasks, // the PM tasks that point at this post (SCP-1n, BFF §63.13)
     copyLog: copyLog.rows.map((r) => ({
       field: r.field, before: r.before, after: r.after, via: r.via, by: person(r.edited_by), suggestedBy: person(r.suggested_by), stage: r.stage, at: iso(r.edited_at),

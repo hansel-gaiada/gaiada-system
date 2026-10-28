@@ -3,6 +3,7 @@
 //   GET feed?view=your_turn|waiting|all&engagementId=&cycleId=&phase=&officerId=&cursor=&limit=   social_post · read   PipelineCard items
 //   GET waiting                                                                                    social_post · read   Messages: who holds my posts
 //   GET needs-you                                                                                  social_post · read   the pipeline's leg of lib/queue.ts
+//                                                                                                  (SCP-4a: + the seats' boosts approved, not started)
 //
 // AUTHORIZATION BEFORE VALIDATION (BFF §63.0): the read decision is asked first, so a refused caller always gets 403, never a 400.
 // What each caller SEES is narrowed by relationship facts read from the rows (the officer is the engagement's owner, a Creatives designer an
@@ -25,6 +26,7 @@ import { addDays } from "../../hr/working-days";
 import { grantCoversTenant, todayIsoInTz } from "../../reports/person-scope";
 import { loadSocialApproverIds } from "../pipeline-authz";
 import { findDepartmentBySlug, roleHolders } from "./pipeline-data";
+import { readBoostsToStart } from "./boosts-data";
 import { HOLDER_LABELS } from "./pipeline-read";
 import {
   FEED_WINDOW_AHEAD_DAYS, FEED_WINDOW_BEHIND_DAYS, readFeedCandidates, readFeedContext, readFeedPageExtras, readLastFollowUps, readMetricsMissing,
@@ -258,6 +260,26 @@ export class SocialFeedController {
       }
     } catch {
       partial.push("post metrics");
+    }
+    // Source 3 (SCP-4a, §63.7): for the HoD and GM seats, boosts approved but not started (every client's: the seats run the team's boosts).
+    try {
+      const data = await withTenants([tenantId], async (c) => {
+        const approverIds = await loadSocialApproverIds(c, tenantId);
+        if (!approverIds.includes(me)) return null;
+        const dept = await findDepartmentBySlug(c, tenantId, "social-media");
+        return { dept, rows: await readBoostsToStart(c, tenantId, NEEDS_YOU_MAX) };
+      }, SOCIAL);
+      if (data) {
+        const base = data.dept ? `/departments/${data.dept.id}/posts/` : "/departments#";
+        for (const r of data.rows) {
+          items.push({
+            id: `social:${tenantId}:${r.id}:boost_start`, kind: "boost_start", role: "approver", title: r.title, clientName: r.clientName,
+            since: r.since, due: r.startsOn, href: `${base}${r.postId}`,
+          });
+        }
+      }
+    } catch {
+      partial.push("boosts");
     }
     items.sort((a, b) => (a.since < b.since ? -1 : a.since > b.since ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     return { items: items.slice(0, NEEDS_YOU_MAX), partial };

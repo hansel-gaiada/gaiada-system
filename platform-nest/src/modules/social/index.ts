@@ -148,6 +148,9 @@ export const socialModule: ModuleContract = {
     "202610271600_social_simulation.sql",
     // SCP-2b (BFF §63.1 file 10, §63.8) — the stored thumbnail of a post's design (`social_post_designs.thumb_file_id`).
     "202610271700_social_design_thumbs.sql",
+    // SCP-4a (BFF §63.1 file 7, §63.11) — boosts and the monthly boost budget: social_boost_budgets and social_boosts, both on
+    // the PLAIN tenant wall (the portal writes them, as social_post_client_reviews).
+    "202610280500_social_boosts.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
