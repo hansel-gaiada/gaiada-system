@@ -84,9 +84,10 @@ describe.skipIf(!TEST_URL)("SCP-Sg · GET engagements/:engagementId/accounts-sum
   async function addAccount(tenant: string, e: Eng, network: string, handle: string, o: { simulated?: boolean; deleted?: boolean } = {}): Promise<string> {
     const id = newId();
     await adminPool().query(
-      `INSERT INTO social_accounts (id, tenant_id, client_id, publisher_org_id, network, handle, status, simulated, deleted_at, origin_site)
-       VALUES ($1, $2, $3, $4, $5, $6, 'connected', $7, $8, 'central')`,
-      [id, tenant, e.clientId, e.orgId, network, handle, o.simulated === true, o.deleted ? new Date() : null],
+      // A simulated account carries `simulated:<network>` as its integration id (SCP-Sa2's `social_accounts_kind_ck`).
+      `INSERT INTO social_accounts (id, tenant_id, client_id, publisher_org_id, network, handle, status, simulated, postiz_integration_id, deleted_at, origin_site)
+       VALUES ($1, $2, $3, $4, $5, $6, 'connected', $7, $8, $9, 'central')`,
+      [id, tenant, e.clientId, e.orgId, network, handle, o.simulated === true, o.simulated === true ? `simulated:${network}` : null, o.deleted ? new Date() : null],
     );
     return id;
   }

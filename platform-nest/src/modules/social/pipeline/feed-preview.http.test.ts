@@ -387,9 +387,16 @@ describe.skipIf(!TEST_URL)("SCP-3d · the feed preview (BFF §63.10)", () => {
       const e = await makeEngagement(A, U.officer);
       await daily(e.accountId, "2027-03-30", "simulated", "2027-03-30T10:00:00.000Z"); // a real account (simulated = false) holding a simulated row
       expect((await itemsOf(e.engagementId)).lastSyncedAt).toBeNull();
-      await adminPool().query(`UPDATE social_accounts SET simulated = true WHERE id = $1`, [e.accountId]);
+      // A simulated account of the same client (an account's kind is fixed once it holds an integration id, SCP-Sa2, so
+      // this is a second account rather than the first one flipped): its simulated row counts, its pulled row never does.
+      const orgId = (await adminPool().query(`SELECT publisher_org_id::text AS id FROM social_accounts WHERE id = $1`, [e.accountId])).rows[0].id as string;
+      const simAccount = newId();
+      await adminPool().query(
+        `INSERT INTO social_accounts (id, tenant_id, client_id, publisher_org_id, network, handle, status, simulated, postiz_integration_id, origin_site)
+         VALUES ($1, $2, $3, $4, 'facebook', '@mock-sim-facebook', 'connected', true, 'simulated:facebook', 'central')`, [simAccount, A, e.clientId, orgId]);
+      await daily(simAccount, "2027-03-30", "simulated", "2027-03-30T10:00:00.000Z");
       expect((await itemsOf(e.engagementId)).lastSyncedAt).toBe("2027-03-30T10:00:00.000Z");
-      await daily(e.accountId, "2027-03-31", "pull", "2027-04-01T00:00:00.000Z"); // a pulled row under a simulated account
+      await daily(simAccount, "2027-03-31", "pull", "2027-04-01T00:00:00.000Z"); // a pulled row under a simulated account
       expect((await itemsOf(e.engagementId)).lastSyncedAt).toBe("2027-03-30T10:00:00.000Z");
     });
 
