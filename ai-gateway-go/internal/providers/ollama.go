@@ -33,6 +33,16 @@ func (p *OllamaProvider) Available() bool { return p.URL != "" }
 // configured with, exactly what /api/generate is called with — never the embed model.
 func (p *OllamaProvider) ModelName() string { return p.Model }
 
+// WithModel implements ModelOverrider (AIP-06): a shallow copy with the chat model replaced; the
+// embed model and the receiver are untouched. Both Complete and the stream read p.Model per call.
+func (p *OllamaProvider) WithModel(model string) Provider {
+	c := *p
+	c.Model = model
+	return &c
+}
+
+var _ ModelOverrider = (*OllamaProvider)(nil)
+
 func (p *OllamaProvider) Complete(ctx context.Context, prompt string) (string, error) {
 	// Marshal error is safely ignored: the input is always a struct of strings/bools,
 	// which is always marshalable.

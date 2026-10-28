@@ -31,6 +31,17 @@ func (p *GeminiProvider) Available() bool { return p.APIKey != "" }
 // ModelName implements providers.ModelReporter (ASST-11).
 func (p *GeminiProvider) ModelName() string { return p.Model }
 
+// WithModel implements ModelOverrider (AIP-06): a shallow copy with the model replaced. The model is
+// read per call (it becomes the URL's /models/<model>:generateContent segment inside generate, never
+// at construction), and the receiver is untouched. Embed uses its own fixed model.
+func (p *GeminiProvider) WithModel(model string) Provider {
+	c := *p
+	c.Model = model
+	return &c
+}
+
+var _ ModelOverrider = (*GeminiProvider)(nil)
+
 func (p *GeminiProvider) base() string {
 	if p.baseURL != "" {
 		return p.baseURL

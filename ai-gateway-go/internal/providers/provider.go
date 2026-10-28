@@ -75,3 +75,13 @@ type SessionStreamingProvider interface {
 	StreamingProvider
 	CompleteStreamSession(ctx context.Context, prompt, session string, onToken func(string), onSession func(session string, resumed bool, requestedSession string)) error
 }
+
+// ModelOverrider is an optional capability (AIP-06): a provider that reads its text model on every
+// call implements WithModel, which returns a SHALLOW COPY using `model` for text completion. The
+// gateway uses the copy for ONE attempt of a tier-routed request (the shared provider is never
+// mutated, and Name() must not change so the circuit breaker stays one per provider). Providers that
+// bake their model in elsewhere or have none (hermes, echo, central-forward, whisper) do not
+// implement it, and a tier entry naming a model for them is refused at validation.
+type ModelOverrider interface {
+	WithModel(model string) Provider
+}
