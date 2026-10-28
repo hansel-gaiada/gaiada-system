@@ -2,9 +2,12 @@
 //
 //   GET calendar?from=&to=&engagementId=      social_post · read      the pipeline posts scheduled in the range
 //
-// WHAT IT ANSWERS. `{items: [{postId, clientName, title, format, scheduledAt, pipelineStatus, phase, simulated}]}`, oldest first. The `phase` is the
-// fixture's (`postPhase`, the same function the health read uses: for `changes` it is the change case's phase), so the UI colours by it without a second
-// table. Holidays and approved leave come from the department calendar (§59), merged by the UI; Monday-first and the phase colours are the UI's.
+// WHAT IT ANSWERS. `{items: [{postId, clientName, title, format, scheduledAt, pipelineStatus, phase, simulated, dateMove, dateMoveRefusal}]}`, oldest first.
+// The `phase` is the fixture's (`postPhase`, the same function the health read uses: for `changes` it is the change case's phase), so the UI colours by it
+// without a second table. Holidays and approved leave come from the department calendar (§59), merged by the UI; Monday-first and the phase colours are the UI's.
+// SCP-3e: each item also says what a date move would do (`dateMove`: `edit`, `reschedule` or `locked`; `dateMoveRefusal`: `field_locked`, `post_is_live`
+// or null), by `dateMoveOf` (the feed preview's own function, the fixture's `systemRules.date_moves`), so the grid decides a drag from the server's answer
+// and never from the status alone (a `changes` post is an edit or locked by its change case, which only this read can see).
 //
 // THE RANGE. `from` and `to` are real `YYYY-MM-DD` days in the company's report zone (`REPORTS_TZ`, UTC when unset: the same day rule as the cycles).
 // The range is INCLUSIVE and covers at most 62 days (two calendar months); a longer one is 400 `{field: "to"}`. A missing or malformed date is 400
@@ -27,6 +30,7 @@ import { ModuleEnabledGuard } from "../../module-enabled.guard";
 import { parseIsoDate } from "../../hr/working-days";
 import { declareSocialModuleScope } from "../module-scope";
 import { invalidField } from "./brand-book";
+import { dateMoveOf, type DateMoveKind } from "./feed-preview";
 import { looksLikeIsoDate, postPhase } from "./schedule-health";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -43,6 +47,10 @@ export interface CalendarItem {
   pipelineStatus: string;
   phase: string | null;
   simulated: boolean;
+  /** What dragging the post to another day does (SCP-3e): an edit of the date, `reschedule` (the client is asked again), or locked. */
+  dateMove: DateMoveKind;
+  /** The refusal a move would get when `dateMove` is `locked`; null otherwise. */
+  dateMoveRefusal: "post_is_live" | "field_locked" | null;
 }
 
 /** A real calendar day as UTC milliseconds, or 400 `{field}`. */
@@ -108,19 +116,27 @@ export class SocialCalendarController {
     );
 
     return {
-      items: rows.map((r): CalendarItem => ({
-        postId: r.id,
-        clientName: r.client_name,
-        title: r.title,
-        format: r.format,
-        scheduledAt: new Date(r.scheduled_at).toISOString(),
-        pipelineStatus: r.pipeline_status,
-        phase: postPhase({
-          status: r.pipeline_status, changeBy: r.change_by, changeKind: r.change_kind, returnTo: r.return_to, changedOnly: r.changed_only,
-          blockedFrom: r.blocked_from, blockWaitingOn: r.block_waiting_on,
-        }),
-        simulated: r.simulated === true,
-      })),
+      items: rows.map((r): CalendarItem => {
+        const move = dateMoveOf({
+          pipelineStatus: r.pipeline_status, changeBy: r.change_by, changeKind: r.change_kind, returnTo: r.return_to,
+          scheduleVia: null, blockWaitingOn: r.block_waiting_on, creativeState: null,
+        });
+        return {
+          postId: r.id,
+          clientName: r.client_name,
+          title: r.title,
+          format: r.format,
+          scheduledAt: new Date(r.scheduled_at).toISOString(),
+          pipelineStatus: r.pipeline_status,
+          phase: postPhase({
+            status: r.pipeline_status, changeBy: r.change_by, changeKind: r.change_kind, returnTo: r.return_to, changedOnly: r.changed_only,
+            blockedFrom: r.blocked_from, blockWaitingOn: r.block_waiting_on,
+          }),
+          simulated: r.simulated === true,
+          dateMove: move.move,
+          dateMoveRefusal: move.refusal,
+        };
+      }),
     };
   }
 }

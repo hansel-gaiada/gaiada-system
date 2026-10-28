@@ -10,6 +10,9 @@
 //   6. Another company's posts are left out, and a member of another company is refused.
 //   7. `social_post` · `read` decides: no social tier is 403, before the query is validated (a refused caller never gets a 400).
 //   8. A simulated post says so.
+//   9. SCP-3e: every item says what a date move would do (`dateMove`, `dateMoveRefusal`), by the fixture's `dateMoveOf` (the feed preview's function): planned,
+//      drafting and a team copy change are `edit`; approved and scheduled `reschedule`; the rest, a client copy change included, `locked` with `field_locked`;
+//      a live post `locked` with `post_is_live`.
 //
 // The days are fixed, not relative to today: the read does not depend on the clock.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -29,6 +32,7 @@ const asUser = (id: string) => ({ ...svc, "x-user-id": id });
 
 interface Item {
   postId: string; clientName: string; title: string; format: string | null; scheduledAt: string; pipelineStatus: string; phase: string | null; simulated: boolean;
+  dateMove: string; dateMoveRefusal: string | null;
 }
 
 describe("parseCalendarRange (pure)", () => {
@@ -102,14 +106,17 @@ describe.skipIf(!TEST_URL)("social calendar (SCP-1k)", () => {
         `INSERT INTO social_posts (id, tenant_id, engagement_id, cycle_id, title, scheduled_at, pipeline_status, status_since, format,
                                    change_by, change_kind, return_to, change_note,
                                    blocked_from, block_waiting_on, block_reason, blocked_at,
-                                   archived_at, archived_by, archive_reason, deleted_at, simulated)
+                                   archived_at, archived_by, archive_reason, deleted_at, simulated, schedule_via, live_url, went_live_at)
          VALUES ($1, $2, $3, CASE WHEN $6::text IS NULL THEN NULL ELSE $16::uuid END, $4, $5::timestamptz, $6, CASE WHEN $6::text IS NULL THEN NULL ELSE now() END, $7,
                  $8, $9, $10, CASE WHEN $8::text IS NULL THEN NULL ELSE 'a note' END,
                  $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'officer' END, CASE WHEN $11::text IS NULL THEN NULL ELSE 'waiting' END,
                  CASE WHEN $11::text IS NULL THEN NULL ELSE now() END,
                  CASE WHEN $12::boolean THEN now() ELSE NULL END, CASE WHEN $12::boolean THEN $13::uuid ELSE NULL END,
                  CASE WHEN $12::boolean THEN 'archived' ELSE NULL END,
-                 CASE WHEN $14::boolean THEN now() ELSE NULL END, $15::boolean)`,
+                 CASE WHEN $14::boolean THEN now() ELSE NULL END, $15::boolean,
+                 CASE WHEN $6::text IN ('scheduled','live') THEN 'manual' ELSE NULL END,
+                 CASE WHEN $6::text = 'live' THEN 'https://example.invalid/p/1' ELSE NULL END,
+                 CASE WHEN $6::text = 'live' THEN now() ELSE NULL END)`,
         [id, tenant, e.id, title, at, status, o.format ?? null, o.changeBy ?? null, o.changeKind ?? null, o.returnTo ?? null,
          o.blockedFrom ?? null, o.archived ?? false, o.archivedBy ?? null, o.deleted ?? false, o.simulated ?? false, e.cycleId],
       ),
@@ -167,12 +174,42 @@ describe.skipIf(!TEST_URL)("social calendar (SCP-1k)", () => {
     const by = (t: string) => items.find((i) => i.title === t)!;
     expect(by("Alpha first")).toEqual({
       postId: ids.first, clientName: "Calendar Alpha", title: "Alpha first", format: "feed", scheduledAt: "2026-03-02T12:00:00.000Z",
-      pipelineStatus: "planned", phase: "brief", simulated: false,
+      pipelineStatus: "planned", phase: "brief", simulated: false, dateMove: "edit", dateMoveRefusal: null,
     });
     expect(by("Alpha with the client")).toMatchObject({ pipelineStatus: "client", phase: "with_client", format: "reel" });
     expect(by("Alpha client change")).toMatchObject({ pipelineStatus: "changes", phase: "client_changes", format: "carousel" });
     expect(by("Alpha blocked")).toMatchObject({ pipelineStatus: "blocked", phase: "brief", format: null });
     expect(by("Beta post")).toMatchObject({ clientName: "Calendar Beta", simulated: true });
+  });
+
+  it("says what a date move does to each post, by the fixture (SCP-3e)", async () => {
+    // February 2026: one post per status that matters, apart from March's so the other claims keep their lists.
+    const day = (n: number) => `2026-02-${String(n).padStart(2, "0")}T12:00:00Z`;
+    const kinds: Array<[string, string, Parameters<typeof insertPost>[4], string, string | null]> = [
+      ["planned", "planned", {}, "edit", null],
+      ["drafting", "drafting", {}, "edit", null],
+      ["team copy change", "changes", { changeBy: "hod", changeKind: "copy", returnTo: "hod" }, "edit", null],
+      ["final copy change", "changes", { changeBy: "final", changeKind: "copy", returnTo: "final" }, "edit", null],
+      ["client copy change", "changes", { changeBy: "client", changeKind: "copy", returnTo: "proofread" }, "locked", "field_locked"],
+      ["final design change", "changes", { changeBy: "final", changeKind: "design", returnTo: "final" }, "locked", "field_locked"],
+      ["approved", "approved", {}, "reschedule", null],
+      ["scheduled", "scheduled", {}, "reschedule", null],
+      ["proofread", "proofread", {}, "locked", "field_locked"],
+      ["hod", "hod", {}, "locked", "field_locked"],
+      ["client", "client", {}, "locked", "field_locked"],
+      ["blocked", "blocked", { blockedFrom: "drafting" }, "locked", "field_locked"],
+      ["live", "live", {}, "locked", "post_is_live"],
+    ];
+    let n = 1;
+    for (const [title, status, o] of kinds) await insertPost(A, engA, `Move ${title}`, day(n++), { ...o, status });
+    const r = await get(U.staff, "?from=2026-02-01&to=2026-02-28");
+    expect(r.statusCode, r.body).toBe(200);
+    const items = (r.json() as { items: Item[] }).items;
+    expect(items).toHaveLength(kinds.length);
+    for (const [title, status, , move, refusal] of kinds) {
+      const it = items.find((i) => i.title === `Move ${title}`)!;
+      expect({ title, status: it.pipelineStatus, dateMove: it.dateMove, dateMoveRefusal: it.dateMoveRefusal }).toEqual({ title, status, dateMove: move, dateMoveRefusal: refusal });
+    }
   });
 
   it("leaves out an archived post, a deleted post, a Composer post, a post with no date, and another company's post", async () => {
