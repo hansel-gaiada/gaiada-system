@@ -11,6 +11,11 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.197.0` - Fix: a social post with no first comment could not be published through an approval (found live on the SCP-S walk, 2026-10-28) - PROTOTYPED
+
+- **The bug.** A publish approval stores the variant's canonical args (`variantPublishArgs`, canonical-args.ts), which keep a missing first comment and an unscheduled variant as explicit nulls so the args hash never depends on the path that built it. The executor re-drives exactly those args through the MCP hub's validator, but `social.publishPost` and `social.publishPostMetered` declared `firstComment` and `scheduledAt` as plain strings, so every decided approval for a variant with no first comment failed with `tool_error: invalid arguments … firstComment: expected string, got null`. Every pipeline post's variants are built without a first comment, so no pipeline post could be published through the publisher, simulated or real. The route tests missed it because their executor stub calls the dispatch directly, skipping the hub's validator.
+- **The fix.** Both tools declare `firstComment` and `scheduledAt` as `["string", "null"]`; the args and their hash are unchanged, so approvals already filed and failed can simply be filed again. `publish-tool-args.test.ts` pins every key the canonical args carry, in every shape they take, against both tools' declared types (it fails on the old schema: 6 of 7).
+
 ### ai-gateway-go `0.19.0` + platform-nest `0.196.0` - AIP-03c, train 19: the knowledge re-index can finish. No echo vectors, no oversized chunks, no queue pile-up (2026-10-28) - PROTOTYPED
 
 - **Why.** The live proof of 452 failed twice, and the cause was older than 452. During a sweep the gateway's embed chain kept falling over to **echo**. Between 06:51 and 06:54 UTC echo answered 8,507 embeds and ollama answered 57. Echo's vectors are a 128-number word hash, and the store holds 768-number `nomic-embed-text` vectors, so pgvector refused every one (`expected 768 dimensions, not 128`). Each source rolled back, so nothing was lost, but the index could never catch up. Three causes, one per fix:
