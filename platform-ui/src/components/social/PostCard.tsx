@@ -3,6 +3,7 @@
 // a drawer over the page.
 import Link from "next/link";
 import { HealthChip } from "./HealthChip";
+import { SimulatedMark } from "./SimulatedMark";
 import type { CSSProperties } from "react";
 import { formatWords, holderLabel, phaseLabel, phaseStyle, statusLabel, type ClientPost } from "@/lib/socialClient";
 
@@ -17,6 +18,7 @@ export function PostCard({ post, href }: { post: ClientPost; href: string }) {
         <span>With {holderLabel(post.holder).toLowerCase()}</span>
       </span>
       {post.isExtra && <span className="scp-pcard__flag">Extra post · outside the target</span>}
+      {post.simulated && <SimulatedMark />}
       {post.health && <HealthChip health={post.health} />}
     </Link>
   );

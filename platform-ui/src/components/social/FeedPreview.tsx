@@ -19,6 +19,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState, useTransition, type CSSProperties, type DragEvent, type KeyboardEvent } from "react";
 import { swapFeedPreview } from "@/lib/socialClientActions";
+import { SimulatedMark } from "./SimulatedMark";
 import { formatDateTime } from "@/lib/format";
 import { lastSyncedText } from "@/lib/socialAccountsSummary";
 import { PHASE_LEGEND, formatWords, phaseStyle, postHref, statusLabel } from "@/lib/socialClient";
@@ -223,7 +224,7 @@ export function FeedPreview({
                 </span>
                 {it.locked && <span className="scp-feed__lock" aria-hidden="true">Live · locked</span>}
                 {!it.locked && !movable && <span className="scp-feed__lock" aria-hidden="true">Date locked</span>}
-                {it.simulated && <span className="scp-feed__sim" aria-hidden="true">SIMULATED</span>}
+                {it.simulated && <SimulatedMark className="scp-feed__sim" />}
               </button>
               <Link href={postHref(deptId, it.postId)} className="scp-feed__open" aria-label={`Open ${it.title}`} draggable={false}>Open</Link>
               {live?.kind === "link" && (

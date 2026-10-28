@@ -12,6 +12,7 @@ import { useId, useState, useTransition } from "react";
 import { Modal } from "@/components/overlay/Modal";
 import { PinOverlay } from "@/components/social/PinOverlay";
 import { RefusalNote } from "@/components/social/PostRefusal";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { formatDateTime } from "@/lib/format";
 import { runPostAction, runSimulatedPublishNow, type WriteResult } from "@/lib/socialPipelineActions";
 import {
@@ -76,7 +77,7 @@ export function PostActionBar({ post, image, onResult }: { post: PipelinePost; i
           ))}
           {publishNow?.allowed && (
             <button type="button" disabled={pending} onClick={pressPublishNow} className="lux-btn lux-btn--ghost lux-btn--sm">
-              {PUBLISH_NOW_LABEL} <span className="scp-chip scp-chip--sim">SIMULATED</span>
+              {PUBLISH_NOW_LABEL} <SimulatedMark of="action" />
             </button>
           )}
         </div>

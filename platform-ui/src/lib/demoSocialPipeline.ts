@@ -466,7 +466,7 @@ export function demoCycleHealth(cycleId: string): DemoResult {
     today: todayIsoInDisplayZone(), bufferWorkingDays: cyclesStore.bufferWorkingDays, holidaysKnown: true,
     estimates: store.allocations[eng.id].stepEstimates, averageApprovalDays: null, clientSlower: false, client: demoClientHealth(cycle),
     posts: store.posts.filter((p) => p.cycleId === cycle.id && !p.archivedAt).map((p) => ({
-      postId: p.id, title: p.title, status: p.pipelineStatus, phase: scpPhaseOf(view(p)), holder: holderRole(p), isExtra: p.isExtra, format: p.format, health: demoPostHealth(p),
+      postId: p.id, title: p.title, status: p.pipelineStatus, phase: scpPhaseOf(view(p)), holder: holderRole(p), isExtra: p.isExtra, format: p.format, health: demoPostHealth(p), simulated: p.simulated,
     })),
   });
 }

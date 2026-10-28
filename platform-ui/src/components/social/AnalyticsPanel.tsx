@@ -13,6 +13,7 @@
 import type { CSSProperties } from "react";
 import type { DailyMetricRow, PostMetricRow } from "@/lib/socialShared";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { SimulatedMark } from "./SimulatedMark";
 
 function fmtMetric(v: number | null | undefined): string {
   return v === null || v === undefined ? "—" : v.toLocaleString();
@@ -48,7 +49,8 @@ function AccountDailyTable({ network, handle, displayName, rows }: {
           </div>
           {rows.map((r) => (
             <div className="lux-table__row" style={GRID_GAP} key={`${r.accountId}-${r.date}`}>
-              <span>{fmtDate(r.date)}</span>
+              {/* SCP-Sf: a day the social simulator wrote says so beside its date (plan §5: every screen that shows a simulated row). */}
+              <span>{fmtDate(r.date)}{r.source === "simulated" && <> <SimulatedMark of="metrics" /></>}</span>
               <span>{fmtMetric(r.followers)}</span>
               <span>{fmtMetric(r.impressions)}</span>
               <span>{fmtMetric(r.reach)}</span>
@@ -123,6 +125,7 @@ export function AnalyticsPanel({ dailySeries, postMetrics }: {
                     {p.publishedUrl
                       ? <a href={p.publishedUrl} target="_blank" rel="noreferrer">{p.network}</a>
                       : p.network}
+                    {p.source === "simulated" && <> <SimulatedMark of="metrics" /></>}
                   </span>
                   <span>{p.publishedAt ? fmtDate(p.publishedAt.slice(0, 10)) : "—"}</span>
                   <span>{fmtMetric(p.impressions)}</span>

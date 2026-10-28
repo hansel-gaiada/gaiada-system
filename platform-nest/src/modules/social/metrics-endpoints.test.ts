@@ -147,6 +147,7 @@ describe.skipIf(!TEST_URL)("SMM-21 · Analytics endpoints (metrics/daily, metric
     expect(day15.engagements).toBe(180);
     expect(day14.network).toBe("instagram");
     expect(day14.accountId).toBe(accountId);
+    expect(day14.source).toBe("pull"); // SCP-Sf: the provenance travels with the row, so a simulated day can be marked
   });
 
   it("filters by date range (`from`/`to`)", async () => {
@@ -197,6 +198,7 @@ describe.skipIf(!TEST_URL)("SMM-21 · Analytics endpoints (metrics/daily, metric
     expect(row.comments).toBe(4);
     expect(row.network).toBe("instagram");
     expect(row.publishedUrl).toBe("https://instagram.example/p/1");
+    expect(row.source).toBe("pull"); // SCP-Sf
   });
 
   it("400 missing_field on metrics/posts with no engagementId", async () => {

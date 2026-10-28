@@ -7,7 +7,7 @@
 // could not be read is said once under the list, and an account is never drawn with "0 followers" it was not measured to have.
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { SimulatedAccountChip } from "./SimulatedAccountChip";
+import { SimulatedMark } from "./SimulatedMark";
 import "@/components/social/simulated-account.css";
 import { seedSimulatedAccounts } from "@/lib/socialSimulatedAccountsActions";
 import { networksMissingAccount } from "@/lib/socialSimulatedAccounts";
@@ -59,7 +59,7 @@ export function ClientAccounts({
             <li key={a.id} className="scp-accts__item">
               <b>{NETWORK_LABEL[a.network] ?? a.network}</b>
               <span className="scp-accts__handle">{a.handle}</span>
-              {a.simulated && <SimulatedAccountChip />}
+              {a.simulated && <SimulatedMark of="account" />}
               {summary?.kind === "ok" && <span className="scp-accts__stat">{accountStatText(stats.get(a.id) ?? { followers: null, lastSyncedAt: null })}</span>}
             </li>
           ))}

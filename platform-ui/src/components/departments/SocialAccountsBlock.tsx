@@ -1,5 +1,5 @@
 import { StatusBadge } from "@/components/ui";
-import { SimulatedAccountChip } from "@/components/social/SimulatedAccountChip";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import type { SocialAccount } from "@/lib/socialShared";
 
 // DW-6c: the social accounts block of the Connections section. Read-only: the backend's
@@ -22,7 +22,7 @@ export function SocialAccountsBlock({ accounts, forbidden = false }: { accounts:
                 <span className="dept-conn-row__account">{a.handle}</span>
                 <StatusBadge label={a.status} />
                 {/* SCP-Sb: a seeded mock account says so, in words, beside its name. */}
-                {a.simulated && <SimulatedAccountChip withNote />}
+                {a.simulated && <SimulatedMark of="account" withNote />}
               </div>
             </li>
           ))}

@@ -2648,9 +2648,11 @@ export class SocialController {
         // `date` is a plain SQL DATE column — cast to text (not handed back as a JS Date) so a
         // local timezone offset can never shift it a day either way on its way to JSON, the same
         // trap `pm.controller.ts`/`document-builder.ts` already guard every date column against.
+        // SCP-Sf: `source` ('pull' | 'simulated', 202610271600) travels with every row, so the console marks a simulated day
+        // SIMULATED beside its numbers (plan §5: every screen that shows a simulated row says so).
         `SELECT m.account_id AS "accountId", a.network, a.handle, a.display_name AS "displayName",
                 m.date::text AS date, m.followers, m.impressions, m.reach, m.engagements,
-                m.link_clicks AS "linkClicks", m.video_views AS "videoViews"
+                m.link_clicks AS "linkClicks", m.video_views AS "videoViews", m.source
            FROM social_metrics_daily m
            JOIN social_accounts a ON a.id = m.account_id AND a.tenant_id = m.tenant_id
            JOIN social_engagements e ON e.client_id = a.client_id AND e.tenant_id = a.tenant_id
@@ -2683,7 +2685,7 @@ export class SocialController {
                 pm.variant_id AS "variantId", v.post_id AS "postId", v.account_id AS "accountId",
                 a.network, v.published_at AS "publishedAt", v.published_url AS "publishedUrl",
                 pm.impressions, pm.likes, pm.comments, pm.shares, pm.saves,
-                pm.video_views AS "videoViews", pm.clicks, pm.fetched_at AS "fetchedAt"
+                pm.video_views AS "videoViews", pm.clicks, pm.fetched_at AS "fetchedAt", pm.source
            FROM social_post_metrics pm
            JOIN social_post_variants v ON v.id = pm.variant_id AND v.tenant_id = pm.tenant_id
            JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
