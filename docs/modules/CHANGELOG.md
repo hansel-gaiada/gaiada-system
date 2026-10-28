@@ -11,7 +11,7 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `NEST_NEXT` + platform-ui `UI_NEXT` - SCP-S train 4: a post is wholly simulated or wholly real (SCP-Sa3); one SIMULATED mark on every screen, its render pin, and the purge before real data (SCP-Sf) (plan §5, SCP-D9; FRONTEND-BFF-CONTRACT §63.1 file 8, §63.5, §63.14) (2026-10-28) - PROTOTYPED
+### platform-nest `0.195.0` + platform-ui `0.219.0` - SCP-S train 4: a post is wholly simulated or wholly real (SCP-Sa3); one SIMULATED mark on every screen, its render pin, and the purge before real data (SCP-Sf) (plan §5, SCP-D9; FRONTEND-BFF-CONTRACT §63.1 file 8, §63.5, §63.14) (2026-10-28) - PROTOTYPED
 
 - **Never a half-simulated post (SCP-Sa3).** `final_approve` and `schedule_publisher` refuse 409 `publisher_kinds_mixed` (with the networks of each kind) when a post's networks mix simulated and real accounts; nothing is written. The demo applies the same rule.
 - **One mark (SCP-Sf).** `SimulatedMark` (accessible name "Simulated") replaces every ad-hoc chip: accounts strip, Connections, inbox, quota strip, post header and networks, metrics, "Publish now (simulated)", Feed preview, Home cards, client post cards and list, Analytics, the portal post card, the calendars and the Overview Pulse tiles. A render pin fails when a component reads the flag without drawing it, or when another file writes the word. The cycle health's posts and the SMM metrics rows gain `simulated` / `source` so the mark can show.
