@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"gaiada/ai-gateway-go/internal/routing"
 )
 
 // Overrides is the persisted set. A nil pointer means "not overridden — use the env value", which is
@@ -33,6 +35,11 @@ type Overrides struct {
 	LLMChain              []string `json:"llmChain,omitempty"`
 	MediaChain            []string `json:"mediaChain,omitempty"`
 	EmbedChain            []string `json:"embedChain,omitempty"`
+	// Tiers and TaskTiers (AIP-06) are POINTERS to maps so that "overridden to no tiers" (an empty
+	// object, persisted as {}) is distinguishable from "not overridden" (nil, use the env table).
+	// The maps are replaced wholesale by a write and never edited in place.
+	Tiers     *map[string]routing.Entry `json:"tiers,omitempty"`
+	TaskTiers *map[string]string        `json:"taskTiers,omitempty"`
 }
 
 // WritableKeys is the allowlist the HTTP layer validates against, and what the console renders as
@@ -47,6 +54,8 @@ var WritableKeys = []string{
 	"llmChain",
 	"mediaChain",
 	"embedChain",
+	"tiers",
+	"taskTiers",
 }
 
 func IsWritable(key string) bool {
@@ -103,7 +112,9 @@ var numericBounds = map[string][2]int{
 //
 // knownProviders gates the chain keys: a chain naming a provider this build doesn't have would
 // silently shrink the chain (buildChain skips unknown names), so it is rejected up front instead.
-func (s *Store) Set(key string, value any, knownProviders []string) (any, error) {
+// It also gates the `tiers` key's provider names; overridableProviders (those implementing
+// providers.ModelOverrider) gates which of them may carry a model.
+func (s *Store) Set(key string, value any, knownProviders, overridableProviders []string) (any, error) {
 	if !IsWritable(key) {
 		return nil, fmt.Errorf("%s is not runtime-writable (env + restart only)", key)
 	}
@@ -156,6 +167,22 @@ func (s *Store) Set(key string, value any, knownProviders []string) (any, error)
 			s.ov.EmbedChain = names
 		}
 		return names, s.persistLocked()
+
+	case "tiers":
+		m, err := toTiers(value, routing.NewValidator(knownProviders, overridableProviders))
+		if err != nil {
+			return nil, err
+		}
+		s.ov.Tiers = &m
+		return m, s.persistLocked()
+
+	case "taskTiers":
+		m, err := toTaskTiers(value)
+		if err != nil {
+			return nil, err
+		}
+		s.ov.TaskTiers = &m
+		return m, s.persistLocked()
 	}
 	return nil, fmt.Errorf("unhandled key %s", key)
 }
@@ -206,6 +233,10 @@ func (s *Store) Clear(key string) error {
 		s.ov.MediaChain = nil
 	case "embedChain":
 		s.ov.EmbedChain = nil
+	case "tiers":
+		s.ov.Tiers = nil
+	case "taskTiers":
+		s.ov.TaskTiers = nil
 	}
 	return s.persistLocked()
 }
@@ -290,6 +321,93 @@ func toChain(v any, known []string) ([]string, error) {
 		return nil, fmt.Errorf("chain must name at least one provider")
 	}
 	return out, nil
+}
+
+// objectOf accepts a JSON object either already decoded (map[string]any, what a PUT body yields) or
+// as a JSON string (what a console text field sends) and returns it as a generic map.
+func objectOf(v any, what string) (map[string]any, error) {
+	switch t := v.(type) {
+	case map[string]any:
+		return t, nil
+	case string:
+		var m map[string]any
+		if err := json.Unmarshal([]byte(t), &m); err != nil || m == nil {
+			return nil, fmt.Errorf("%s must be a JSON object", what)
+		}
+		return m, nil
+	}
+	return nil, fmt.Errorf("%s must be a JSON object", what)
+}
+
+// toTiers parses and validates a `tiers` write: {"fast": {"provider": "openai", "model": ""}, ...}.
+// Keys only fast|standard|strong; an entry has exactly the fields provider and model (model may be
+// omitted or empty). An empty object is valid and means "no tiers".
+func toTiers(v any, val routing.Validator) (map[string]routing.Entry, error) {
+	obj, err := objectOf(v, "tiers")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]routing.Entry, len(obj))
+	for tier, raw := range obj {
+		fields, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("tiers.%s must be an object {provider, model}", tier)
+		}
+		var e routing.Entry
+		for name, fv := range fields {
+			if name != "provider" && name != "model" {
+				return nil, fmt.Errorf("tiers.%s: unknown field %q (allowed: provider, model)", tier, name)
+			}
+			str, ok := fv.(string)
+			if !ok {
+				return nil, fmt.Errorf("tiers.%s.%s must be a string", tier, name)
+			}
+			if name == "provider" {
+				e.Provider = strings.TrimSpace(str)
+			} else {
+				e.Model = strings.TrimSpace(str)
+			}
+		}
+		out[tier] = e
+	}
+	if err := val.CheckTiers(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// toTaskTiers parses and validates a `taskTiers` write: {"summarise": "fast", ...}. Keys only the
+// five tasks, values only the three tiers. An empty object is valid.
+func toTaskTiers(v any) (map[string]string, error) {
+	obj, err := objectOf(v, "taskTiers")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(obj))
+	for task, raw := range obj {
+		tier, ok := raw.(string)
+		if !ok {
+			return nil, fmt.Errorf("taskTiers.%s must be a tier name string", task)
+		}
+		out[task] = strings.TrimSpace(tier)
+	}
+	if err := routing.CheckTaskTiers(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// FoldRouting returns the effective routing table: the env table with any persisted override
+// replacing the matching half wholesale. Used at boot and after every tiers/taskTiers write or clear.
+func FoldRouting(env routing.Table, ov Overrides) routing.Table {
+	out := env
+	if ov.Tiers != nil {
+		out.Tiers = *ov.Tiers
+	}
+	if ov.TaskTiers != nil {
+		out.TaskTiers = *ov.TaskTiers
+	}
+	return out
 }
 
 // Apply folds the overrides onto a boot config, returning the effective values. Callers use this at

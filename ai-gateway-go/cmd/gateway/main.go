@@ -22,6 +22,7 @@ import (
 	"gaiada/ai-gateway-go/internal/egress"
 	"gaiada/ai-gateway-go/internal/metrics"
 	"gaiada/ai-gateway-go/internal/providers"
+	"gaiada/ai-gateway-go/internal/routing"
 	"gaiada/ai-gateway-go/internal/server"
 	"gaiada/ai-gateway-go/internal/telemetry"
 	gatewaytls "gaiada/ai-gateway-go/internal/tls"
@@ -62,6 +63,22 @@ func buildProviderList(names []string, cfg config.Config, client *http.Client) [
 	}
 	list = append(list, providers.NewEchoProvider())
 	return list
+}
+
+// overridableProviders names the known providers whose text model a tier may override (those that
+// implement providers.ModelOverrider), taken from the same registry buildProviderList uses. It is
+// computed from a registry built WITHOUT the site-topology exclusions: a name's capability does not
+// depend on topology. Nothing is called on the providers; they are only type-checked.
+func overridableProviders(cfg config.Config, client *http.Client) []string {
+	open := cfg
+	open.TopologyMode = "central"
+	out := []string{}
+	for _, p := range buildProviderList(knownProviders, open, client) {
+		if _, ok := p.(providers.ModelOverrider); ok {
+			out = append(out, p.Name())
+		}
+	}
+	return out
 }
 
 func buildChain(names []string, cfg config.Config, client *http.Client) *chain.Chain {
@@ -151,6 +168,14 @@ func main() {
 			cfg.BreakerCooldownMs, cfg.ProviderTimeoutMs, cfg.DLPClassifierEnabled,
 			cfg.LLMChain, cfg.MediaChain, cfg.EmbedChain)
 
+	// AIP-06: the ENV routing table (GATEWAY_TIERS / GATEWAY_TASK_TIERS). A malformed entry is logged by
+	// key and dropped, never fatal; the server folds a persisted console override over this table.
+	overridable := overridableProviders(cfg, client)
+	cfg.Routing = routing.FromEnv(cfg.GatewayTiers, cfg.GatewayTaskTiers, routing.NewValidator(knownProviders, overridable), log.Printf)
+	if names := cfg.Routing.TierNames(); len(names) > 0 {
+		log.Printf("routing: env tiers %v, %d task mapping(s)", names, len(cfg.Routing.TaskTiers))
+	}
+
 	chains := server.Chains{
 		LLM:   buildChain(cfg.LLMChain, cfg, client),
 		Media: buildChain(cfg.MediaChain, cfg, client),
@@ -178,6 +203,8 @@ func main() {
 	admin := &server.Admin{
 		Store:          overrideStore,
 		KnownProviders: knownProviders,
+		// AIP-06: which of them a `tiers` write may attach a model to.
+		OverridableProviders: overridable,
 		// Reordering rebuilds from the same registry the boot path used, so site-mode exclusions and
 		// the echo terminator apply to a runtime reorder exactly as they do at boot.
 		BuildProviders: func(names []string) []providers.Provider { return buildProviderList(names, cfg, client) },
