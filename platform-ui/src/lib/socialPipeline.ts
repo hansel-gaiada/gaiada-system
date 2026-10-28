@@ -14,6 +14,7 @@ import { scpActionsFromStatus, scpHolderOf, scpPhaseLabel, SCP_STATUSES } from "
 import { ALLOCATION_NETWORKS, NETWORK_LABEL } from "./socialAllocation";
 import { asHealth, PLAN_REFUSAL_REASON, type Health } from "./socialCycles";
 import { DISPLAY_TZ } from "./format";
+import { asBoostRowOrNull, type BoostRow } from "./socialBoostRow";
 
 // ── The fixture, as this file reads it ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -94,6 +95,8 @@ export interface PipelinePost {
   scheduleVia: "manual" | "publisher" | null; reviewHash: string | null;
   liveUrl: string | null; wentLiveAt: string | null; simulated: boolean; archivedAt: string | null;
   simulatedPublishNow: SimulatedPublishOffer | null;
+  /** SCP-4b (BFF §63.6.2, §63.11): the post's boost: its open one, else its latest, or null. Optional so a hand-built post of a test need not name it. */
+  boost?: BoostRow | null;
   /** The client's latest decision (SCP-2, BFF §63.6.2): given in the portal, or recorded by staff on the client's behalf. Null before one, and again once the
    *  post goes back to the client. */
   clientDecision: ClientDecision | null;
@@ -185,6 +188,7 @@ export function asPipelinePost(raw: unknown): PipelinePost {
       ? { allowed: o.simulatedPublishNow.allowed, ...(typeof o.simulatedPublishNow.reason === "string" ? { reason: o.simulatedPublishNow.reason } : {}) }
       : null,
     clientDecision: asClientDecision(o.clientDecision),
+    boost: asBoostRowOrNull(o.boost),
     copyLog: arr(o.copyLog).filter(isObj).map((c) => ({
       field: str(c.field) ?? "", before: c.before, after: c.after, via: str(c.via) ?? "", by: person(c.by), suggestedBy: person(c.suggestedBy), stage: str(c.stage) ?? "", at: str(c.at) ?? "",
     })),
@@ -324,6 +328,9 @@ export const FIELD_LABEL: Readonly<Record<string, string>> = {
   sendAnyway: "Send anyway", anchor: "The pin", assetGroupId: "The asset", linkUrl: "The link", linkSource: "The link's source", linkAiNote: "The AI note",
   position: "The position", designId: "The design", fields: "The fields", field: "The field", value: "The value",
   // SCP-3c: the metrics form's fields (BFF §63.10).
+  // SCP-4b: the boost and boost-budget forms' fields (BFF §63.11).
+  goal: "The goal", audience: "The audience", audienceNote: "The audience note", dailyBudgetMinor: "The daily budget", days: "The days", startsOn: "The start date",
+  spendMinor: "The spend", paidReach: "The paid reach", amountMinor: "The amount", decision: "The decision",
   capturedAt: "The capture time", reach: "Reach", impressions: "Impressions", likes: "Likes", comments: "Comments", shares: "Shares", saves: "Saves", videoViews: "Video views", clicks: "Clicks",
 };
 const fieldName = (f: string | undefined): string => (f ? FIELD_LABEL[f] ?? f : "A value");

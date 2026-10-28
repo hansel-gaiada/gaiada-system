@@ -12,6 +12,7 @@ import {
 } from "./demoSocialPipeline";
 import { demoBulkActions, runDemoPipelineAction, runDemoPipelineWrite } from "./demoSocialPipelineRun";
 import { demoFeedPreviewRoute } from "./demoSocialFeedPreview";
+import { demoBoostsRoute } from "./demoSocialBoosts";
 import {
   DEMO_SIMULATED_NETWORKS, demoAccounts, demoRemoveSimulatedAccounts, demoSeedSimulatedAccounts,
   type DemoAccount, type DemoSimulatedNetwork, type DemoSocialNetwork as AccountsNetwork,
@@ -981,6 +982,8 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   if (cycleHealthM && m === "GET") return demoCycleHealth(cycleHealthM[1]);
   // ── SCP-3d: the client's feed preview and its swap (BFF §63.10), in demoSocialFeedPreview.ts ─────────────────
   { const feedPreview = demoFeedPreviewRoute(m, tail, body, userId); if (feedPreview) return feedPreview; }
+  // ── SCP-4b: boosts and the monthly boost budget (BFF §63.11), in demoSocialBoosts.ts ─────────────────────────────
+  { const boosts = demoBoostsRoute(m, tail, params, body, userId); if (boosts) return boosts; }
   // ── SCP-1k: the client calendar (BFF §63.10) ─────────────────────────────────────────────────────
   if (tail === "calendar" && m === "GET") return demoCalendar(params);
   // ── SCP-1m: create a post in a cycle (BFF §63.6.1), and SCP-1k's bulk actions (§63.6.7) ───────────
