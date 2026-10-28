@@ -139,11 +139,23 @@ describe.skipIf(!TEST_URL)("SCP-3f · GET overview (BFF §63.7)", () => {
     ), SOCIAL);
     if (o.variant) {
       const account = await accountOf(tenant, e.clientId);
-      await withTenants([tenant], (c) => c.query(
-        `INSERT INTO social_post_variants (id, tenant_id, post_id, account_id, status, simulated, body, media, settings, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, 'body', '[]', '{}', 'central')`,
-        [newId(), tenant, id, account, o.variant!.status, o.variant!.simulated],
-      ), SOCIAL);
+      // A variant past `approved` was dispatched, so it holds a decided publish approval (svar_dispatched_has_approval).
+      const dispatched = !["draft", "in_review", "approved", "cancelled"].includes(o.variant.status);
+      const variantId = newId();
+      await withTenants([tenant], async (c) => {
+        let approvalId: string | null = null;
+        if (dispatched) {
+          approvalId = newId();
+          await c.query(
+            `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, decided_by, decided_at, origin, origin_site)
+             VALUES ($1, $2, 'wf:scp3f', 'social.publishPost', $3, 'high', 'approved', $4, $4, now(), 'automation', 'main')`,
+            [approvalId, tenant, JSON.stringify({ variantId }), officer]);
+        }
+        await c.query(
+          `INSERT INTO social_post_variants (id, tenant_id, post_id, account_id, status, simulated, body, media, settings, origin_site, approval_id, args_sha256)
+           VALUES ($1, $2, $3, $4, $5, $6, 'body', '[]', '{}', 'central', $7, CASE WHEN $7::uuid IS NULL THEN NULL ELSE repeat('a', 64) END)`,
+          [variantId, tenant, id, account, o.variant!.status, o.variant!.simulated, approvalId]);
+      }, SOCIAL);
     }
     return id;
   }
