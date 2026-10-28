@@ -31,6 +31,9 @@ export interface IngestRunResult {
   chunks: number;
   retired: number;
   errors: string[];
+  /** True when the sweep stopped on the gateway's budget refusal (429). An aborted result never
+   *  retired anything, and the tiers after it did not run. */
+  aborted?: boolean;
   startedAt: string;
   finishedAt: string;
 }
