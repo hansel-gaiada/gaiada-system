@@ -34,6 +34,8 @@ describe.skipIf(!TEST_URL)("SCP-Se · a started simulated boost completes by its
   let seq = 0;
 
   beforeAll(async () => {
+    // On from the first test: CI's default is off, and afterEach only restores it after a test that turned it off.
+    config.socialSimulationEnabled = true;
     await initTestDb();
     A = await createCompany("SCP-Se Agency", ["social"]);
     user = await createUser("scp-se-officer@mock.test", "Mock Officer");

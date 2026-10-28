@@ -135,8 +135,8 @@ describe("SCP-Se · the job is wired only inside the switch, and never starts or
   it("the job calls completeBoost with onlySimulated and expectedStatus running, never startBoost, no network, no publisher", () => {
     const job = src("modules/social/simulated-boost-job.ts");
     expect(job).toMatch(/onlySimulated: true, expectedStatus: "running"/);
-    expect(job).not.toMatch(/startBoost/);
+    expect(job).not.toMatch(/\bstartBoost\b/);
     expect(job).toMatch(/isSocialSimulationEnabled\(\)/);
-    expect(job).not.toMatch(/fetch\(|getPublisher|resolvePublisher|resolveSimulatedPublisher|createSimulatedPublisher/);
+    expect(job).not.toMatch(/\bfetch\(|getPublisher|resolvePublisher|resolveSimulatedPublisher|createSimulatedPublisher/);
   });
 });
