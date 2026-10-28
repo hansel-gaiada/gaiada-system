@@ -61,6 +61,9 @@ export interface AutomationApprovalDetail {
   executionAttempts: number | null;
   /** PGL-05/06: the typed reason this viewer's Approve would be refused with, or null (BFF §8). Optional: older backends. */
   approveRefusal?: string | null;
+  /** SCP-3g (PERMISSION §53.12): this viewer may decide the row because its entry's approverCheck replaces the generic decide
+   *  right (the four social approvers on a pipeline post's publish approval). Optional: older backends. A hint, never the authority. */
+  approverDecides?: boolean;
 }
 
 export interface AgencyApprovalDetail {

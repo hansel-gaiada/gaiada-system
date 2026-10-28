@@ -352,7 +352,9 @@ export async function getMyWorkQueue(
         ]);
         const rows: QueueItem[] = [
           ...approvals.map((a) => fromApproval(a, decidable)),
-          ...automation.map((a) => fromAutomation(a, c, decidable)),
+          // SCP-3g: a row the server marks `approver_decides` (a pipeline post's publish approval, for the four social approvers)
+          // is theirs to decide without `approvals.decide`.
+          ...automation.map((a) => fromAutomation(a, c, decidable || a.approver_decides === true)),
           ...gates.map((g) => fromGate(g, c, decidable)),
           ...tasks.filter((t) => t.status !== "done").map((t) => fromTask(t, c)),
           ...pmTasks.filter((t) => t.status !== "done").map((t) => fromPmTask(t, c)),

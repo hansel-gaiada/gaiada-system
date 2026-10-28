@@ -12,7 +12,7 @@ import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
 import { createCompany, createUser, addMembership, createClient, createProject } from "../../testing/fixtures";
 import { SOCIAL_UNITS, grantSocialSeat, seedSocialOrgTree, setEngagementOfficer } from "../../testing/social-pipeline-fixtures";
 import {
-  loadSocialApproverIds, loadSocialPostAuthz, socialApproverUnitIds, socialEngagementResource, socialPostResource, socialReportResource,
+  loadSocialApproverIds, loadSocialPostAuthz, loadSocialPostAuthzMany, socialApproverUnitIds, socialEngagementResource, socialPostResource, socialReportResource,
 } from "./pipeline-authz";
 
 describe("socialApproverUnitIds (pure)", () => {
@@ -160,8 +160,15 @@ describe.skipIf(!TEST_URL)("SCP-1b · loadSocialApproverIds and loadSocialPostAu
       assigneeIds: [designer.toLowerCase()],
       creativeSource: "creatives",
     });
+    // SCP-3g: the batched loader is the one builder: the same facts per post, keyed lower case; unknown and non-uuid ids
+    // (and repeats) have no entry.
+    const many = await withTenants([A], (c) => loadSocialPostAuthzMany(c, A, [postId.toUpperCase(), newId(), "not-a-uuid", postId]));
+    expect([...many.keys()]).toEqual([postId.toLowerCase()]);
+    expect(many.get(postId.toLowerCase())).toEqual(facts);
+    expect((await withTenants([A], (c) => loadSocialPostAuthzMany(c, A, []))).size).toBe(0);
     // Another company's session cannot read it (RLS), so a cross-company id answers null.
     expect(await withTenants([B], (c) => loadSocialPostAuthz(c, B, postId))).toBeNull();
+    expect((await withTenants([B], (c) => loadSocialPostAuthzMany(c, B, [postId]))).size).toBe(0);
 
     // Unfed facts answer the fail-closed defaults: no officer, no author, no request, no source.
     await setEngagementOfficer(A, engagementId, null);

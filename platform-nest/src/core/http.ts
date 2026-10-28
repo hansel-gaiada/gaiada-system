@@ -140,6 +140,15 @@ export async function authorize(principal: Principal, resource: Resource, action
   // `authorize()` invocations. See that function's own comment for why per-request scoping — not a
   // cache keyed on the Principal object, not a TTL — is the one memoisation shape that cannot mask
   // a revocation between calls. Measured cost: `src/rbac/session-current-perf.db.test.ts`.
+  await assertSessionCurrent(principal);
+}
+
+/**
+ * D11 / F13, `authorize()`'s last step on its own: a revoked session is 401 on every action. Exported for a route that
+ * authorizes a caller WITHOUT `authorize()` (SCP-3g: an approvals read whose right is an entry's batched approverCheck), so
+ * that path cannot skip the session check every `authorize()` makes. Memoised per request, as above.
+ */
+export async function assertSessionCurrent(principal: Principal): Promise<void> {
   if (
     principal.userId &&
     !(await memoiseSessionCurrent(principal.userId, principal.sessionVersion, () => sessionVersionCurrent(principal)))
