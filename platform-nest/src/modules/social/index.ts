@@ -837,10 +837,14 @@ export const socialModule: ModuleContract = {
           variantId: { type: "string", description: "The approved post variant to publish." },
           accountId: { type: "string", description: "The target account (attribution only — the account actually dispatched to comes from the live row, never the caller)." },
           body: { type: "string" },
-          firstComment: { type: "string" },
+          // Nullable on purpose: `variantPublishArgs` (canonical-args.ts) keeps a missing first comment and an unscheduled
+          // variant as EXPLICIT nulls so the args hash never depends on which path built it, and the executor re-drives
+          // exactly those filed args through the hub's validator. A plain "string" refused every pipeline post with no
+          // first comment at re-drive (found live 2026-10-28, SCP-S walk). publish-tool-args.test.ts pins it.
+          firstComment: { type: ["string", "null"] },
           media: { type: "array", items: { type: "object" } },
           settings: { type: "object" },
-          scheduledAt: { type: "string" },
+          scheduledAt: { type: ["string", "null"] },
         },
         required: ["tenantId", "variantId"],
       },
@@ -879,10 +883,11 @@ export const socialModule: ModuleContract = {
           variantId: { type: "string", description: "The approved post variant to publish. Must target a metered network (x)." },
           accountId: { type: "string", description: "The target account (attribution only — the account actually dispatched to comes from the live row, never the caller)." },
           body: { type: "string" },
-          firstComment: { type: "string" },
+          // Nullable for the same reason as `social.publishPost` above (canonical-args.ts keeps nulls explicit).
+          firstComment: { type: ["string", "null"] },
           media: { type: "array", items: { type: "object" } },
           settings: { type: "object" },
-          scheduledAt: { type: "string" },
+          scheduledAt: { type: ["string", "null"] },
         },
         required: ["tenantId", "variantId"],
       },

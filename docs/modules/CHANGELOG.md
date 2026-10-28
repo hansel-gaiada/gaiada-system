@@ -11,6 +11,11 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.198.0` - Fix: a social post with no first comment could not be published through an approval (found live on the SCP-S walk, 2026-10-28) - PROTOTYPED
+
+- **The bug.** A publish approval stores the variant's canonical args (`variantPublishArgs`, canonical-args.ts), which keep a missing first comment and an unscheduled variant as explicit nulls so the args hash never depends on the path that built it. The executor re-drives exactly those args through the MCP hub's validator, but `social.publishPost` and `social.publishPostMetered` declared `firstComment` and `scheduledAt` as plain strings, so every decided approval for a variant with no first comment failed with `tool_error: invalid arguments … firstComment: expected string, got null`. Every pipeline post's variants are built without a first comment, so no pipeline post could be published through the publisher, simulated or real. The route tests missed it because their executor stub calls the dispatch directly, skipping the hub's validator.
+- **The fix.** Both tools declare `firstComment` and `scheduledAt` as `["string", "null"]`; the args and their hash are unchanged, so approvals already filed and failed can simply be filed again. `publish-tool-args.test.ts` pins every key the canonical args carry, in every shape they take, against both tools' declared types (it fails on the old schema: 6 of 7).
+
 ### platform-nest `0.197.0` + platform-ui `0.220.0` - SCP-4 train: boosting and the monthly boost budget (SCP-4a, 4b, 4c, 4d) (plan §2 SCP-Q11, Q14, Q15, Q18, Q19; FRONTEND-BFF-CONTRACT §63.1 file 7, §63.7, §63.11, §63.14, §63.15; PERMISSION §53.1, §53.6, §53.8)
 
 - **Why.** The Social Media team boosts live posts within a monthly budget the client agrees in advance (SCP-Q11): within what remains, a boost starts without asking; over it, the client approves it in the portal. **No ads are bought by the ERP**: a boost records what the team runs in Meta's own tools (or the simulator runs), so nothing here spends money or calls a network.
