@@ -13,11 +13,16 @@
 // produced 0 documents would be indistinguishable from "everything was deleted upstream", and one
 // bad run would wipe the corpus. Losing freshness for one cycle is recoverable; deleting the whole
 // index is not.
+//
+// A run that STOPPED on the gateway's embedding budget (429) is the extreme case of "not clean": it
+// retires nothing for the tier it was in, and the tiers/companies after it are never started, so
+// their stored chunks are untouched. Unchanged chunks are not re-embedded at all (the knowledge
+// service keeps a stored chunk whose text is identical), so a normal sweep is a handful of calls.
 import { config } from "../../../config";
 import { withGlobal } from "../../../db";
 import { buildErpDocuments } from "./erp-source";
 import { extractFileText } from "./file-text";
-import { eraseSource, ingestDocument, knowledgeConfigured, listSourceRefs } from "./ingest-client";
+import { EmbeddingBudgetExhaustedError, eraseSource, ingestDocument, knowledgeConfigured, listSourceRefs } from "./ingest-client";
 import type { IngestDocument, IngestRunResult } from "./types";
 import { emptyResult } from "./types";
 import { crawlSite, pagesToDocuments } from "./web-source";
@@ -27,6 +32,8 @@ interface IngestOutcome {
   written: Set<string>;
   chunks: number;
   errors: string[];
+  /** The gateway refused an embed with 429. Nothing after the refusal was attempted. */
+  aborted: boolean;
 }
 
 async function ingestAll(docs: IngestDocument[]): Promise<IngestOutcome> {
@@ -38,11 +45,17 @@ async function ingestAll(docs: IngestDocument[]): Promise<IngestOutcome> {
       chunks += await ingestDocument(d);
       written.add(d.sourceRef);
     } catch (err) {
+      if (err instanceof EmbeddingBudgetExhaustedError) {
+        // Every further embed would be refused as well. Stop at once: no more documents. The
+        // document that was cut off is NOT in `written`, and the caller must not retire.
+        errors.push(`${d.sourceRef} (${d.label}): ${err.message}`);
+        return { written, chunks, errors, aborted: true };
+      }
       // Per-document isolation: one oversized record or one transient 5xx must not strand the rest.
       errors.push(`${d.sourceRef} (${d.label}): ${(err as Error).message}`);
     }
   }
-  return { written, chunks, errors };
+  return { written, chunks, errors, aborted: false };
 }
 
 /** Delete stored sources of `tier` for `tenantId` that this run did not write. Returns the count. */
@@ -92,9 +105,10 @@ export async function runPublicIngest(): Promise<IngestRunResult> {
   result.sources = out.written.size;
   result.chunks = out.chunks;
   result.errors.push(...out.errors);
+  result.aborted = out.aborted;
 
-  // Retire only after a clean, non-empty crawl — see the file header.
-  if (out.errors.length === 0 && docs.length > 0) {
+  // Retire only after a clean, non-empty crawl — see the file header. An aborted run is never clean.
+  if (!out.aborted && out.errors.length === 0 && docs.length > 0) {
     try {
       result.retired = await retireMissing(cfg.publicTenantId, "public", out.written, ["web:"]);
     } catch (err) {
@@ -127,8 +141,9 @@ export async function runInternalIngest(tenantId: string): Promise<IngestRunResu
   result.sources = out.written.size;
   result.chunks = out.chunks;
   result.errors.push(...out.errors);
+  result.aborted = out.aborted;
 
-  if (out.errors.length === 0 && docs.length > 0) {
+  if (!out.aborted && out.errors.length === 0 && docs.length > 0) {
     try {
       result.retired = await retireMissing(tenantId, "internal", out.written, ["erp:"]);
     } catch (err) {
@@ -151,12 +166,17 @@ export async function internalTenantIds(): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-/** One full sweep: the public corpus once, then every company's internal corpus. */
+/** One full sweep: the public corpus once, then every company's internal corpus. Stops at the first
+ *  result flagged `aborted` (the gateway's budget refusal): the tiers after it are not run, so their
+ *  stored chunks stay exactly as they were. */
 export async function runFullIngest(): Promise<IngestRunResult[]> {
   const results: IngestRunResult[] = [];
   results.push(await runPublicIngest());
+  if (results[0].aborted) return results;
   for (const tenantId of await internalTenantIds()) {
-    results.push(await runInternalIngest(tenantId));
+    const r = await runInternalIngest(tenantId);
+    results.push(r);
+    if (r.aborted) break;
   }
   return results;
 }

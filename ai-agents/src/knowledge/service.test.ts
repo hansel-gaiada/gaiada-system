@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { KnowledgeStore } from "./store";
 import { KnowledgeGraph } from "./graph";
 import { PgEpisodicStore } from "../memory/episodic-pg";
-import { buildKnowledgeApp, knowledgeConfig } from "./service";
+import { buildKnowledgeApp, GatewayBudgetError, knowledgeConfig } from "./service";
 import { TEST_DB_URL as url, testDbReachable } from "./testdb";
 
 const dbUp = await testDbReachable();
@@ -170,5 +170,54 @@ describe.skipIf(!dbUp)("knowledge service", () => {
   it("erase hard-deletes by source", async () => {
     const r = await app.inject({ method: "POST", url: "/erase", headers: svc, payload: { sourceRef: "svc-doc" } });
     expect((r.json() as { deleted: number }).deleted).toBeGreaterThan(0);
+  });
+});
+
+// The gateway's 429 on /embed must reach the platform as a 429 on /ingest (its sweep stops on that
+// status), with the stored source untouched.
+describe.skipIf(!dbUp)("knowledge service: embedding budget refusal", () => {
+  let pool: Pool;
+  let app: ReturnType<typeof buildKnowledgeApp>;
+  const svc = { authorization: "Bearer know-token" };
+  const REF = "budget-doc";
+  let refuse = false;
+
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: url });
+    const store = new KnowledgeStore(
+      pool,
+      async (t) => {
+        if (refuse) throw new GatewayBudgetError();
+        return hashEmbed(t);
+      },
+    );
+    await store.init();
+    knowledgeConfig.serviceToken = "know-token";
+    app = buildKnowledgeApp(store, async () => ({ tenantSet: [], crossCompany: false }));
+  });
+  afterAll(async () => {
+    await pool.query(`DELETE FROM knowledge_chunks WHERE source_ref = $1`, [REF]);
+    await app.close();
+    await pool.end();
+  });
+
+  it("a gateway 429 answers /ingest 429 and leaves the stored chunks as they were", async () => {
+    const payload = { tenantId: T_A, sourceRef: REF, acl: [], kind: "doc", chunks: ["budget paragraph one"], provenance: "human", trust: "trusted" };
+    const ok = await app.inject({ method: "POST", url: "/ingest", headers: svc, payload });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ written: 1, embedded: 1, reused: 0 });
+
+    refuse = true;
+    const refused = await app.inject({ method: "POST", url: "/ingest", headers: svc, payload: { ...payload, chunks: ["budget paragraph one", "a new paragraph"] } });
+    expect(refused.statusCode).toBe(429);
+    expect(refused.json()).toEqual({ error: "embedding_budget_exhausted" });
+    const { rows } = await pool.query(`SELECT text FROM knowledge_chunks WHERE source_ref = $1`, [REF]);
+    expect(rows).toEqual([{ text: "budget paragraph one" }]);
+
+    // An unchanged re-ingest needs no embedding, so it succeeds even while the budget is gone.
+    const unchanged = await app.inject({ method: "POST", url: "/ingest", headers: svc, payload });
+    expect(unchanged.statusCode).toBe(200);
+    expect(unchanged.json()).toEqual({ written: 1, embedded: 0, reused: 1 });
+    refuse = false;
   });
 });

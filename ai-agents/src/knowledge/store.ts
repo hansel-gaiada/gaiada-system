@@ -150,6 +150,23 @@ export class KnowledgeStore {
 
   /** D9.2: ingest REPLACES the source's previous chunks (source-driven invalidation). */
   async ingest(doc: IngestDoc): Promise<number> {
+    return (await this.ingestDetailed(doc)).written;
+  }
+
+  /** The same replace, reporting how many chunks were embedded and how many were kept as they were.
+   *
+   *  A chunk whose text is byte-identical to one already stored under this source keeps its row and
+   *  its vector: nothing is embedded for it. Without this a scheduled re-ingest of an unchanged corpus
+   *  re-embedded every chunk every sweep (the 2026-10-28 daily-cap exhaustion). The stored `text` IS
+   *  the content identity, so no hash column is needed and nothing needs backfilling. Kept rows still
+   *  get their metadata (tenant, acl, kind, trust, quarantine, audience) rewritten from `doc`, so the
+   *  replace semantics are unchanged: only the embedding call is skipped.
+   *
+   *  Ordering is the safety property. New chunks are embedded BEFORE anything is deleted or changed,
+   *  so an embedding failure (a gateway 429 above all) throws with the stored source untouched, and
+   *  the transaction rolls back anyway. A per-source advisory lock serialises two ingests of the same
+   *  source (the old DELETE did that implicitly). */
+  async ingestDetailed(doc: IngestDoc): Promise<{ written: number; embedded: number; reused: number }> {
     const quarantined = doc.trust === "untrusted"; // D9.3: never auto-promoted
     const confidence = doc.confidence ?? (doc.provenance === "agent" ? 0.6 : 1);
     // D9.4: anything but an explicit 'public' is internal. A typo'd/absent audience must fail CLOSED.
@@ -157,20 +174,52 @@ export class KnowledgeStore {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`DELETE FROM knowledge_chunks WHERE source_ref = $1`, [doc.sourceRef]);
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [doc.sourceRef]);
+      const existing = await client.query<{ id: string; text: string }>(
+        `SELECT id, text FROM knowledge_chunks WHERE source_ref = $1 ORDER BY created_at, id`,
+        [doc.sourceRef],
+      );
+      // text -> stored row ids; each stored row can satisfy at most one incoming chunk, so a source
+      // that repeats a paragraph is matched as a multiset, not collapsed.
+      const stored = new Map<string, string[]>();
+      for (const r of existing.rows) {
+        const ids = stored.get(r.text);
+        if (ids) ids.push(r.id);
+        else stored.set(r.text, [r.id]);
+      }
+      const keepIds: string[] = [];
+      const fresh: string[] = [];
       for (const text of doc.chunks) {
-        const embedding = await this.embed(text);
+        const id = stored.get(text)?.shift();
+        if (id) keepIds.push(id);
+        else fresh.push(text);
+      }
+      // Embed first: a throw here leaves every stored row exactly as it was.
+      const vectors: number[][] = [];
+      for (const text of fresh) vectors.push(await this.embed(text));
+
+      await client.query(`DELETE FROM knowledge_chunks WHERE source_ref = $1 AND NOT (id = ANY($2::uuid[]))`, [doc.sourceRef, keepIds]);
+      if (keepIds.length > 0) {
+        await client.query(
+          `UPDATE knowledge_chunks
+              SET tenant_id = $2, acl = $3, kind = $4, provenance = $5, trust = $6, confidence = $7,
+                  quarantined = $8, audience = $9, source_hlc = now()
+            WHERE id = ANY($1::uuid[])`,
+          [keepIds, doc.tenantId, doc.acl, doc.kind, doc.provenance, doc.trust, confidence, quarantined, audience],
+        );
+      }
+      for (let i = 0; i < fresh.length; i++) {
         // pgvector wants a '[..]'::vector literal; the array backend takes the number[] directly.
-        const embParam = this.pgvector ? vectorLiteral(embedding) : embedding;
+        const embParam = this.pgvector ? vectorLiteral(vectors[i]) : vectors[i];
         const embPlaceholder = this.pgvector ? "$6::vector" : "$6";
         await client.query(
           `INSERT INTO knowledge_chunks (tenant_id, source_ref, acl, kind, text, embedding, provenance, trust, confidence, quarantined, audience)
            VALUES ($1, $2, $3, $4, $5, ${embPlaceholder}, $7, $8, $9, $10, $11)`,
-          [doc.tenantId, doc.sourceRef, doc.acl, doc.kind, text, embParam, doc.provenance, doc.trust, confidence, quarantined, audience],
+          [doc.tenantId, doc.sourceRef, doc.acl, doc.kind, fresh[i], embParam, doc.provenance, doc.trust, confidence, quarantined, audience],
         );
       }
       await client.query("COMMIT");
-      return doc.chunks.length;
+      return { written: doc.chunks.length, embedded: fresh.length, reused: keepIds.length };
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;
