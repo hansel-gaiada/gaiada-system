@@ -58,4 +58,13 @@ describe("AIP-03b · usage-event", () => {
     const e = usageEvent({ tenantId: undefined, surface: "knowledge", capability: "embed" }, 200);
     expect(e).toMatchObject({ tenantId: undefined, userId: null, runId: null, task: null, surface: "knowledge", capability: "embed", outcome: "ok", tokensSource: "none" });
   });
+
+  it("the answer's model rides on the event (so the price table can cost it); a failed call or a non-label model is null", () => {
+    const base = { tenantId: "00000000-0000-4000-8000-000000000001", surface: "agent" as const, capability: "llm" as const };
+    const usage = { promptTokens: 5, completionTokens: 2, source: "provider" };
+    expect(usageEvent(base, 200, { provider: "openai", model: "z-ai/glm-5.3-flash", usage }).model).toBe("z-ai/glm-5.3-flash");
+    expect(usageEvent(base, 200, { provider: "openai", usage }).model).toBeNull();
+    expect(usageEvent(base, 200, { provider: "openai", model: "a model with spaces", usage }).model).toBeNull();
+    expect(usageEvent(base, 429, { provider: "openai", model: "z-ai/glm-5.3-flash" }).model).toBeNull();
+  });
 });

@@ -217,9 +217,13 @@ func usagePayloadOf(u providers.Usage) *usagePayload {
 // was; `usage` (the usagePayload shape: promptTokens, completionTokens, costUsd?, source) is
 // appended only when the serving provider reported real figures.
 type completeAnswer struct {
-	Provider string        `json:"provider"`
-	Text     string        `json:"text"`
-	Usage    *usagePayload `json:"usage,omitempty"`
+	Provider string `json:"provider"`
+	Text     string `json:"text"`
+	// Model (AIP-03 follow-up) names the upstream model that served, and is set only together with
+	// `usage`: an answer without usage stays byte for byte the old one, and every answer that carries
+	// counts also says which model they are for, so a price-table cost can be computed downstream.
+	Model string        `json:"model,omitempty"`
+	Usage *usagePayload `json:"usage,omitempty"`
 }
 
 // auditUsage copies a reported usage onto an egress row (counts and cost only, never text).
@@ -781,8 +785,9 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 		// AIP-02: the serving attempt's own usage, when its provider reports it. Reset at the top of
 		// every attempt so a failed-over provider's figures can never be attributed to the next one.
 		var usage *usagePayload
+		var servedModel string
 		text, provider, taxonomy, err := chain.RunWithHint(chains.LLM, r.Context(), body.Provider, func(p providers.Provider) (string, error) {
-			usage = nil
+			usage, servedModel = nil, modelOf(p)
 			// Fresh per-attempt timeout derived from r.Context(), NOT a single deadline shared
 			// across the whole failover chain: a hung provider costs at most one
 			// PROVIDER_TIMEOUT_MS before failing over, and a client disconnect (r.Context()
@@ -803,12 +808,18 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			writeErr(w, 502, err.Error())
 			return
 		}
-		emit(r.Context(), auditUsage(audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()}, usage))
+		answerModel := ""
+		if usage != nil {
+			answerModel = servedModel
+		}
+		row := auditUsage(audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()}, usage)
+		row.Model = answerModel
+		emit(r.Context(), row)
 		// Report the provider that actually served (after any failover) so a WS8 write-capable agent
 		// can enforce the D13 failover gate + WS9 can attribute the run. Additive/back-compatible.
 		// AIP-02: `usage` (the upstream's own counts and cost, source "provider") is appended only
-		// when real; {provider,text} are untouched either way.
-		writeJSON(w, 200, completeAnswer{Provider: provider, Text: text, Usage: usage})
+		// when real; {provider,text} are untouched either way. `model` rides with `usage` only.
+		writeJSON(w, 200, completeAnswer{Provider: provider, Text: text, Model: answerModel, Usage: usage})
 	})
 
 	mux.HandleFunc("POST /media", func(w http.ResponseWriter, r *http.Request) {

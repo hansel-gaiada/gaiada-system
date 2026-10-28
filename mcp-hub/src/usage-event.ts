@@ -25,12 +25,13 @@ export function readUsage(raw: unknown): { promptTokens: number; completionToken
 export type CallBase = Pick<UsageEvent, "tenantId" | "userId" | "surface" | "capability" | "task" | "runId">;
 
 /** `status` is the gateway's HTTP status, or null when no HTTP answer arrived (network failure: error). `body` is the parsed answer on success. */
-export function usageEvent(base: CallBase, status: number | null, body?: { provider?: unknown; usage?: unknown } | null): UsageEvent {
+export function usageEvent(base: CallBase, status: number | null, body?: { provider?: unknown; model?: unknown; usage?: unknown } | null): UsageEvent {
   const ok = status !== null && status >= 200 && status < 300;
   const usage = ok ? readUsage(body?.usage) : null;
   return {
     ...base, task: label(base.task), userId: base.userId ?? null, runId: base.runId ?? null,
-    provider: ok ? label(body?.provider) : null,
+    // The gateway names the serving model next to `usage` (AIP-03 follow-up), so the platform's price table can cost the row.
+    provider: ok ? label(body?.provider) : null, model: ok ? label(body?.model) : null,
     promptTokens: usage?.promptTokens ?? null, completionTokens: usage?.completionTokens ?? null,
     tokensSource: usage ? "provider" : "none",
     costUsd: usage?.costUsd ?? null, costSource: usage?.costUsd != null ? "provider" : null,
