@@ -42,7 +42,7 @@ const row = (over: Partial<AllocationRow> = {}): AllocationRow => ({
   stepEstimates: {}, thisCycle: { cycleId: "cy-1", month: "2026-10", target: 5, counted: 1, extra: 0, stories: 0 }, canPlan: false, ...over,
 });
 const item = (over: Partial<DayItem> & { postId: string }): DayItem => placeItem({
-  clientName: "Brand Alpha", title: "Harvest teaser", format: "feed", scheduledAt: "2026-10-20T01:30:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: false, ...over,
+  clientName: "Brand Alpha", title: "Harvest teaser", format: "feed", scheduledAt: "2026-10-20T01:30:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: false, dateMove: "locked", dateMoveRefusal: "field_locked", ...over,
 });
 const dept = (over: Record<string, unknown> = {}) => asDeptCalendar({
   unit: { id: "d-soc", name: "Social Media" }, from: "2026-09-28", to: "2026-11-01",
@@ -62,11 +62,11 @@ beforeEach(() => {
   vi.mocked(getDepartment).mockReset().mockResolvedValue({ id: "d-soc", name: "Social Media" } as never);
   vi.mocked(getSocialCalendar).mockReset().mockResolvedValue(ok([
     item({ postId: "p-1" }),
-    item({ postId: "p-2", title: "Studio day", clientName: "Brand Beta", pipelineStatus: "approved", phase: "client_approved", scheduledAt: "2026-10-21T01:30:00.000Z" }),
+    item({ postId: "p-2", title: "Studio day", clientName: "Brand Beta", pipelineStatus: "approved", phase: "client_approved", scheduledAt: "2026-10-21T01:30:00.000Z", dateMove: "reschedule", dateMoveRefusal: null }),
   ]));
   vi.mocked(getDeptCalendar).mockReset().mockResolvedValue(ok(dept()));
   vi.mocked(getComposerPosts).mockReset().mockResolvedValue(ok(asComposerEntries([{ id: "c-1", title: "Weekly promo", status: "approved", engagementId: "e-alpha", scheduledAt: "2026-10-27T01:00:00.000Z" }])));
-  vi.mocked(getAllocation).mockReset().mockResolvedValue(ok([row(), row({ engagementId: "e-beta", clientName: "Brand Beta" })]));
+  vi.mocked(getAllocation).mockReset().mockResolvedValue(ok([row({ officer: { id: "u-1", name: "Me" } }), row({ engagementId: "e-beta", clientName: "Brand Beta" })]));
   vi.mocked(getCycleTable).mockReset().mockResolvedValue(ok(table));
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -194,9 +194,21 @@ describe("what could not be read is said, never drawn as empty", () => {
     expect(screen.queryByRole("combobox", { name: "Client" })).toBeNull();
   });
 
-  it("offers the + on the month's days once the clients are read", async () => {
+  it("offers the + on the month's days once the clients are read, to the officer of a client", async () => {
     await mount();
     expect(screen.getAllByRole("button", { name: /^Plan a post on / })).toHaveLength(31);
+    expect(screen.queryByText(/so the days have no/)).toBeNull();
+  });
+
+  it("offers the + to an approver (canPlan) for every client, and not to anyone else, with the reason in a line", async () => {
+    vi.mocked(getAllocation).mockResolvedValue(ok([row({ canPlan: true }), row({ engagementId: "e-beta", clientName: "Brand Beta", canPlan: true })]));
+    await mount();
+    expect(screen.getAllByRole("button", { name: /^Plan a post on / })).toHaveLength(31);
+    cleanup();
+    vi.mocked(getAllocation).mockResolvedValue(ok([row(), row({ engagementId: "e-beta", clientName: "Brand Beta" })]));
+    await mount();
+    expect(screen.queryByRole("button", { name: /^Plan a post on / })).toBeNull();
+    expect(screen.getByText(/officer or one of the four Social Media approvers, so the days have no "\+" for you/)).toBeInTheDocument();
   });
 
   it("refuses in words when the calendar itself is forbidden, instead of drawing an empty grid", async () => {

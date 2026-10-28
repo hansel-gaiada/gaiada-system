@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, within, fireEvent, waitFor } from "@testing-library/react";
 
 // SCP-3e (BFF §63.10; plan §8 row 3e): the Social Media calendar's grid. Every client's posts on a Monday-first month, a chip edged in its phase, holidays and leave
-// beside them, the Composer's posts kept read-only; a date moves by the fixture's rule (an edit, or Reschedule with the client asked again, or locked), by drag
-// and by the keyboard path; and a day's "+" plans a post through the client page's create flow.
+// beside them, the Composer's posts kept read-only; a date moves by the server's `dateMove` on each item (an edit, or Reschedule with the client asked again, or
+// locked), by drag and by the keyboard path; and a day's "+", offered to a client's officer or an approver, plans a post through the client page's create flow.
 const refresh = vi.fn();
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
@@ -23,18 +23,24 @@ const create = vi.mocked(createClientPost);
 const ok = (): WriteResult => ({ ok: true, post: null, applied: null, warnings: [], alreadyApplied: false, designId: null });
 const refused = (error: string, message: string, extra: Record<string, unknown> = {}): WriteResult => ({ ok: false, refusal: { status: 409, error, ...extra }, message });
 
-const item = (over: Partial<DayItem> & { postId: string; pipelineStatus: string; phase: string | null; scheduledAt: string }): DayItem => placeItem({
+type Move = Pick<DayItem, "dateMove" | "dateMoveRefusal">;
+const EDIT: Move = { dateMove: "edit", dateMoveRefusal: null };
+const RESCHEDULE: Move = { dateMove: "reschedule", dateMoveRefusal: null };
+const LOCKED: Move = { dateMove: "locked", dateMoveRefusal: "field_locked" };
+const LIVE: Move = { dateMove: "locked", dateMoveRefusal: "post_is_live" };
+const item = (over: Partial<DayItem> & Move & { postId: string; pipelineStatus: string; phase: string | null; scheduledAt: string }): DayItem => placeItem({
   clientName: "Brand Alpha", title: `Post ${over.postId}`, format: "feed", simulated: false, ...over,
 });
 // 09:30 in Singapore is 01:30 UTC.
 const at = (day: string) => `${day}T01:30:00.000Z`;
 const items: DayItem[] = [
-  item({ postId: "p-draft", title: "Harvest teaser", pipelineStatus: "drafting", phase: "brief", scheduledAt: at("2026-10-20") }),
-  item({ postId: "p-appr", title: "Studio day", pipelineStatus: "approved", phase: "client_approved", scheduledAt: at("2026-10-21") }),
-  item({ postId: "p-sched", title: "Open late", pipelineStatus: "scheduled", phase: "client_approved", scheduledAt: at("2026-10-22") }),
-  item({ postId: "p-client", title: "With the client", pipelineStatus: "client", phase: "with_client", scheduledAt: at("2026-10-23"), simulated: true }),
-  item({ postId: "p-live", title: "Gone live", pipelineStatus: "live", phase: "posted", scheduledAt: at("2026-10-14") }),
-  item({ postId: "p-cchg", title: "Client changes", pipelineStatus: "changes", phase: "client_changes", scheduledAt: at("2026-10-26") }),
+  item({ postId: "p-draft", title: "Harvest teaser", pipelineStatus: "drafting", phase: "brief", scheduledAt: at("2026-10-20"), ...EDIT }),
+  item({ postId: "p-appr", title: "Studio day", pipelineStatus: "approved", phase: "client_approved", scheduledAt: at("2026-10-21"), ...RESCHEDULE }),
+  item({ postId: "p-sched", title: "Open late", pipelineStatus: "scheduled", phase: "client_approved", scheduledAt: at("2026-10-22"), ...RESCHEDULE }),
+  item({ postId: "p-client", title: "With the client", pipelineStatus: "client", phase: "with_client", scheduledAt: at("2026-10-23"), simulated: true, ...LOCKED }),
+  item({ postId: "p-live", title: "Gone live", pipelineStatus: "live", phase: "posted", scheduledAt: at("2026-10-14"), ...LIVE }),
+  item({ postId: "p-cchg", title: "Client changes", pipelineStatus: "changes", phase: "client_changes", scheduledAt: at("2026-10-26"), ...LOCKED }),
+  item({ postId: "p-tchg", title: "Team fix", pipelineStatus: "changes", phase: "brief", scheduledAt: at("2026-10-19"), ...EDIT }),
 ];
 const notes: Record<string, DayNote[]> = {
   "2026-10-09": [{ key: "h", kind: "holiday", label: "Nyepi", detail: "Public holiday" }],
@@ -46,10 +52,14 @@ const row = (over: Partial<AllocationRow> = {}): AllocationRow => ({
   creativeSource: "creatives", deliveryBatch: "A", reportFormat: "email", reportDueDay: 5, platforms: ["instagram", "tiktok"], formats: ["feed"], defaultPostTime: "09:30",
   stepEstimates: {}, thisCycle: { cycleId: "cy-1", month: "2026-10", target: 5, counted: 1, extra: 0, stories: 0 }, canPlan: false, ...over,
 });
-const clients = planClients([row(), row({ engagementId: "e-beta", clientName: "Brand Beta", thisCycle: null })], null, "2026-10", "u-me");
+// The viewer, u-2, is the officer of Alpha and Beta (Beta has no cycle this month); Gamma's officer is somebody else, so the viewer may not plan for it.
+const clients = planClients([
+  row(), row({ engagementId: "e-beta", clientName: "Brand Beta", thisCycle: null }),
+  row({ engagementId: "e-gamma", clientName: "Brand Gamma", officer: { id: "u-9", name: "Other Officer" } }),
+], null, "2026-10", "u-2");
 
 const mount = (over: Partial<Parameters<typeof SocialCalendar>[0]> = {}) => render(
-  <SocialCalendar deptId="d-soc" month="2026-10" today="2026-10-16" items={items} composer={composer} notes={notes} clients={clients} summary="6 pipeline posts." {...over} />,
+  <SocialCalendar deptId="d-soc" month="2026-10" today="2026-10-16" items={items} composer={composer} notes={notes} clients={clients} summary="7 pipeline posts." {...over} />,
 );
 const cell = (day: string) => document.querySelector<HTMLElement>(`td[data-day="${day}"]`)!;
 const chip = (title: string) => screen.getByRole("link", { name: new RegExp(title) });
@@ -67,7 +77,7 @@ describe("the grid", () => {
     mount();
     const table = screen.getByRole("table");
     expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
-    expect(within(table).getByText(/October 2026, weeks start on Monday\. 6 pipeline posts\./)).toBeInTheDocument();
+    expect(within(table).getByText(/October 2026, weeks start on Monday\. 7 pipeline posts\./)).toBeInTheDocument();
     // 1 October 2026 is a Thursday: the first row starts on Monday 28 September.
     expect(table.querySelector("tbody tr td")!.getAttribute("data-day")).toBe("2026-09-28");
     expect(cell("2026-10-16").className).toContain("scp-cal__today");
@@ -116,16 +126,32 @@ describe("the grid", () => {
 });
 
 describe("dragging a date by the fixture's rule", () => {
-  it("makes only the posts whose date can move draggable, and says why in the title of the others", () => {
+  it("makes only the posts whose date the server says can move draggable, and says why in the title of the others", () => {
     mount();
-    expect(chip("Harvest teaser")).toHaveAttribute("draggable", "true");
-    expect(chip("Studio day")).toHaveAttribute("draggable", "true");
-    expect(chip("Open late")).toHaveAttribute("draggable", "true");
+    for (const t of ["Harvest teaser", "Studio day", "Open late", "Team fix"]) expect(chip(t), t).toHaveAttribute("draggable", "true");
     for (const t of ["With the client", "Gone live", "Client changes"]) expect(chip(t), t).toHaveAttribute("draggable", "false");
-    expect(chip("Gone live").getAttribute("title")).toContain("Date locked: The post is live.");
+    expect(chip("Gone live").getAttribute("title")).toContain("Date locked: The post is live, so its date cannot change.");
     expect(chip("With the client").getAttribute("title")).toContain("Date locked: The client is looking at it.");
-    expect(chip("Client changes").getAttribute("title")).toContain("Date locked: The client asked for changes");
+    expect(chip("Client changes").getAttribute("title")).toContain("Date locked: The post is back for a design change or a change the client asked for");
     expect(chip("Gone live")).toHaveTextContent("date locked");
+  });
+
+  it("tells a team copy change (an edit) from a locked change by the server's answer, not by the status or the phase", () => {
+    // Both are `changes` in In production; the page cannot tell them apart, the server does.
+    mount({ items: [
+      item({ postId: "a", title: "Team copy fix", pipelineStatus: "changes", phase: "in_production", scheduledAt: at("2026-10-20"), ...EDIT }),
+      item({ postId: "b", title: "Design change", pipelineStatus: "changes", phase: "in_production", scheduledAt: at("2026-10-21"), ...LOCKED }),
+    ] });
+    expect(chip("Team copy fix")).toHaveAttribute("draggable", "true");
+    expect(chip("Design change")).toHaveAttribute("draggable", "false");
+  });
+
+  it("says why a locked post cannot move when it is dropped on a day, and sends nothing", async () => {
+    mount();
+    drag("Gone live", "2026-10-28");
+    expect(await screen.findByText(/"Gone live" cannot be moved\. The post is live, so its date cannot change\./)).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("moves a drafting post at once by editing its date, keeping the time of day, and refreshes", async () => {
@@ -240,7 +266,7 @@ describe("the keyboard path: Move to date…", () => {
     mount();
     fireEvent.click(screen.getByRole("button", { name: "Move to date: Brand Alpha, Gone live" }));
     const dialog = await screen.findByRole("dialog", { name: "The date is locked" });
-    expect(within(dialog).getByText("The post is live.")).toBeInTheDocument();
+    expect(within(dialog).getByText("The post is live, so its date cannot change.")).toBeInTheDocument();
     expect(within(dialog).queryByLabelText("New date")).toBeNull();
     expect(within(dialog).queryByRole("button", { name: "Move" })).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
@@ -253,17 +279,14 @@ describe("the keyboard path: Move to date…", () => {
     mount();
     fireEvent.click(screen.getByRole("button", { name: "Move to date: Brand Alpha, Client changes" }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/The client asked for changes, so the date stays as they saw it\. After their next approval, Reschedule asks them again\./)).toBeInTheDocument();
+    expect(within(dialog).getByText(/the date stays as the client saw it. After the next approval, Reschedule asks the client again\./)).toBeInTheDocument();
   });
 
-  it("warns that a copy-change post in production may still refuse, and shows the server's 409 if it does", async () => {
+  it("shows the server's 409 field_locked in words if it refuses an edit the page offered", async () => {
     save.mockResolvedValue(refused("field_locked", "Date and time cannot be changed at Changes asked.", { detail: { field: "scheduledAt", status: "changes" } }));
-    const inProd = [item({ postId: "p-prod", title: "Final fix", pipelineStatus: "changes", phase: "in_production", scheduledAt: at("2026-10-20") })];
-    mount({ items: inProd });
-    expect(chip("Final fix")).toHaveAttribute("draggable", "true");
+    mount({ items: [item({ postId: "p-prod", title: "Final fix", pipelineStatus: "changes", phase: "in_production", scheduledAt: at("2026-10-20"), ...EDIT })] });
     fireEvent.click(screen.getByRole("button", { name: "Move to date: Brand Alpha, Final fix" }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/If the change is to the design, its date stays fixed and the server will say so/)).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText("New date"), { target: { value: "2026-10-22" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Move" }));
     expect(await within(dialog).findByText("Date and time cannot be changed at Changes asked.")).toBeInTheDocument();
@@ -283,14 +306,32 @@ describe("planning a post on a day", () => {
     expect(screen.queryByRole("button", { name: /Plan a post/ })).toBeNull();
   });
 
+  it("offers none to someone who is neither a client's officer nor an approver, and lists only the clients the viewer may plan for", async () => {
+    mount({ clients: planClients([row({ canPlan: false }), row({ engagementId: "e-gamma", clientName: "Brand Gamma", officer: { id: "u-9", name: "Other Officer" } })], null, "2026-10", "u-other") });
+    expect(screen.queryByRole("button", { name: /Plan a post/ })).toBeNull();
+    cleanup();
+    mount();
+    fireEvent.click(within(cell("2026-10-15")).getByRole("button", { name: "Plan a post on Thu 15 Oct 2026" }));
+    const select = within(await screen.findByRole("dialog")).getByLabelText("Client");
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Brand Alpha (yours)", "Brand Beta (yours) — no cycle in October 2026"]);
+  });
+
+  it("offers every client to an approver", async () => {
+    mount({ clients: planClients([row({ canPlan: true }), row({ engagementId: "e-gamma", clientName: "Brand Gamma", canPlan: true, officer: { id: "u-9", name: "Other Officer" } })], null, "2026-10", "u-head") });
+    fireEvent.click(within(cell("2026-10-15")).getByRole("button", { name: "Plan a post on Thu 15 Oct 2026" }));
+    const select = within(await screen.findByRole("dialog")).getByLabelText("Client");
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Brand Alpha", "Brand Gamma"]);
+  });
+
   it("chooses the client, lists one with no cycle as unavailable with its reason, and creates the post in that client's cycle at the default time", async () => {
     create.mockResolvedValue({ ok: true, postId: "new-1", created: true });
     mount();
     fireEvent.click(within(cell("2026-10-15")).getByRole("button", { name: "Plan a post on Thu 15 Oct 2026" }));
     const dialog = await screen.findByRole("dialog", { name: "Plan a post on Thu 15 Oct 2026" });
     const select = within(dialog).getByLabelText("Client");
-    expect(within(select).getByRole("option", { name: /Brand Beta — no cycle in October 2026/ })).toBeDisabled();
-    expect(within(select).getByRole("option", { name: "Brand Alpha" })).not.toBeDisabled();
+    expect(within(select).getByRole("option", { name: /Brand Beta \(yours\) — no cycle in October 2026/ })).toBeDisabled();
+    expect(within(select).getByRole("option", { name: "Brand Alpha (yours)" })).not.toBeDisabled();
+    expect(within(select).queryByRole("option", { name: /Gamma/ })).toBeNull();
     expect(within(dialog).getByText(/Dated/)).toHaveTextContent("Thu 15 Oct 2026 at 09:30, Brand Alpha's default post time. Placed on Instagram, TikTok.");
     fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Pumpkin spice story" } });
     fireEvent.change(within(dialog).getByLabelText("Format"), { target: { value: "reel" } });
@@ -320,7 +361,7 @@ describe("planning a post on a day", () => {
   });
 
   it("says so, and disables adding, when no client has a cycle in the month", async () => {
-    mount({ clients: planClients([row({ thisCycle: null })], null, "2026-10", "u") });
+    mount({ clients: planClients([row({ thisCycle: null })], null, "2026-10", "u-2") });
     fireEvent.click(within(cell("2026-10-15")).getByRole("button", { name: "Plan a post on Thu 15 Oct 2026" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/No client has a cycle in October 2026/)).toBeInTheDocument();

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import fixture from "./scpStageMachine.json";
 import { SCP_PHASES, SCP_STATUSES } from "./scpStageMachine";
 import { asDeptCalendar } from "./deptCalendar";
+import { dateMoveForPost } from "./socialFeedPreview";
 import { PHASE_LEGEND, PHASE_TOKEN, monthGrid, phaseToken, shiftMonth } from "./socialClient";
 import type { AllocationRow } from "./socialAllocation";
 import type { CycleTable } from "./socialCycles";
@@ -103,49 +104,64 @@ describe("the legend: a phase is its status token, as the status families mean i
   });
 });
 
-describe("the date-move rule, for every status of the fixture", () => {
-  const rule = (pipelineStatus: string, phase: string | null) => moveRuleOf({ pipelineStatus, phase });
+describe("the date-move rule: the server's answer, worded", () => {
+  const rule = (pipelineStatus: string, dateMove: "edit" | "reschedule" | "locked", dateMoveRefusal: "post_is_live" | "field_locked" | null = null) =>
+    moveRuleOf({ pipelineStatus, dateMove, dateMoveRefusal });
   const phaseOf = fixture.phaseOf as Record<string, string>;
 
-  it("edits a planned or drafting post's date, and says nothing is uncertain about it", () => {
-    expect(rule("planned", phaseOf.planned)).toEqual({ kind: "edit", tryOnly: false });
-    expect(rule("drafting", phaseOf.drafting)).toEqual({ kind: "edit", tryOnly: false });
+  it("takes the server's word: an edit is an edit and a reschedule is a reschedule, whatever the status", () => {
+    expect(rule("planned", "edit")).toEqual({ kind: "edit" });
+    expect(rule("changes", "edit")).toEqual({ kind: "edit" });
+    expect(rule("approved", "reschedule")).toEqual({ kind: "reschedule" });
+    expect(rule("scheduled", "reschedule")).toEqual({ kind: "reschedule" });
   });
 
-  it("reschedules an approved or scheduled post, which asks the client again", () => {
-    expect(rule("approved", phaseOf.approved)).toEqual({ kind: "reschedule" });
-    expect(rule("scheduled", phaseOf.scheduled)).toEqual({ kind: "reschedule" });
-  });
-
-  it("edits a team copy change (Brief: the copywriter's or the HoD's) and tries the In production one, where a design change is locked and looks the same", () => {
-    expect(rule("changes", "brief")).toEqual({ kind: "edit", tryOnly: false });
-    expect(rule("changes", "in_production")).toEqual({ kind: "edit", tryOnly: true });
-  });
-
-  it("locks the client's own change: the date stays as the client saw it", () => {
-    const r = rule("changes", "client_changes");
-    expect(r.kind).toBe("locked");
-    expect(r.kind === "locked" && r.why).toMatch(/client asked for changes/);
-    expect(r.kind === "locked" && r.why).toMatch(/Reschedule/);
-  });
-
-  it("locks every other status, with its reason in the words of the post page", () => {
-    const locked = ["proofread", "hod", "design", "final", "client", "blocked", "live"] as const;
-    for (const s of locked) {
-      const r = rule(s, phaseOf[s]);
+  it("locks a post the server locked, with the reason in words (`field_locked`, `post_is_live`)", () => {
+    const live = rule("live", "locked", "post_is_live");
+    expect(live).toEqual({ kind: "locked", why: "The post is live, so its date cannot change." });
+    expect(rule("client", "locked", "field_locked")).toEqual({ kind: "locked", why: "The client is looking at it." });
+    const kinds = ["proofread", "hod", "design", "final", "blocked"] as const;
+    for (const s of kinds) {
+      const r = rule(s, "locked", "field_locked");
       expect(r.kind, s).toBe("locked");
       expect(r.kind === "locked" && r.why.length, s).toBeGreaterThan(10);
     }
-    expect(rule("live", "posted")).toEqual({ kind: "locked", why: "The post is live." });
-    expect(rule("client", "with_client")).toEqual({ kind: "locked", why: "The client is looking at it." });
   });
 
-  it("says something about every status of the fixture, and nothing else is movable", () => {
-    const movable = SCP_STATUSES.filter((s) => {
-      const phase = s === "changes" ? "brief" : phaseOf[s];
-      return rule(s, phase).kind !== "locked";
-    });
-    expect(movable.sort()).toEqual(["approved", "changes", "drafting", "planned", "scheduled"]);
+  it("words a locked change: the date stays as the client saw it, and Reschedule asks again after the next approval", () => {
+    const r = rule("changes", "locked", "field_locked");
+    expect(r.kind === "locked" && r.why).toMatch(/design change or a change the client asked for/);
+    expect(r.kind === "locked" && r.why).toMatch(/Reschedule/);
+  });
+
+  it("never guesses: a body without `dateMove` is refused, not drawn", () => {
+    expect(() => asDayItems({ items: [{ postId: "p", scheduledAt: "2026-10-20T01:30:00.000Z", pipelineStatus: "changes", phase: "in_production" }] })).toThrow(/dateMove/);
+    expect(() => asDayItems({ items: [{ postId: "p", scheduledAt: "2026-10-20T01:30:00.000Z", pipelineStatus: "planned", dateMove: "maybe" }] })).toThrow();
+  });
+
+  it("reads a locked item without a stated refusal as field_locked, and a movable one as having none", () => {
+    const at = "2026-10-20T01:30:00.000Z";
+    const [a, b, c] = asDayItems({ items: [
+      { postId: "a", scheduledAt: at, pipelineStatus: "hod", dateMove: "locked" },
+      { postId: "b", scheduledAt: at, pipelineStatus: "live", dateMove: "locked", dateMoveRefusal: "post_is_live" },
+      { postId: "c", scheduledAt: at, pipelineStatus: "planned", dateMove: "edit", dateMoveRefusal: "field_locked" },
+    ] });
+    expect([a.dateMoveRefusal, b.dateMoveRefusal, c.dateMoveRefusal]).toEqual(["field_locked", "post_is_live", null]);
+  });
+
+  it("agrees with the demo's twin of the fixture rule for every status and change case, so the words and the drag cannot disagree", () => {
+    const cases: Array<[string, string | null]> = [...SCP_STATUSES.filter((s) => s !== "changes").map((s): [string, string | null] => [s, null]),
+      ...fixture.changeCases.map((c): [string, string | null] => ["changes", c.key])];
+    const kinds = new Map<string, string>();
+    for (const [status, changeCase] of cases) {
+      const m = dateMoveForPost({ status, changeCase });
+      const r = moveRuleOf({ pipelineStatus: status, dateMove: m.move, dateMoveRefusal: m.refusal });
+      kinds.set(`${status}${changeCase ? `/${changeCase}` : ""}`, r.kind);
+      expect(r.kind, status).toBe(m.move);
+    }
+    const movable = [...kinds].filter(([, k]) => k !== "locked").map(([k]) => k);
+    expect(movable.sort()).toEqual(["approved", "changes/copywriter_copy", "changes/final_copy", "changes/hod_copy", "drafting", "planned", "scheduled"].sort());
+    expect(phaseOf.live).toBe("posted");
   });
 
   it("follows the fixture's own date_moves rule in prose, so a change to the machine breaks this test", () => {
@@ -169,7 +185,7 @@ describe("moving a post to another day", () => {
   it("reads the day and the time in the display zone, not in UTC", () => {
     expect(dayOfIso("2026-10-20T20:00:00.000Z")).toBe("2026-10-21");
     expect(timeOfIso("2026-10-20T20:00:00.000Z")).toBe("04:00");
-    expect(placeItem({ postId: "p", clientName: "Brand Alpha", title: "T", format: "feed", scheduledAt: "2026-10-20T01:30:00.000Z", pipelineStatus: "drafting", phase: "brief", simulated: false }))
+    expect(placeItem({ postId: "p", clientName: "Brand Alpha", title: "T", format: "feed", scheduledAt: "2026-10-20T01:30:00.000Z", pipelineStatus: "drafting", phase: "brief", simulated: false, dateMove: "edit", dateMoveRefusal: null }))
       .toMatchObject({ day: "2026-10-20", time: "09:30" });
   });
 
@@ -186,14 +202,14 @@ describe("moving a post to another day", () => {
 
   it("says the outcome: a plain move, or a move that sends the post back to the client", () => {
     const next = "2026-10-23T01:30:00.000Z";
-    expect(movedWords({ title: "Teaser" }, { kind: "edit", tryOnly: false }, next)).toBe('Moved "Teaser" to Fri 23 Oct 2026 at 09:30.');
+    expect(movedWords({ title: "Teaser" }, { kind: "edit" }, next)).toBe('Moved "Teaser" to Fri 23 Oct 2026 at 09:30.');
     expect(movedWords({ title: "Teaser" }, { kind: "reschedule" }, next)).toBe('Moved "Teaser" to Fri 23 Oct 2026 at 09:30. The client will be asked to approve it again.');
   });
 });
 
 describe("GET calendar, GET posts and the pipeline's own post list", () => {
   it("places each item on its day and time, and refuses a body that is not a list", () => {
-    const items = asDayItems({ items: [{ postId: "p-1", clientName: "Brand Alpha", title: "T", format: "feed", scheduledAt: "2026-10-20T01:30:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: true }] });
+    const items = asDayItems({ items: [{ postId: "p-1", clientName: "Brand Alpha", title: "T", format: "feed", scheduledAt: "2026-10-20T01:30:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: true, dateMove: "locked", dateMoveRefusal: "field_locked" }] });
     expect(items).toEqual([expect.objectContaining({ postId: "p-1", day: "2026-10-20", time: "09:30", simulated: true })]);
     expect(() => asDayItems({ nope: 1 })).toThrow();
   });
@@ -292,6 +308,14 @@ describe("planning a post on a day", () => {
     const out = planClients([row({ engagementId: "e-z", clientName: "Zed" }), row({ engagementId: "e-b", clientName: "Bay", officer: { id: "u-me", name: "Me" } }), row({ engagementId: "e-a", clientName: "Ant" })], null, "2026-10", "u-me");
     expect(out.map((c) => c.clientName)).toEqual(["Bay", "Ant", "Zed"]);
     expect(out[0].mine).toBe(true);
+  });
+
+  it("offers a create only for a client the viewer is the officer of, or to an approver (`canPlan`), for every client", () => {
+    const rows = [row({ engagementId: "e-a", clientName: "Ant" }), row({ engagementId: "e-b", clientName: "Bay", officer: { id: "u-me", name: "Me" } })];
+    const by = (id: string, rs: AllocationRow[]) => Object.fromEntries(planClients(rs, null, "2026-10", id).map((c) => [c.engagementId, c.canCreate]));
+    expect(by("u-me", rows)).toEqual({ "e-a": false, "e-b": true });
+    expect(by("u-other", rows)).toEqual({ "e-a": false, "e-b": false });
+    expect(by("u-other", rows.map((r) => ({ ...r, canPlan: true })))).toEqual({ "e-a": true, "e-b": true });
   });
 
   it("takes each client's cycle for the month on show from the cycle table", () => {

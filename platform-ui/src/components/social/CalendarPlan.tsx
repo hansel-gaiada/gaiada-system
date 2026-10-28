@@ -4,8 +4,8 @@
 // `buildNewPost`) in that client's cycle for the month on show, dated that day at the client's default post time, placed on the client's platforms. It starts
 // `planned`; the date, time and networks stay editable on the post until it goes on (`editableFieldsOf`).
 //
-// Nothing is hidden by role, as on the client page: the server decides (403 `not_officer_or_approver`) and the refusal is shown in words. A client with no cycle
-// for the month is listed and cannot be chosen, with the reason beside it.
+// Only the clients the viewer may create a post for are listed (`canCreate`: the client's officer, or one of the four approvers); the server still decides
+// (403 `not_officer_or_approver`) and its refusal is shown in words. A client with no cycle for the month is listed and cannot be chosen, with the reason beside it.
 import Link from "next/link";
 import { useId, useState, useTransition } from "react";
 import { Modal } from "@/components/overlay/Modal";
@@ -18,11 +18,12 @@ import { defaultPostIso, timeOfIso, type PlanClient } from "@/lib/socialCalendar
 export interface Planned { postId: string; title: string; clientName: string; day: string }
 
 export function CalendarPlan({
-  deptId, day, month, clients, onClose, onDone,
+  deptId, day, month, clients: allClients, onClose, onDone,
 }: {
   deptId: string; day: string; month: string; clients: readonly PlanClient[]; onClose: () => void; onDone: (p: Planned) => void;
 }) {
   const uid = useId();
+  const clients = allClients.filter((c) => c.canCreate);
   const usable = clients.filter((c) => c.cycleId !== null);
   const [engagementId, setEngagementId] = useState(usable[0]?.engagementId ?? "");
   const [title, setTitle] = useState("");

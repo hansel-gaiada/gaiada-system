@@ -36,8 +36,8 @@ const first = (v: string | string[] | undefined): string | undefined => (typeof 
 // calendar (§59.1, for the HR legs only) and `GET posts` (the Composer's), each of which may fail on its own and then says so in a line above the grid, and
 // `GET allocation` with `GET cycles?month=` for the "+" on a day. "Nothing is on" is claimed only for a read that succeeded.
 //
-// Writes live in the grid (`SocialCalendar`): dragging or "Move to date…" (the fixture's date-move rule) and planning a post on a day. The server decides each one;
-// the page hides nothing by role.
+// Writes live in the grid (`SocialCalendar`): dragging or "Move to date…" (the server's `dateMove` on each item) and planning a post on a day, offered only to the
+// client's officer and the four approvers. The server decides each one.
 export default async function SocialCalendarPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -118,6 +118,10 @@ export default async function SocialCalendarPage({ params, searchParams }: { par
           <ul className="scp-calnotes" aria-label="What could not be loaded">
             {notes.map((n) => <li key={n}>{n}</li>)}
           </ul>
+        )}
+
+        {clients !== null && !clients.some((c) => c.canCreate) && (
+          <p className="scp-note">A post is planned by the client&apos;s officer or one of the four Social Media approvers, so the days have no &quot;+&quot; for you.</p>
         )}
 
         <SocialCalendar

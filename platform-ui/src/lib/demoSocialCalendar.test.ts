@@ -2,7 +2,8 @@ import { describe, it, expect, vi, afterAll } from "vitest";
 
 // SCP-3e (BFF §63.10, §59, §63.16): DEMO_MODE end to end for the Social Media calendar. The page reads `GET calendar` and the department calendar, and moves a date
 // with `PATCH posts/:postId/pipeline` or `reschedule`. This drives every seeded post of the month through the demo store with the write the calendar's own rule
-// (`moveRuleOf`) picks, and checks the demo answers as the rule says, so the page's rule and the demo (the server's twin) cannot drift apart. The store seeds from
+// (`moveRuleOf`, from the `dateMove` the demo's `GET calendar` says, as the server's does) picks, and checks the demo's write answers as that says, so the page's rule and
+// the demo's writes (the server's twin) cannot drift apart. The store seeds from
 // the day it is first touched, so the clock is pinned to mid-month (Friday 16 October 2026, midday in Singapore) before it is imported (hence vi.hoisted).
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -74,6 +75,16 @@ describe("a date move, by the rule the calendar draws", () => {
     return [...seen.values()];
   };
 
+  it("says on every item of the calendar what a date move does, and why when it cannot: live is post_is_live, the rest field_locked", () => {
+    for (const it of seeded()) {
+      const label = `${it.pipelineStatus}/${it.phase}`;
+      if (it.pipelineStatus === "live") expect(it, label).toMatchObject({ dateMove: "locked", dateMoveRefusal: "post_is_live" });
+      else if (it.dateMove === "locked") expect(it.dateMoveRefusal, label).toBe("field_locked");
+      else expect(it.dateMoveRefusal, label).toBeNull();
+      if (it.pipelineStatus === "approved" || it.pipelineStatus === "scheduled") expect(it.dateMove, label).toBe("reschedule");
+    }
+  });
+
   it("has a seeded post for every status the rule distinguishes", () => {
     const keys = sample().map((i) => `${i.pipelineStatus}/${i.phase}`);
     for (const k of ["drafting/brief", "approved/client_approved", "scheduled/client_approved", "client/with_client", "live/posted", "changes/client_changes"]) expect(keys, k).toContain(k);
@@ -95,8 +106,6 @@ describe("a date move, by the rule the calendar draws", () => {
         reschedules += 1;
       } else if (rule.kind === "edit") {
         const r = call("PATCH", `posts/${it.postId}/pipeline`, { expectedStatus: it.pipelineStatus, fields: { scheduledAt: next } }, {}, actor);
-        // an In production copy change is tried: the demo, like the server, may say field_locked for a design change
-        if (rule.tryOnly && r?.status !== 200) { expect(r?.json, label).toMatchObject({ error: "field_locked" }); refusals += 1; continue; }
         expect(r?.status, label).toBe(200);
         expect(r?.json, label).toMatchObject({ post: { scheduledAt: next } });
         moved.push({ postId: it.postId, at: next, kind: "edit" });

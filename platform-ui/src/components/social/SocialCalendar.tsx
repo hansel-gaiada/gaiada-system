@@ -5,13 +5,14 @@
 // THE GRID IS A REAL TABLE (a caption, `scope="col"` weekday headers, a cell per day with its date), and every post is a link to its page. A chip says its client,
 // its title, its time, and, for a screen reader, its phase and status and whether its date is locked: colour is never the only signal.
 //
-// MOVING A DATE follows the fixture's rule (`moveRuleOf`): drag a chip to another day, or press its "Move to date…" button (drag alone is not accessible):
+// MOVING A DATE follows the server's answer, `dateMove` on each item of `GET calendar` (the fixture's rule; `moveRuleOf` only words it): drag a chip to another day, or press its "Move to date…" button (drag alone is not accessible):
 //   an edit (planned, drafting, a team copy change)   moves at once: `PATCH posts/:postId/pipeline` with the new `scheduledAt`, the time of day kept
 //   approved, scheduled                               asks first: the client will be asked to approve the new date again; then `reschedule` with `at`
 //   anything else                                      cannot be dragged (no `draggable`); its button opens the reason
 // A refusal is shown in words (`refusalText`, the blockers under it), a success is said in a status line, and the page is refreshed after each move.
 //
-// PLANNING: a day of the month on show has a "+" that opens `CalendarPlan`. Neither is hidden by role: the server decides, and says why.
+// PLANNING: a day of the month on show has a "+" that opens `CalendarPlan`, offered only when the viewer may create a post for at least one client (its officer, or one of
+// the four approvers: `PlanClient.canCreate`). That is a courtesy, not security: the server decides a create, and its refusal is shown in words.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState, useTransition } from "react";
@@ -58,6 +59,8 @@ export function SocialCalendar({
   const [pending, start] = useTransition();
 
   const weeks = monthGrid(month);
+  /** The "+" is offered only to someone who may create a post for at least one client. */
+  const canPlan = clients !== null && clients.some((c) => c.canCreate);
   const byDay = new Map<string, DayItem[]>();
   for (const it of items) byDay.set(it.day, [...(byDay.get(it.day) ?? []), it]);
   const composerByDay = new Map<string, ComposerEntry[]>();
@@ -142,7 +145,7 @@ export function SocialCalendar({
                           {d.iso === today && <span className="scp-sr-only"> (today)</span>}
                         </time>
                         {d.iso === today && <span className="scp-cal__todaymark" aria-hidden="true">Today</span>}
-                        {clients !== null && d.inMonth && (
+                        {canPlan && d.inMonth && (
                           <button type="button" className="scp-cal__add" aria-label={`Plan a post on ${dayLabel(d.iso)}`} title="Plan a post" onClick={() => { setNotice(null); setFailure(null); setPlan(d.iso); }}>
                             +
                           </button>
@@ -272,8 +275,6 @@ function MoveDialog({
               rescheduleWarning(item, nextIso).map((t) => <p key={t} className="scp-note scp-note--reason" style={{ margin: 0 }}>{t}</p>)
             ) : rule.kind === "reschedule" ? (
               <p className="scp-note scp-note--reason" style={{ margin: 0 }}>The client approved this post for its present date. A new date means the client will be asked to approve it again, on every network.</p>
-            ) : rule.tryOnly ? (
-              <p className="scp-note" style={{ margin: 0 }}>This post is back with the team for a change. If the change is to the design, its date stays fixed and the server will say so.</p>
             ) : null}
           </>
         )}

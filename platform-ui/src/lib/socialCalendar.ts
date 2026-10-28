@@ -4,17 +4,14 @@
 // THE GRID IS `monthGrid` (lib/socialClient.ts): Monday first, whole weeks. The page asks for the grid's own first and last day, which is at most 42 days:
 // inside the server's 62 for `GET calendar` and exactly the department calendar's longest window (§59.1), so one window serves both reads.
 //
-// THE DATE-MOVE RULE IS THE FIXTURE'S (`systemRules` › `date_moves`, read through `editableFieldsOf` and `scpActionsFromStatus`; nothing restates a status):
-//   planned, drafting and a team copy `changes` case   an edit: `PATCH posts/:postId/pipeline` with `scheduledAt`
-//   approved, scheduled                                `reschedule`: the client is asked again (SCP-Q13)
-//   every other status                                 locked, with `lockedWords` for why; a live post is locked for good
-// `GET calendar` carries the status and the phase but not the change case, so a `changes` post is read from its phase: Brief is a copy fix by the team
-// (an edit), Client changes is the client's own change (locked: plan SCP-D6), and In production is either a copy fix at the final check (an edit) or a
-// design change (locked) with no way to tell them apart here. That one is tried, and the server's 409 `field_locked` is shown in words if it refuses.
-import { scpActionsFromStatus } from "./scpStageMachine";
+// THE DATE-MOVE RULE IS THE SERVER'S (`GET calendar` carries `dateMove` and `dateMoveRefusal` on every item, decided by `dateMoveOf`, the fixture's
+// `systemRules.date_moves`, the same function the feed preview uses; nothing is restated or guessed here):
+//   edit        planned, drafting and a team copy `changes` case: `PATCH posts/:postId/pipeline` with `scheduledAt`
+//   reschedule  approved, scheduled: the client is asked again (SCP-Q13), so the dialog says so BEFORE the move commits
+//   locked      every other status; `dateMoveRefusal` is `field_locked`, or `post_is_live` for a live post, and `lockedWords` says why in words
 import { chipsByDay, dayLabel, legNotes, type DeptCalendar } from "./deptCalendar";
 import { todayIsoInDisplayZone } from "./format";
-import { editableFieldsOf, isoToZoneInput, lockedWords, zoneInputToIso } from "./socialPipeline";
+import { isoToZoneInput, lockedWords, zoneInputToIso } from "./socialPipeline";
 import { asCalendarItems, monthGrid, shiftMonth, type CalendarItem } from "./socialClient";
 import type { AllocationRow } from "./socialAllocation";
 import type { CycleTable } from "./socialCycles";
@@ -41,33 +38,26 @@ export const placeItem = (it: CalendarItem): DayItem => ({ ...it, day: dayOfIso(
 // ── The date-move rule ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export type MoveRule =
-  /** An edit: `PATCH posts/:postId/pipeline` with the new `scheduledAt`. `tryOnly` when the calendar cannot tell whether the server will allow it. */
-  | { kind: "edit"; tryOnly: boolean }
+  /** An edit: `PATCH posts/:postId/pipeline` with the new `scheduledAt`. */
+  | { kind: "edit" }
   /** `reschedule`: the post goes back to the client. */
   | { kind: "reschedule" }
   /** Not movable, and why. */
   | { kind: "locked"; why: string };
 
-/** The change case a `changes` post is read as from its phase (see the header): the first of the fixture's cases of that phase that edits the date, or the
- *  client's. Null when the status is not `changes`. */
-function changeCaseOf(status: string, phase: string | null): { case: string; tryOnly: boolean } | null {
-  if (status !== "changes") return null;
-  if (phase === "client_changes") return { case: "client_copy", tryOnly: false };
-  if (phase === "in_production") return { case: "final_copy", tryOnly: true };
-  return { case: "hod_copy", tryOnly: false };
+/** What dragging (or "Move to date…") does to a post, as the server said (`dateMove`), with the reason in words when it is locked. */
+export function moveRuleOf(post: Pick<CalendarItem, "pipelineStatus" | "dateMove" | "dateMoveRefusal">): MoveRule {
+  if (post.dateMove === "edit") return { kind: "edit" };
+  if (post.dateMove === "reschedule") return { kind: "reschedule" };
+  return { kind: "locked", why: lockedReason(post) };
 }
 
-/** What dragging (or "Move to date…") does to a post: an edit, `reschedule`, or nothing, with the reason in words. */
-export function moveRuleOf(post: Pick<CalendarItem, "pipelineStatus" | "phase">): MoveRule {
+/** Why a locked date is locked, in words: `post_is_live`, or `field_locked` by the status (a locked `changes` post is a design change or the client's own). */
+function lockedReason(post: Pick<CalendarItem, "pipelineStatus" | "dateMoveRefusal">): string {
   const s = post.pipelineStatus;
-  if (scpActionsFromStatus({ pipelineStatus: s }).includes("reschedule")) return { kind: "reschedule" };
-  const kase = changeCaseOf(s, post.phase);
-  const change = kase ? { by: "", kind: "", returnTo: "", note: null, case: kase.case } : null;
-  if (editableFieldsOf({ pipelineStatus: s, change }).fields.includes("scheduledAt")) return { kind: "edit", tryOnly: kase?.tryOnly ?? false };
-  if (s === "changes") {
-    return { kind: "locked", why: "The client asked for changes, so the date stays as they saw it. After their next approval, Reschedule asks them again." };
-  }
-  return { kind: "locked", why: lockedWords({ pipelineStatus: s, scheduleVia: null }, "scheduledAt") };
+  if (post.dateMoveRefusal === "post_is_live" || s === "live") return "The post is live, so its date cannot change.";
+  if (s === "changes") return "The post is back for a design change or a change the client asked for, so the date stays as the client saw it. After the next approval, Reschedule asks the client again.";
+  return lockedWords({ pipelineStatus: s, scheduleVia: null }, "scheduledAt");
 }
 
 /** A post's instant moved to another day, keeping its time of day in the display zone; "" when that time does not exist on that day (a DST gap). */
@@ -171,6 +161,8 @@ export interface PlanClient {
   defaultPostTime: string | null;
   /** The viewer is the client's officer: their clients are listed first. */
   mine: boolean;
+  /** The viewer may create a post for this client: its officer, or one of the four approvers (`canPlan` on the allocation row). The server is the authority. */
+  canCreate: boolean;
 }
 
 /** The clients to offer, the viewer's own first, then by name. A client's cycle for the month on show comes from the month's cycle table, or, when that could
@@ -181,6 +173,7 @@ export function planClients(rows: readonly AllocationRow[], table: CycleTable | 
       engagementId: r.engagementId, clientName: r.clientName,
       cycleId: table?.rows.find((c) => c.engagementId === r.engagementId)?.cycleId ?? (r.thisCycle?.month === month ? r.thisCycle.cycleId : null),
       platforms: [...r.platforms], defaultPostTime: r.defaultPostTime, mine: r.officer?.id === viewerId,
+      canCreate: r.canPlan || r.officer?.id === viewerId,
     }))
     .sort((a, b) => Number(b.mine) - Number(a.mine) || a.clientName.localeCompare(b.clientName));
 }

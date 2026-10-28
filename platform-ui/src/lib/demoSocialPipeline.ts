@@ -18,6 +18,7 @@ import fixture from "./scpStageMachine.json";
 import {
   SCP_PHASES, scpActionsFromStatus, scpEngineStatusOf, scpHolderOf, scpPhaseOf, scpPrimaryActionOf, type ScpPostView,
 } from "./scpStageMachine";
+import { dateMoveForPost } from "./socialFeedPreview";
 
 export interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown): DemoResult => ({ status: 200, json });
@@ -476,6 +477,10 @@ export function demoCycleHealth(cycleId: string): DemoResult {
  * are scheduled on in the display zone, oldest first; a post with no date is left out. Sorted like the server's `ORDER BY scheduled_at, id`.
  */
 export const DEMO_CALENDAR_MAX_DAYS = 62;
+const demoDateMove = (p: PipePost): { dateMove: string; dateMoveRefusal: string | null } => {
+  const m = dateMoveForPost({ status: p.pipelineStatus, changeCase: p.changeCase });
+  return { dateMove: m.move, dateMoveRefusal: m.refusal };
+};
 export function demoCalendar(params: URLSearchParams): DemoResult {
   const bad = (field: string): DemoResult => ({ status: 400, json: { error: "invalid_field", field } });
   const from = params.get("from");
@@ -493,6 +498,8 @@ export function demoCalendar(params: URLSearchParams): DemoResult {
     .map((p) => ({
       postId: p.id, clientName: store.engagements.find((e) => e.id === p.engagementId)?.clientName ?? "", title: p.title, format: p.format,
       scheduledAt: p.scheduledAt, pipelineStatus: p.pipelineStatus, phase: scpPhaseOf(view(p)), simulated: p.simulated,
+      // SCP-3e: what a date move does, by the fixture's rule (`dateMoveForPost`, the twin of the server's `dateMoveOf`, as the feed preview's).
+      ...demoDateMove(p),
     }));
   return ok({ items });
 }
