@@ -144,6 +144,16 @@ export interface SummarizeOptions {
 
 export class CompactionGatewayError extends Error {}
 
+/** The compaction prompt, exactly as `summarizeExcerpt` sends it. Exported (AIP-09) so the tier eval tests the production text, not a copy. */
+export function buildCompactionPrompt(excerpt: string, existingSummary: string | null): string {
+  return (
+    `Summarize the following excerpt from a conversation in a few dense sentences, preserving ` +
+    `concrete facts, decisions and open questions. Do not add commentary or preamble, output only ` +
+    `the summary.${existingSummary ? ` Fold it into this EXISTING summary rather than replacing it ` +
+    `(merge, don't just append):\n\nEXISTING SUMMARY:\n${existingSummary}` : ""}\n\nEXCERPT:\n${excerpt}`
+  );
+}
+
 /** One non-streaming `POST /complete` call to fold an excerpt into the rolling summary. Fails
  *  LOUDLY (throws) rather than silently skipping compaction — a swallowed failure here would let
  *  context assembly silently keep exceeding its budget on every subsequent send to a long thread,
@@ -153,11 +163,7 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
   if (!url) {
     throw new CompactionGatewayError("ai-gateway-go is not configured (GATEWAY_URL unset) — cannot compact this thread's context");
   }
-  const prompt =
-    `Summarize the following excerpt from a conversation in a few dense sentences, preserving ` +
-    `concrete facts, decisions and open questions. Do not add commentary or preamble, output only ` +
-    `the summary.${existingSummary ? ` Fold it into this EXISTING summary rather than replacing it ` +
-    `(merge, don't just append):\n\nEXISTING SUMMARY:\n${existingSummary}` : ""}\n\nEXCERPT:\n${excerpt}`;
+  const prompt = buildCompactionPrompt(excerpt, existingSummary);
   const fetchImpl = opts?.fetchImpl ?? fetch;
   // AIP-03a: ONE usage row per compaction call, after the answer is in hand, fire-and-forget (never throws, never awaited here).
   const record = (facts: Parameters<typeof recordGatewayCall>[1]): void => {
