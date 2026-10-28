@@ -491,22 +491,35 @@ export async function runMetricsPull(now: Date = new Date()): Promise<{
 // for the length of SMM-24 only because `config.ts` was held by a parallel worktree; that was always
 // flagged as a mechanical fold-in, now done. Dark by default, like every other job in this module.
 
+/** After a sweep that failed as a whole, the next try comes this soon instead of a full interval. The first tick runs at
+ *  boot, when every loop opens connections at once; on gda-aicenter (2026-10-28) it died on "timeout exceeded when trying
+ *  to connect" after each deploy, and at the default daily interval a box deployed more than once a day never swept. A
+ *  failure inside one company or account is caught by `runMetricsPull` itself and never reaches this. */
+export const METRICS_PULL_RETRY_MS = 5 * 60_000;
+
 /** Daily loop. Only started by main.ts when `socialMetricsPullEnabled()` is true — see this
- *  file's header for why the gate lives here instead of in `config.ts`. */
-export function startMetricsPullLoop(intervalMs: number): { stop: () => void } {
+ *  file's header for why the gate lives here instead of in `config.ts`. `run` and `retryMs` are for tests. */
+export function startMetricsPullLoop(
+  intervalMs: number,
+  o: { run?: () => Promise<unknown>; retryMs?: number } = {},
+): { stop: () => void } {
+  const run = o.run ?? (() => runMetricsPull());
+  const retryMs = Math.min(intervalMs, o.retryMs ?? METRICS_PULL_RETRY_MS);
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
   const tick = async () => {
     if (stopped) return;
+    let next = intervalMs;
     try {
-      const result = await runMetricsPull();
+      const result = await run();
       // eslint-disable-next-line no-console
       console.log("[SOCIAL-METRICS-PULL] sweep run:", result);
     } catch (err) {
+      next = retryMs;
       // eslint-disable-next-line no-console
-      console.error("[SOCIAL-METRICS-PULL] tick failed:", (err as Error).message);
+      console.error(`[SOCIAL-METRICS-PULL] tick failed, next try in ${Math.round(next / 1000)}s:`, (err as Error).message);
     }
-    if (!stopped) timer = setTimeout(tick, intervalMs);
+    if (!stopped) timer = setTimeout(tick, next);
   };
   void tick();
   return {

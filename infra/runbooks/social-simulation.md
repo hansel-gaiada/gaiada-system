@@ -101,7 +101,10 @@ refused: nothing was sent to Postiz. The status and metrics sweeps log the same 
    release 444 (`SOCIAL_SIMULATION_ENABLED: ${SOCIAL_SIMULATION_ENABLED:-0}`), and since 449 also
    `SOCIAL_METRICS_PULL_ENABLED` (default 0) and `SOCIAL_METRICS_PULL_INTERVAL_MS` (default 86400000; the dev review uses
    3600000). On gda-aicenter `.env` had no `SOCIAL_SIMULATION_ENABLED` line at all: add it, do not just edit it. Prove it after
-   the recreate (step 3), do not assume it.
+   the recreate (step 3), do not assume it. The sweep's first tick runs at boot and often dies there on
+   `[SOCIAL-METRICS-PULL] tick failed, next try in 300s: timeout exceeded when trying to connect` (every loop opens its
+   connections at once); since platform-nest 0.199.1 it tries again 5 minutes later instead of a whole interval, so look for the `sweep run:`
+   line about 5 minutes after a restart.
 4. **Postiz stays as it is.** `SOCIAL_POSTIZ_BASE_URL` stays set (the side-by-side mode is the point). Do not set
    `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS` to anything naming `simulated` (boot refuses it, switch on or off).
 5. **TikTok.** `SOCIAL_NETWORKS_ENABLED` defaults to `instagram,facebook,linkedin`; TikTok is off at the deployment level.

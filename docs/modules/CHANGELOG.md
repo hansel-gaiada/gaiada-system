@@ -11,6 +11,12 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.199.1` - Fix: the social metrics sweep tries again 5 minutes after a failed tick, not a whole interval later (found on the SCP-S live walk, 2026-10-28) - PROTOTYPED
+
+- **The bug.** `startMetricsPullLoop` runs its first tick at boot and scheduled the next one a full interval later whatever happened. At boot every loop opens its connections at once, and on gda-aicenter the sweep's first tick died on "timeout exceeded when trying to connect" after each deploy (seven loops logged the same timeout at 458's boot). The live dev review runs hourly, so each deploy cost an hour of metrics; at the compose default (daily) a box deployed more than once a day would never sweep at all.
+- **The fix.** A tick that fails as a whole schedules the next one `METRICS_PULL_RETRY_MS` (5 minutes) later, never later than the interval itself; a tick that runs goes back to the interval. A failure inside one company or account is still caught by `runMetricsPull` and counted, as before. The log line names the next try. `metrics-pull-loop.test.ts` pins the schedule with fake timers; runbook `infra/runbooks/social-simulation.md` says what to look for after a restart.
+- **Deploy.** No migration, no Cerbos policy change, no compose change.
+
 ### platform-nest `0.199.0` - SCP-Se: a started simulated boost completes by itself, and the purge removes simulated boosts (plan §5 "Simulated boosts"; FRONTEND-BFF-CONTRACT §63.10) - PROTOTYPED
 
 - **Why.** With the simulator on (SCP-D9, beside the real Postiz), staff can request, approve and start a boost on a simulated post (SCP-4), but nothing ever ended it: Meta's own tools run a real boost and staff type in the results, and a simulated one had no Meta. The plan's flow is request, approve, started by a person, then the simulator completes it.
