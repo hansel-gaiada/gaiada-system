@@ -92,6 +92,17 @@ export function searchUsageContext(tenantSet: string[], provider: string, extern
   };
 }
 
+/** The gateway refused an embed with 429: the day's call budget is spent. A typed error (not a generic
+ *  Error) so /ingest can answer 429 and the platform's scheduled sweep can tell "stop now" apart from
+ *  one bad document. */
+export class GatewayBudgetError extends Error {
+  readonly status = 429;
+  constructor(message = "gateway /embed 429") {
+    super(message);
+    this.name = "GatewayBudgetError";
+  }
+}
+
 export async function embedViaGateway(text: string): Promise<number[]> {
   const who = embedUsageContext.getStore();
   let status: number | null = null; // null until the gateway answers: a network failure is an `error` row
@@ -102,6 +113,7 @@ export async function embedViaGateway(text: string): Promise<number[]> {
       body: JSON.stringify({ text }),
     });
     status = res.status;
+    if (res.status === 429) throw new GatewayBudgetError();
     if (!res.ok) throw new Error(`gateway /embed ${res.status}`);
     return ((await res.json()) as { embedding: number[] }).embedding;
   } finally {
@@ -132,10 +144,19 @@ export function buildKnowledgeApp(
     // "public" — absent, misspelled, or hostile — resolves to 'internal', so a malformed ingest
     // can only ever under-share.
     const audience = doc.audience === "public" ? ("public" as const) : ("internal" as const);
-    const written = await embedUsageContext.run({ tenantId: doc.tenantId, userId: null, task: "knowledge.ingest" }, () =>
-      store.ingest({ ...doc, acl: doc.acl ?? [], kind: doc.kind ?? "doc", audience }),
-    );
-    return { written };
+    try {
+      const r = await embedUsageContext.run({ tenantId: doc.tenantId, userId: null, task: "knowledge.ingest" }, () =>
+        store.ingestDetailed({ ...doc, acl: doc.acl ?? [], kind: doc.kind ?? "doc", audience }),
+      );
+      return r;
+    } catch (err) {
+      // The embedding budget is spent. 429 is the signal the platform's sweep stops on; the stored
+      // source was left untouched (the store embeds before it deletes, inside a transaction).
+      if (err instanceof GatewayBudgetError) {
+        return reply.code(429).header("retry-after", "3600").send({ error: "embedding_budget_exhausted" });
+      }
+      throw err;
+    }
   });
 
   // Two-tier retrieval (D9.4). An OBO envelope is OPTIONAL here: without one (or with one the

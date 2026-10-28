@@ -9,7 +9,7 @@
 // through our own gateway.
 //
 // ── OVERLAP IS THE FAILURE MODE TO AVOID ─────────────────────────────────────────────────────────
-// A full sweep embeds every chunk of every company and can outlast a short interval. Two concurrent
+// A full sweep walks every chunk of every company (embedding only the new or changed ones) and can outlast a short interval. Two concurrent
 // sweeps would double the embedding load and race each other's retire step (one sweep's in-progress
 // writes look like "missing" to the other's diff). `running` is therefore a hard gate: a tick that
 // finds a sweep in flight logs and returns rather than queueing.
@@ -36,10 +36,18 @@ export async function runIngestSweep(): Promise<IngestRunResult[]> {
     lastResults = await runFullIngest();
     lastRunAt = new Date().toISOString();
     const totals = lastResults.reduce(
-      (a, r) => ({ sources: a.sources + r.sources, chunks: a.chunks + r.chunks, errors: a.errors + r.errors.length }),
-      { sources: 0, chunks: 0, errors: 0 },
+      (a, r) => ({ sources: a.sources + r.sources, chunks: a.chunks + r.chunks, errors: a.errors + r.errors.length, retired: a.retired + r.retired }),
+      { sources: 0, chunks: 0, errors: 0, retired: 0 },
     );
-    console.log(`knowledge ingest: ${totals.sources} sources, ${totals.chunks} chunks, ${totals.errors} errors`);
+    if (lastResults.some((r) => r.aborted)) {
+      // ONE line, counts only: the gateway's embedding budget is spent, so the sweep stopped at the
+      // first refusal and retired nothing for the tier it was in. The next tick resumes.
+      console.warn(
+        `knowledge ingest: STOPPED on embedding budget (gateway 429) after ${totals.sources} sources written, ${totals.chunks} chunks, ${totals.retired} retired; ${lastResults.length} tiers started`,
+      );
+    } else {
+      console.log(`knowledge ingest: ${totals.sources} sources, ${totals.chunks} chunks, ${totals.errors} errors`);
+    }
     return lastResults;
   } finally {
     running = false;

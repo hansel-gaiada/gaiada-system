@@ -1,6 +1,6 @@
 // D9 invariants at store level. Needs a REACHABLE DATABASE_URL_TEST (disposable DB) — skips
 // cleanly without one (a set-but-unreachable URL from .env would otherwise crash the suite).
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { Pool } from "pg";
 import { KnowledgeStore } from "./store";
 import { TEST_DB_URL as url, testDbReachable } from "./testdb";
@@ -179,5 +179,87 @@ describe.skipIf(!dbUp)("knowledge store (D9)", () => {
     expect(deleted).toBeGreaterThan(0);
     const afterErase = await store.search("pouring saturday", { tenantSet: [T_A], scope: "x" });
     expect(afterErase.filter((h) => h.sourceRef === "doc-a")).toEqual([]);
+  });
+
+  // ── Re-ingest skips unchanged chunks (2026-10-28: a sweep re-embedded the whole corpus daily and
+  // exhausted the AI gateway's 2,000-call cap). The embedder here counts calls and can be made to fail
+  // like the gateway's 429, over the same table as the store above.
+  describe("re-ingest embeds only what changed", () => {
+    const REF = "reingest-doc";
+    let calls: string[];
+    let failAfter: number;
+    let counting: KnowledgeStore;
+    const embed = async (text: string) => {
+      if (calls.length >= failAfter) throw new Error("gateway /embed 429");
+      calls.push(text);
+      return hashEmbed(text);
+    };
+    const doc = (chunks: string[], extra: Partial<Parameters<KnowledgeStore["ingest"]>[0]> = {}) => ({
+      tenantId: T_A, sourceRef: REF, acl: [] as string[], kind: "doc" as const, chunks,
+      provenance: "human" as const, trust: "trusted" as const, ...extra,
+    });
+    const rows = async () =>
+      (await pool.query<{ id: string; text: string }>(`SELECT id, text FROM knowledge_chunks WHERE source_ref = $1 ORDER BY text`, [REF])).rows;
+
+    beforeEach(async () => {
+      calls = [];
+      failAfter = Infinity;
+      counting = new KnowledgeStore(pool, embed, { dim: DIMS });
+      await pool.query(`DELETE FROM knowledge_chunks WHERE source_ref = $1`, [REF]);
+    });
+
+    it("an unchanged chunk is not embedded again and keeps its row", async () => {
+      await counting.ingest(doc(["alpha unchanged paragraph", "beta unchanged paragraph"]));
+      const first = await rows();
+      calls = [];
+      const r = await counting.ingestDetailed(doc(["alpha unchanged paragraph", "beta unchanged paragraph"]));
+      expect(calls).toEqual([]);
+      expect(r).toEqual({ written: 2, embedded: 0, reused: 2 });
+      expect(await rows()).toEqual(first); // same ids: nothing was deleted and re-inserted
+    });
+
+    it("a changed chunk is re-embedded, a new one is embedded, a removed one is deleted", async () => {
+      await counting.ingest(doc(["keep this paragraph", "edit this paragraph", "drop this paragraph"]));
+      calls = [];
+      const r = await counting.ingestDetailed(doc(["keep this paragraph", "edited this paragraph", "brand new paragraph"]));
+      expect(calls.sort()).toEqual(["brand new paragraph", "edited this paragraph"]);
+      expect(r).toEqual({ written: 3, embedded: 2, reused: 1 });
+      expect((await rows()).map((x) => x.text)).toEqual(["brand new paragraph", "edited this paragraph", "keep this paragraph"]);
+    });
+
+    it("repeated identical chunks are matched as a multiset", async () => {
+      await counting.ingest(doc(["same line", "same line"]));
+      calls = [];
+      await counting.ingest(doc(["same line", "same line", "same line"]));
+      expect(calls).toEqual(["same line"]); // two reused, one new
+      expect(await rows()).toHaveLength(3);
+      await counting.ingest(doc(["same line"]));
+      expect(await rows()).toHaveLength(1);
+    });
+
+    it("a kept chunk still takes the new metadata (acl, trust => quarantine, audience)", async () => {
+      await counting.ingest(doc(["secret paragraph"]));
+      await counting.ingest(doc(["secret paragraph"], { acl: ["finance"], trust: "untrusted" }));
+      const { rows: r } = await pool.query(`SELECT acl, quarantined FROM knowledge_chunks WHERE source_ref = $1`, [REF]);
+      expect(r).toEqual([{ acl: ["finance"], quarantined: true }]);
+    });
+
+    it("an embedding failure midway leaves the stored source exactly as it was", async () => {
+      await counting.ingest(doc(["stays one", "stays two"]));
+      const before = await rows();
+      calls = [];
+      failAfter = 1; // the first new chunk embeds, the second is refused
+      await expect(counting.ingest(doc(["stays one", "new one", "new two"]))).rejects.toThrow(/429/);
+      expect(await rows()).toEqual(before);
+    });
+
+    it("kept and fresh chunks are both retrievable by similarity", async () => {
+      await counting.ingest(doc(["zebra stripes pattern"]));
+      await counting.ingest(doc(["zebra stripes pattern", "giraffe spotted neck"]));
+      const hits = await counting.search("giraffe neck", { tenantSet: [T_A], scope: "x" });
+      expect(hits.some((h) => h.text === "giraffe spotted neck")).toBe(true);
+      const kept = await counting.search("zebra stripes", { tenantSet: [T_A], scope: "x" });
+      expect(kept.some((h) => h.text === "zebra stripes pattern")).toBe(true);
+    });
   });
 });

@@ -15,6 +15,17 @@ const HTTP_TIMEOUT_MS = 30_000;
 
 export class KnowledgeUnavailableError extends Error {}
 
+/** The knowledge service answered 429 on /ingest: the AI gateway refused its embedding call because
+ *  the day's budget is spent. Distinct from every other failure on purpose: one bad document is
+ *  isolated and the sweep goes on, but this means EVERY further call will be refused too, so the
+ *  sweep must stop (and must not retire anything). */
+export class EmbeddingBudgetExhaustedError extends Error {
+  constructor(message = "knowledge /ingest 429: embedding budget exhausted") {
+    super(message);
+    this.name = "EmbeddingBudgetExhaustedError";
+  }
+}
+
 function base(): string {
   return config.services.knowledge.url.replace(/\/$/, "");
 }
@@ -57,6 +68,7 @@ export async function ingestDocument(doc: IngestDocument): Promise<number> {
     trust: "trusted",
     audience: doc.audience,
   });
+  if (res.status === 429) throw new EmbeddingBudgetExhaustedError();
   if (!res.ok) throw new Error(`knowledge /ingest ${res.status}: ${await res.text().catch(() => "")}`);
   return ((await res.json()) as { written?: number }).written ?? doc.chunks.length;
 }
