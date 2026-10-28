@@ -20,7 +20,10 @@
 //   (7) the designs routes (another company's asset is 404), the suggestions routes, the bulk route, the read (which
 //       carries `scheduleVia`);
 //   (8) the month request: opening it tells the Creatives head as a hand-filed request does (`request.received`), joining
-//       it tells nobody.
+//       it tells nobody;
+//   (9) SCP-Sa3 (SCP-D9): a post is wholly simulated or wholly real: a client with a real Instagram and a simulated Facebook
+//       is refused `publisher_kinds_mixed` on final_approve (nothing written) and on schedule_publisher (reached by a
+//       reschedule onto both networks, which dispatches nothing), and an Instagram-only post passes.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../../config";
@@ -68,7 +71,8 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
   const base = () => `/api/${A}/modules/social`;
 
   // ── fixtures ────────────────────────────────────────────────────────────────────────────────────────────────────
-  async function freshEngagement(o: { creativeSource?: "creatives" | "in_team"; officer?: string; platforms?: string[] } = {}): Promise<Eng> {
+  /** `kinds` makes a network's account SIMULATED (a `simulated:<network>` id, the shape 202610280100's CHECK requires); the rest are real. */
+  async function freshEngagement(o: { creativeSource?: "creatives" | "in_team"; officer?: string; platforms?: string[]; kinds?: Record<string, "real" | "simulated"> } = {}): Promise<Eng> {
     n += 1;
     const clientId = await createClient(A, `Mock Client ${n}`);
     const engagementId = newId();
@@ -90,9 +94,10 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
       );
       for (const network of ["instagram", "facebook"]) {
         await c.query(
-          `INSERT INTO social_accounts (id, tenant_id, client_id, publisher_org_id, network, handle, status, quota, postiz_integration_id, origin_site)
-           VALUES ($1, $2, $3, $4, $5, $6, 'connected', '{"igPosts24h":{"used":0,"cap":100}}', $7, 'central')`,
-          [newId(), A, clientId, orgId, network, `@mock-${network}-${n}`, `int-${network}-${n}`],
+          `INSERT INTO social_accounts (id, tenant_id, client_id, publisher_org_id, network, handle, status, quota, postiz_integration_id, simulated, origin_site)
+           VALUES ($1, $2, $3, $4, $5, $6, 'connected', '{"igPosts24h":{"used":0,"cap":100}}', $7, $8, 'central')`,
+          [newId(), A, clientId, orgId, network, `@mock-${network}-${n}`,
+           o.kinds?.[network] === "simulated" ? `simulated:${network}` : `int-${network}-${n}`, o.kinds?.[network] === "simulated"],
         );
       }
       await c.query(
@@ -272,7 +277,12 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
     const start = sc.start ?? {};
     const officerPersona = typeof start.officerIs === "string" ? (start.officerIs === "platform_admin" ? "superadmin" : String(start.officerIs)) : "officer";
     const draftingOfficer = start.authorIs === "approver" ? U.hod : U[officerPersona];
-    const eng = await freshEngagement({ creativeSource: sc.creativeSource === "in_team" ? "in_team" : "creatives", officer: draftingOfficer });
+    // SCP-Sa3: `mixedAccountKinds` is a client with a real Instagram and a simulated Facebook, the post placed on both.
+    const mixed = start.mixedAccountKinds === true;
+    const eng = await freshEngagement({
+      creativeSource: sc.creativeSource === "in_team" ? "in_team" : "creatives", officer: draftingOfficer,
+      ...(mixed ? { kinds: { facebook: "simulated" as const } } : {}),
+    });
     const realOfficer = U[officerPersona];
     if (start.publisherRegistered === true) registerPublisher(createMockPublisher(pub));
     else resetPublishers();
@@ -291,7 +301,10 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
 
     let postId = "";
     if (start.status !== undefined) {
-      postId = await newPost(eng, eng.officer, start.approvedTimeIsPast === true ? { scheduledAt: PAST } : {});
+      postId = await newPost(eng, eng.officer, {
+        ...(start.approvedTimeIsPast === true ? { scheduledAt: PAST } : {}),
+        ...(mixed ? { placement: ["instagram", "facebook"] } : {}),
+      });
       const status = String(start.status);
       const caseKey = typeof start.changeCase === "string" ? start.changeCase : null;
       const drive = caseKey ? "final" : status;
@@ -968,5 +981,66 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
     // The superadmin is a different person (the house wildcard), and passes it.
     await ok(await act(U.superadmin, postId, "approve_copy"), "superadmin approves the copy");
     expect((await row(postId))?.pipeline_status).toBe("hod");
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // (9) SCP-Sa3 (SCP-D9): a post is wholly simulated or wholly real
+  // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+  /** What a refused action must leave untouched: the status, the variants, the reviews, the approvals and the "your client was told" events. */
+  async function footprint(postId: string) {
+    const r = await adminPool().query(
+      `SELECT (SELECT pipeline_status FROM social_posts WHERE id = $1) AS status,
+              (SELECT count(*)::int FROM social_post_variants WHERE post_id = $1) AS variants,
+              (SELECT count(*)::int FROM social_post_client_reviews cr JOIN social_post_variants v ON v.id = cr.variant_id WHERE v.post_id = $1) AS reviews,
+              (SELECT count(*)::int FROM automation_approvals WHERE tool_args->>'variantId' IN (SELECT id::text FROM social_post_variants WHERE post_id = $1)) AS approvals`, [postId]);
+    return { ...(r.rows[0] as { status: string; variants: number; reviews: number; approvals: number }), told: await clientToldCount(postId) };
+  }
+
+  it("a real Instagram and a simulated Facebook: final_approve of an Instagram + Facebook post is 409 publisher_kinds_mixed with nothing written; a one-kind post passes", async () => {
+    const eng = await freshEngagement({ kinds: { facebook: "simulated" } });
+    const both = await newPost(eng, eng.officer, { placement: ["instagram", "facebook"] });
+    await driveTo(eng, both, "final");
+    const before = await footprint(both);
+    expect(before).toMatchObject({ status: "final", variants: 0, reviews: 0, approvals: 0 });
+    // the read's probe says the same as the action
+    const read = await app.inject({ method: "GET", url: `${base()}/posts/${both}/pipeline`, headers: headersFor(U.hod) });
+    expect(read.json().actions.find((a: { action: string }) => a.action === "final_approve")).toMatchObject({ allowed: false, reason: "publisher_kinds_mixed" });
+    const refused = await act(U.hod, both, "final_approve");
+    expect(refused.statusCode, refused.body).toBe(409);
+    expect(refused.json()).toMatchObject({ error: "publisher_kinds_mixed", detail: { simulated: ["facebook"], real: ["instagram"] } });
+    expect(await footprint(both)).toEqual(before);
+
+    // the same client, a post on the real network alone (and one on the simulated network alone): whole, so each passes
+    const igOnly = await newPost(eng);
+    await driveTo(eng, igOnly, "client");
+    expect((await footprint(igOnly)).variants).toBe(1);
+    const fbOnly = await newPost(eng, eng.officer, { placement: ["facebook"] });
+    await driveTo(eng, fbOnly, "client");
+    expect((await footprint(fbOnly)).variants).toBe(1);
+  });
+
+  it("a reschedule onto both kinds dispatches nothing, and schedule_publisher then refuses 409 publisher_kinds_mixed before any approval is filed", async () => {
+    registerPublisher(createMockPublisher(pub));
+    try {
+      const eng = await freshEngagement({ kinds: { facebook: "simulated" } });
+      const postId = await newPost(eng);
+      await driveTo(eng, postId, "approved");
+      // Instagram alone is whole. Reschedule is unguarded, so it can place the post on both; the client's approval returns it to `approved`.
+      await ok(await act(eng.officer, postId, "reschedule", { placement: ["instagram", "facebook"], at: new Date(Date.now() + 3 * 86400000).toISOString() }), "reschedule onto both");
+      await ok(await act(eng.officer, postId, "record_client_approve", { channel: "whatsapp", note: "Approved on a call." }), "client approves again");
+      expect((await row(postId))?.pipeline_status).toBe("approved");
+      const before = await footprint(postId);
+      expect(before.variants).toBe(2);
+      const calls = pub.calls.length;
+      const refused = await act(U.hod, postId, "schedule_publisher");
+      expect(refused.statusCode, refused.body).toBe(409);
+      expect(refused.json()).toMatchObject({ error: "publisher_kinds_mixed", detail: { simulated: ["facebook"], real: ["instagram"] } });
+      expect(await footprint(postId)).toEqual(before);
+      expect(pub.calls.length).toBe(calls);
+      expect((await row(postId))?.schedule_via).toBeNull();
+    } finally {
+      resetPublishers();
+    }
   });
 });

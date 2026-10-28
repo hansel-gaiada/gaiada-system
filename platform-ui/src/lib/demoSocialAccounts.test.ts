@@ -12,9 +12,9 @@ afterAll(() => vi.useRealTimers());
 
 import { socialDemo } from "./demoSocial";
 import { asClientAccounts } from "./socialSimulatedAccounts";
-import { DEMO_ASSETS } from "./demoSocialPipelineRun";
+import { DEMO_ASSETS, runDemoPipelineAction } from "./demoSocialPipelineRun";
 import { PIPE_POSTS, demoPostActions, type PipePost } from "./demoSocialPipeline";
-import { demoClientAccountCounts, demoNetworksWithoutAccount, demoSimulatedHandle } from "./demoSocialAccounts";
+import { demoAccountKinds, demoAccounts, demoClientAccountCounts, demoNetworksWithoutAccount, demoSimulatedHandle } from "./demoSocialAccounts";
 
 type Body = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const call = (method: string, path: string, body?: unknown, q: Record<string, string> = {}, user?: string) =>
@@ -69,6 +69,47 @@ describe("the pipeline's account guard reads the accounts, as live will", () => 
     const back = call("POST", `engagements/${SPA}/simulated-accounts`, { networks: ["instagram"] });
     expect(back?.status).toBe(200);
     expect(finalApprove(p)).toEqual({ action: "final_approve", allowed: true });
+  });
+
+  it("SCP-Sa3: a post is wholly simulated or wholly real: a real Instagram beside a simulated Facebook refuses final_approve and schedule_publisher publisher_kinds_mixed", () => {
+    const real = demoAccounts.find((a) => a.clientId === "cl-soc-spa" && a.network === "instagram")!;
+    const approved = (): PipePost => {
+      const p = finalPost();
+      Object.assign(p, { pipelineStatus: "approved", scheduledAt: "2026-10-23T09:00:00.000Z" });
+      return p;
+    };
+    const publisher = (p: PipePost) => demoPostActions(p, "u-pm").find((a) => a.action === "schedule_publisher");
+    // every demo account is simulated, so a post placed on both networks is whole
+    const both = finalPost();
+    both.placement = ["instagram", "facebook"];
+    expect(demoAccountKinds("cl-soc-spa", ["instagram", "facebook"])).toEqual({ simulated: ["facebook", "instagram"], real: [] });
+    expect(finalApprove(both)).toEqual({ action: "final_approve", allowed: true });
+    real.simulated = false; // the demo's only way to hold a real account: re-mark one
+    try {
+      expect(demoAccountKinds("cl-soc-spa", ["instagram", "facebook"])).toEqual({ simulated: ["facebook"], real: ["instagram"] });
+      expect(finalApprove(both)).toEqual({ action: "final_approve", allowed: false, reason: "publisher_kinds_mixed" });
+      const twoNetworks = approved();
+      twoNetworks.placement = ["instagram", "facebook"];
+      expect(publisher(twoNetworks)).toEqual({ action: "schedule_publisher", allowed: false, reason: "publisher_kinds_mixed" });
+      // a one-network placement is whole whichever kind it is
+      expect(finalApprove(finalPost())).toEqual({ action: "final_approve", allowed: true }); // Instagram alone, real
+      const fbOnly = finalPost();
+      fbOnly.placement = ["facebook"];
+      expect(finalApprove(fbOnly)).toEqual({ action: "final_approve", allowed: true }); // Facebook alone, simulated
+      // the action route refuses the same way, naming the networks of each kind, and writes nothing
+      both.id = `${both.id}-sa3`; // the clone shares its source's id, and the runner finds posts by id
+      PIPE_POSTS.push(both);
+      try {
+        const r = runDemoPipelineAction(both.id, { action: "final_approve", expectedStatus: "final", actionId: "7a1b2c3d-0000-4000-8000-000000000001" }, "u-pm") as { status: number; json: Body };
+        expect(r).toMatchObject({ status: 409, json: { error: "publisher_kinds_mixed", detail: { simulated: ["facebook"], real: ["instagram"] } } });
+        expect(both.pipelineStatus).toBe("final");
+      } finally {
+        PIPE_POSTS.splice(PIPE_POSTS.indexOf(both), 1);
+      }
+    } finally {
+      real.simulated = true;
+    }
+    expect(finalApprove(both)).toEqual({ action: "final_approve", allowed: true });
   });
 
   it("a network the client has no account on (LinkedIn on the hotel) is refused, as on the server", () => {

@@ -56,6 +56,8 @@ describe("the refusal words: one map, every code of the fixture", () => {
     expect(r("field_locked", { detail: { field: "placement", status: "changes" } })).toBe("Networks cannot be changed at Changes asked.");
     expect(r("suggestion_stale", { detail: { fields: ["cta", "caption"] } })).toContain("Call to action, Caption");
     expect(r("no_account_for_network", { detail: { networks: ["tiktok", "x"] } })).toContain("TikTok, X");
+    // SCP-Sa3: the mixed-kinds refusal carries lists, but its words are the same sentence whichever networks they name
+    expect(r("publisher_kinds_mixed", { detail: { simulated: ["facebook"], real: ["instagram"] } })).toBe("This post's networks mix simulated and real accounts. Place it on one kind only.");
     expect(r("follow_up_too_soon", { retryAfterSeconds: 7260 })).toContain("2 h 1 min");
     expect(r("follow_up_too_soon", { retryAfterSeconds: 90 })).toContain("2 min");
     expect(r("missing_field", { field: "sendAnywayReason" })).toBe("The reason is required.");
