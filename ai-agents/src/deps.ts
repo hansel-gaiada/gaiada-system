@@ -103,7 +103,7 @@ async function complete(prompt: string): Promise<string> {
   const tenantId = tenantContext.getStore();
   const attribution = usageContext.getStore();
   let status: number | null = null; // null until the gateway answers: a network failure is an `error` row
-  let body: { text: string; provider?: string; usage?: unknown } | null = null;
+  let body: { text: string; provider?: string; tier?: string; usage?: unknown } | null = null;
   try {
     const res = await fetch(`${config.gatewayUrl}/complete`, {
       method: "POST",
@@ -112,11 +112,12 @@ async function complete(prompt: string): Promise<string> {
         Authorization: `Bearer ${config.gatewayToken}`,
         ...(tenantId ? { "x-tenant-id": tenantId } : {}),
       },
-      body: JSON.stringify(config.servingProvider ? { prompt, provider: config.servingProvider } : { prompt }),
+      // AIP-07: every agent turn is an `agent_step` for the gateway's task routing.
+      body: JSON.stringify(config.servingProvider ? { prompt, provider: config.servingProvider, task: "agent_step" } : { prompt, task: "agent_step" }),
     });
     status = res.status;
     if (!res.ok) throw new Error(`gateway ${res.status}`);
-    body = (await res.json()) as { text: string; provider?: string; usage?: unknown };
+    body = (await res.json()) as { text: string; provider?: string; tier?: string; usage?: unknown };
     // What ACTUALLY served, after any hint miss or failover — the value D13 enforces against.
     lastServedProvider = body.provider;
     return body.text;

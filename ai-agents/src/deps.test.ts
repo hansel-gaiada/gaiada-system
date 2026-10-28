@@ -282,11 +282,11 @@ describe("D13 — AGENT_SERVING_PROVIDER is sent as the Gateway provider hint", 
   }
 
   it("sends `provider` when the env var is set", async () => {
-    expect(await completeOnce("openai")).toEqual({ prompt: "prompt", provider: "openai" });
+    expect(await completeOnce("openai")).toEqual({ prompt: "prompt", provider: "openai", task: "agent_step" });
   });
 
   it("omits it entirely when unset — byte-for-byte the pre-existing request", async () => {
-    expect(await completeOnce(undefined)).toEqual({ prompt: "prompt" });
+    expect(await completeOnce(undefined)).toEqual({ prompt: "prompt", task: "agent_step" }); // AIP-07: only the task is new
   });
 
   it("records what ACTUALLY served, not what was asked for — the value D13 enforces against", async () => {

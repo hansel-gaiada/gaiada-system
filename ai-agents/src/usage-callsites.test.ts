@@ -33,9 +33,21 @@ describe("AIP-03b · the runner's /complete", () => {
     const text = await runAs({ task: "statusReporter", userId: U, runId: R }, T, () => liveDeps.complete("p"));
     expect(text).toBe("done");
     expect(reported).toEqual([{
-      tenantId: T, userId: U, surface: "agent", capability: "llm", task: "statusReporter", runId: R, provider: "openai", model: null,
+      tenantId: T, userId: U, surface: "agent", capability: "llm", task: "statusReporter", runId: R, provider: "openai", model: null, tier: null,
       promptTokens: 120, completionTokens: 30, tokensSource: "provider", costUsd: 0.0021, costSource: "provider", outcome: "ok",
     }]);
+  });
+
+  it("AIP-07: sends task agent_step (with and without the provider hint) and reports the answer's tier; an invalid tier is dropped", async () => {
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ text: "d", provider: "openai", tier: "standard" }) }));
+    vi.stubGlobal("fetch", f);
+    await runAs({ task: "reader", userId: null, runId: null }, T, () => liveDeps.complete("p"));
+    expect(JSON.parse(String((f.mock.calls[0] as unknown as [string, RequestInit])[1].body)).task).toBe("agent_step");
+    expect(JSON.parse(String((f.mock.calls[0] as unknown as [string, RequestInit])[1].body)).prompt).toBe("p");
+    expect(reported[0].tier).toBe("standard");
+    gateway(200, { text: "d", provider: "openai", tier: "turbo" });
+    await runAs({ task: "reader", userId: null, runId: null }, T, () => liveDeps.complete("p"));
+    expect(reported[1].tier).toBeNull();
   });
 
   it("an answer with no usage is tokens 'none' and still ok", async () => {
@@ -85,7 +97,7 @@ describe("AIP-03b · the knowledge service's /embed", () => {
     const v = await embedUsageContext.run({ tenantId: T, userId: null, task: "knowledge.ingest" }, () => embedViaGateway("some chunk text"));
     expect(v).toEqual([0.1, 0.2]);
     expect(reported).toEqual([{
-      tenantId: T, userId: null, surface: "knowledge", capability: "embed", task: "knowledge.ingest", runId: null, provider: null, model: null,
+      tenantId: T, userId: null, surface: "knowledge", capability: "embed", task: "knowledge.ingest", runId: null, provider: null, model: null, tier: null,
       promptTokens: null, completionTokens: null, tokensSource: "none", costUsd: null, costSource: null, outcome: "ok",
     }]);
     expect(JSON.stringify(reported)).not.toContain("chunk text");
