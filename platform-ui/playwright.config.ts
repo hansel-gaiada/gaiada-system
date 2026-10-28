@@ -29,7 +29,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, /workspace-personas\.spec\.ts/, /a11y-axe-workspaces\.spec\.ts/, /skin-social\.spec\.ts/, /social-pipeline-walk\.spec\.ts/, /overview-personalise\.spec\.ts/, /dept-notices\.spec\.ts/, /dept-kpi-months\.spec\.ts/, /dept-calendar\.spec\.ts/, /requests-across\.spec\.ts/, /freelancer-bills\.spec\.ts/, /contract-billing\.spec\.ts/, /portal-social\.spec\.ts/, WEBDESK_STUB_SPECS],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, /workspace-personas\.spec\.ts/, /a11y-axe-workspaces\.spec\.ts/, /skin-social\.spec\.ts/, /social-pipeline-walk\.spec\.ts/, /social-schedule\.spec\.ts/, /overview-personalise\.spec\.ts/, /dept-notices\.spec\.ts/, /dept-kpi-months\.spec\.ts/, /dept-calendar\.spec\.ts/, /requests-across\.spec\.ts/, /freelancer-bills\.spec\.ts/, /contract-billing\.spec\.ts/, /portal-social\.spec\.ts/, WEBDESK_STUB_SPECS],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -171,7 +171,7 @@ export default defineConfig({
       fullyParallel: false,
       retries: 0,
       use: { ...devices["Desktop Chrome"] },
-      testMatch: /social-pipeline-walk\.spec\.ts/,
+      testMatch: /(social-pipeline-walk|social-schedule)\.spec\.ts/,
     },
     {
       // DW-10d: a person hides and switches on Overview blocks (DW-D34), as the placed Web Dev employee and the superadmin. Same
