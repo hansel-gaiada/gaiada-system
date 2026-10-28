@@ -13,6 +13,22 @@ const tasks = (n: number) => Array.from({ length: n }, (_, i) => item(`t${i + 1}
 const decide = () => vi.fn(async () => ({ ok: true }));
 const approval = () => item("agency:co-a:a1", "approval", { origin: "agency", originId: "a1" });
 
+describe("titled (SCP-Kh): a container that names the queue draws the block untitled", () => {
+  it("has its own title and region by default", () => {
+    render(<NeedsYouBlock items={tasks(2)} decide={decide()} />);
+    expect(screen.getByRole("heading", { name: "Needs you · 2" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+  });
+
+  it("with titled={false}, neither, and the rows are unchanged", () => {
+    render(<NeedsYouBlock items={tasks(2)} decide={decide()} titled={false} />);
+    expect(screen.queryByRole("heading", { name: /Needs you/ })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull();
+    expect(screen.getByText("Title t1")).toBeInTheDocument();
+    expect(screen.getByText("Title t2")).toBeInTheDocument();
+  });
+});
+
 describe("NeedsYouBlock", () => {
   it("shows the count in the title and the first six rows, with Show all for the rest", () => {
     render(<NeedsYouBlock items={tasks(9)} decide={decide()} />);

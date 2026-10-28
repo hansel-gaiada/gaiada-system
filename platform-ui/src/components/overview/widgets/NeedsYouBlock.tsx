@@ -18,7 +18,7 @@ type Decide = (tenantId: string, origin: QueueDecideOrigin, originId: string, de
 //
 // The count is what is still waiting, so it drops as items are decided. An empty list is a claim: it says
 // "Nothing needs you right now" only when every source answered, and never a bare 0.
-export function NeedsYouBlock({ items, unread = [], multiCompany = false, decide, acknowledge, limit = NEEDS_YOU_LIMIT }: {
+export function NeedsYouBlock({ items, unread = [], multiCompany = false, decide, acknowledge, limit = NEEDS_YOU_LIMIT, titled = true }: {
   /** Ranked, each id once, across every company the person can reach (DW-Q2). */
   items: QueueItem[];
   /** The companies (by name) with a source that could not be read: the list is short, and an empty one is not settled. */
@@ -29,15 +29,19 @@ export function NeedsYouBlock({ items, unread = [], multiCompany = false, decide
   /** DW-4j-2: the one action of a KPI alert row (Acknowledge, with an optional note). Absent: an alert row offers "Open" only. */
   acknowledge?: Acknowledge;
   limit?: number;
+  /** False when a container already names the queue (the Inbox's "Needs you" row, SCP-Kh): no title of its own and no second region of the
+   *  same name, so the words "Needs you" are not drawn twice. */
+  titled?: boolean;
 }) {
   const partial = unread.length > 0;
   const { visible, act, ack, toast } = useQueueDecisions(items, decide, acknowledge);
   const [expanded, setExpanded] = useState(false);
   const shown = expanded ? visible : visible.slice(0, limit);
+  const Wrap = titled ? "section" : "div";
 
   return (
-    <section className="ov-block" aria-label="Needs you">
-      <h3 className="ov-block__title">{visible.length > 0 ? `Needs you · ${visible.length}` : "Needs you"}</h3>
+    <Wrap className="ov-block" {...(titled ? { "aria-label": "Needs you" } : {})}>
+      {titled && <h3 className="ov-block__title">{visible.length > 0 ? `Needs you · ${visible.length}` : "Needs you"}</h3>}
       {visible.length === 0 ? (
         <p className="ov-block__note">
           {partial ? "Nothing found in the sources that could be read." : "Nothing needs you right now"}
@@ -59,6 +63,6 @@ export function NeedsYouBlock({ items, unread = [], multiCompany = false, decide
         <p className="ov-block__note">Some sources could not be read{multiCompany ? `: ${unread.join(", ")}` : ""}</p>
       )}
       {toast && <Toast message={toast} />}
-    </section>
+    </Wrap>
   );
 }

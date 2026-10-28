@@ -68,7 +68,9 @@ describe("InboxNeedsYou", () => {
     expect(head).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(head);
     expect(head).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("heading", { name: "Needs you · 9" })).toBeInTheDocument();
+    // The row is the queue's only title: the block draws no "Needs you · 9" heading and no second "Needs you" region of its own.
+    expect(screen.queryByRole("heading", { name: /Needs you/ })).toBeNull();
+    expect(screen.getAllByRole("region", { name: "Needs you" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show all (9)" })).toBeInTheDocument();
   });

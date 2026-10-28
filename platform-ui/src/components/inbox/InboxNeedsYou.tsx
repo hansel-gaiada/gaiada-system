@@ -37,7 +37,8 @@ export async function InboxNeedsYou({ read }: { read: Promise<InboxQueueRead> })
   const { line, waiting } = needsYouSummary(r.items, r.unread);
   return (
     <NeedsYouRow line={line} waiting={waiting}>
-      <NeedsYouBlock items={r.items} unread={r.unread} multiCompany={r.multiCompany} decide={decideQueueItem} acknowledge={acknowledgeKpiAlert} />
+      {/* The row is the queue's title, so the block draws none of its own (no "Needs you" twice). */}
+      <NeedsYouBlock items={r.items} unread={r.unread} multiCompany={r.multiCompany} decide={decideQueueItem} acknowledge={acknowledgeKpiAlert} titled={false} />
     </NeedsYouRow>
   );
 }
