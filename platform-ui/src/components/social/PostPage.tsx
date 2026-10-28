@@ -21,6 +21,7 @@ import { PostDesigns } from "@/components/social/PostDesigns";
 import { PostFields } from "@/components/social/PostFields";
 import { Activity, CopyLog } from "@/components/social/PostLog";
 import { PostMetricsSection } from "@/components/social/PostMetrics";
+import { PostBoostSection, type BoostAccess } from "@/components/social/PostBoost";
 import { PostStepper } from "@/components/social/PostStepper";
 import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { postEntityComment } from "@/lib/collabActions";
@@ -43,6 +44,8 @@ export interface PostPageProps {
   metrics?: PostMetrics | null;
   /** The signed-in person: the client's officer is offered the Enter metrics form. */
   viewerId?: string | null;
+  /** SCP-4b: what the server page could tell about the person for the Boost block of a live post (BFF §63.11). Absent: the block is not drawn. */
+  boostAccess?: BoostAccess;
   /** DEMO_MODE: no bytes are stored, so the image is the reference image the demo store holds. */
   demo?: boolean;
   chrome?: "page" | "drawer";
@@ -53,7 +56,7 @@ const monthLabel = (m: string): string => { const x = /^(\d{4})-(\d{2})$/.exec(m
 
 interface Notice { kind: "ok" | "error"; text: string; lines: string[] }
 
-export function PostPage({ deptId, post: initial, comments, assets, metrics, viewerId, demo = false, chrome = "page" }: PostPageProps) {
+export function PostPage({ deptId, post: initial, comments, assets, metrics, viewerId, boostAccess, demo = false, chrome = "page" }: PostPageProps) {
   const router = useRouter();
   const [post, setPost] = useState(initial);
   const [gone, setGone] = useState(false);
@@ -195,6 +198,8 @@ export function PostPage({ deptId, post: initial, comments, assets, metrics, vie
       </div>
 
       <PostMetricsSection post={post} metrics={metrics} viewerId={viewerId} onSaved={() => router.refresh()} />
+
+      {boostAccess && <PostBoostSection post={post} access={boostAccess} onChanged={() => router.refresh()} />}
 
       <section aria-labelledby="scp-post-copylog">
         <h3 className="scp-post__section-title" id="scp-post-copylog">Copy edit log</h3>

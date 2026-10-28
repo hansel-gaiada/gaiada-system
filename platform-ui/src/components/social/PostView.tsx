@@ -9,6 +9,7 @@ import { workspaceFor } from "@/lib/workspaces";
 import { isDemoMode } from "@/lib/demoMode";
 import { canDesignPost } from "@/lib/socialPipeline";
 import { readAssetChoices, readPipelinePost, readPostComments, readPostMetrics } from "@/lib/socialPipeline-data";
+import { canRunBoosts, getBoostBudget } from "@/lib/socialBoosts-data";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { PostPage } from "@/components/social/PostPage";
@@ -56,11 +57,19 @@ export async function PostView({ deptId, postId, chrome }: { deptId: string; pos
   const assets = canDesignPost(post.data) ? await readAssetChoices(userId, tenant) : null;
   // SCP-3c: a live post's metrics are a secondary read too: when it fails the block says so and the page keeps the post.
   const metrics = post.data.pipelineStatus === "live" ? await readPostMetrics(userId, tenant, postId) : null;
+  // SCP-4b: a live post gets the Boost block. The person's share of it is a MIRROR for drawing (the server decides): the run actions are the post's officer's and the HoD's and
+  // GM's; recording the client's answer is one of the four approvers', which the boost's cycle budget read says (`canRecord`). A failed read leaves both off, never claims either.
+  let boostAccess: { canRun: boolean; canRecord: boolean } | undefined;
+  if (post.data.pipelineStatus === "live") {
+    const cycleId = post.data.boost?.cycleId ?? null;
+    const [canRun, budget] = await Promise.all([canRunBoosts(me, tenant, post.data.officer?.id, userId), cycleId ? getBoostBudget(userId, tenant, cycleId) : Promise.resolve(null)]);
+    boostAccess = { canRun, canRecord: budget?.kind === "ok" ? budget.data.canRecord : false };
+  }
   const body = (
     <PostPage
       deptId={deptId} post={post.data} comments={comments.kind === "ok" ? comments.data : null}
       assets={assets && assets.kind === "ok" ? assets.data : null} metrics={post.data.pipelineStatus !== "live" ? undefined : metrics?.kind === "ok" ? metrics.data : null}
-      viewerId={userId} demo={isDemoMode()} chrome={chrome}
+      viewerId={userId} boostAccess={boostAccess} demo={isDemoMode()} chrome={chrome}
     />
   );
   return chrome === "page" ? <Card>{body}</Card> : body;

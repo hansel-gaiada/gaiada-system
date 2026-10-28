@@ -117,3 +117,25 @@ export function scpActionsFromStatus(post: ScpPostView): string[] {
     .filter((a) => a.from.some((f) => f.status === s && (f.changeCase === undefined || (post.changeCase != null && f.changeCase.includes(post.changeCase)))))
     .map((a) => a.action);
 }
+
+// ── SCP-4b: the boost and boost-budget machines (BFF §63.11), read from the fixture's `boosts` and `boostBudgets` keys ──────────────────────────────────────────
+interface BoostAction { action: string; cerbosAction: string; actors: string[]; from: string[]; params?: Record<string, string>; guards: Array<{ guard: string; refusal: string }>; approvedVia?: string }
+interface BoostFixture {
+  statuses: string[]; approvedVia: string[]; committedBy: Record<string, string>;
+  actions: Array<BoostAction & { to: unknown }>;
+}
+interface BudgetFixture { statuses: string[]; agreedVia: string[]; actions: Array<{ action: string; cerbosAction: string; actors: string[]; params?: Record<string, string>; guards: Array<{ guard: string; refusal: string }> }> }
+const FB = (fixture as unknown as { boosts: BoostFixture; boostBudgets: BudgetFixture });
+
+/** The boost statuses, in the fixture's order. */
+export const scpBoostStatuses = (): string[] => [...FB.boosts.statuses];
+/** What each status commits of the monthly budget (`committedBy`): "total budget", "actual spend" or "nothing". */
+export const scpBoostCommittedBy = (status: string): string | null => FB.boosts.committedBy[status] ?? null;
+/** The boost actions that exist from `status` (the fixture's `from` lists), in the fixture's order, with the Cerbos action and the actors each needs. */
+export function scpBoostActionsFrom(status: string): Array<{ action: string; cerbosAction: string; actors: string[] }> {
+  return FB.boosts.actions.filter((a) => a.from.includes(status)).map((a) => ({ action: a.action, cerbosAction: a.cerbosAction, actors: [...a.actors] }));
+}
+/** One boost action of the fixture, or undefined. */
+export const scpBoostAction = (action: string) => FB.boosts.actions.find((a) => a.action === action);
+/** One boost-budget action of the fixture, or undefined. */
+export const scpBudgetAction = (action: string) => FB.boostBudgets.actions.find((a) => a.action === action);

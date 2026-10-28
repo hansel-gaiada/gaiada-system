@@ -563,6 +563,16 @@ const SOCIAL_MEDIA: Workspace = {
         blurb: "The posts waiting for your design, with the note on any revision.",
       }],
     },
+    // SCP-4b (BFF §63.11, §63.17): Boosting: the candidates, the boosts running and waiting, and the totals. No gate: the whole team reads it, and the server refuses a write to
+    // anyone who may not run a boost (the client's officer, the HoD or the GM seat); the page says so in words. The Social skin does NOT pin it: the row is reachable from
+    // the More panel (`lib/skins.ts`), and in the Standard menu it sits with the other rows. The row key `boosts` is free in this workspace.
+    {
+      key: "boosts", label: "Boosting", icon: "chart",
+      tabs: [{
+        key: "boosts", label: "Boosting", href: deptPath("boosts"), icon: "chart",
+        blurb: "Posts worth boosting, the boosts running and waiting for the client, and what each month's boost budget has committed.",
+      }],
+    },
     // SCP-1c (BFF §63.17): the HoD's Settings page (the ready-by buffer, the deadline table). Shown to the four Social approvers only; the page itself is
     // readable by the team and editable with `plan`. The row key `settings` is the Social skin's pin (`lib/skins.ts`); Admin's `settings` row is another list.
     {

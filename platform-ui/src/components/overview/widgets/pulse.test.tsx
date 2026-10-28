@@ -144,11 +144,8 @@ describe("the registry's built tiles (DW-3e)", () => {
 
   it("links every built tile to an existing page", () => {
     const app = resolve(__dirname, "../../../app/(app)");
-    // SCP-4d: Boosts waiting links to the Boosting list, whose page is SCP-4c's. Drop this entry when 4c lands (the check then runs for it).
-    const PAGE_PENDING = new Set(["social-media/boosts-waiting"]);
     for (const w of WORKSPACES) {
       for (const t of w.pulse.filter((p) => !isPlanned(p))) {
-        if (PAGE_PENDING.has(`${w.key}/${t.key}`)) continue;
         const path = t.href!.split(/[?#]/)[0].replaceAll("{dept}", "[deptId]");
         expect(existsSync(resolve(app, `.${path}`, "page.tsx")), `${w.key}/${t.key} -> ${t.href}`).toBe(true);
       }
