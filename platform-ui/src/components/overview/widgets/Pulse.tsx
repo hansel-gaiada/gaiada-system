@@ -3,7 +3,9 @@ import type { PulseSource, PulseTile } from "@/lib/workspaces";
 import { listChangeRequests } from "@/lib/webdevChangeRequests-data";
 import { listInternalPendingGates } from "@/lib/pipeline";
 import { getSummary } from "@/lib/monitoring";
-import { listPosts } from "@/lib/social";
+import { getOverview } from "@/lib/socialOverview-data";
+import { readingOfOverview, type SocialOverview } from "@/lib/socialOverview";
+import type { ReadResult } from "@/lib/readResult";
 import { listAccounts } from "@/lib/it-accounts";
 import { hrScopeCompanies } from "@/lib/hr";
 import { listLeaveResult, listCasesResult } from "@/lib/hr-data";
@@ -20,7 +22,7 @@ import { todayIsoInDisplayZone } from "@/lib/format";
 import type { Me } from "@/lib/platform";
 import {
   NO_CURRENT_PERIOD, UNAVAILABLE_READING, currentPeriod, everyTileFailed, pulseHref, readingOfAccounts, readingOfAllResults, readingOfClose,
-  readingOfAlerts, readingOfDevices, readingOfInstalmentsDue, readingOfFailures, readingOfGuarded, hidesTile, readingOfIntegrity, readingOfOverdue, readingOfPayrollRuns, readingOfPendingPayments, readingOfResult,
+  readingOfAlerts, readingOfDevices, readingOfInstalmentsDue, readingOfFailures, hidesTile, readingOfIntegrity, readingOfOverdue, readingOfPayrollRuns, readingOfPendingPayments, readingOfResult,
   readingOfSummary, runsWaiting, type PulseReading, type PulseTileModel,
 } from "@/lib/overviewPulse";
 import { PulseBlock } from "./PulseBlock";
@@ -37,12 +39,24 @@ import { PulseBlock } from "./PulseBlock";
 const FORBIDDEN_READING: PulseReading = { kind: "forbidden" };
 const inHrScope = (me: Me, tenantId: string) => hrScopeCompanies(me, tenantId).some((c) => c.id === tenantId);
 
-const READERS: Record<PulseSource, (userId: string, tenantId: string, me: Me) => Promise<PulseReading>> = {
+/** A read several tiles share, made at most once per render (SCP-3f: one `GET overview` feeds the five pipeline tiles). */
+interface SharedReads { overview: () => Promise<ReadResult<SocialOverview>> }
+function sharedReads(userId: string, tenantId: string): SharedReads {
+  let overview: Promise<ReadResult<SocialOverview>> | undefined;
+  return { overview: () => (overview ??= getOverview(userId, tenantId)) };
+}
+
+const READERS: Record<PulseSource, (userId: string, tenantId: string, me: Me, shared: SharedReads) => Promise<PulseReading>> = {
   "change-requests-new": async (u, t) => readingOfResult(await listChangeRequests(u, t, { status: "new" }), (rows) => ({ value: rows.length })),
   "pipeline-gates-pending": async (u, t) => readingOfResult(await listInternalPendingGates(u, t), (gates) => ({ value: runsWaiting(gates) })),
   "monitoring-problem-sites": async (u, t) => readingOfSummary(await getSummary(u, t)),
-  "social-posts-scheduled": async (u, t) => readingOfGuarded(await listPosts(u, t, { status: "scheduled" })),
-  "social-posts-failed": async (u, t) => readingOfGuarded(await listPosts(u, t, { status: "failed" })),
+  // SCP-3f: the pipeline's tiles. ONE shared `GET overview`; a refused read is "No access" and a failed one "Unavailable", never 0. While the simulator is on the
+  // server counts simulated rows and the reading carries the SIMULATED mark.
+  "social-overview-in-production": async (_u, _t, _me, s) => readingOfOverview(await s.overview(), "inProduction"),
+  "social-overview-with-client": async (_u, _t, _me, s) => readingOfOverview(await s.overview(), "withClient"),
+  "social-overview-late": async (_u, _t, _me, s) => readingOfOverview(await s.overview(), "late"),
+  "social-overview-scheduled-week": async (_u, _t, _me, s) => readingOfOverview(await s.overview(), "scheduledThisWeek"),
+  "social-overview-failed": async (_u, _t, _me, s) => readingOfOverview(await s.overview(), "failedPosts"),
   "it-account-requests": async (u, t) => readingOfAccounts(await listAccounts(u, t)),
   "hr-leave-pending": async (u, t, me) =>
     inHrScope(me, t) ? readingOfResult(await listLeaveResult(u, t, { status: "pending" }), (rows) => ({ value: rows.length })) : FORBIDDEN_READING,
@@ -94,11 +108,11 @@ const READERS: Record<PulseSource, (userId: string, tenantId: string, me: Me) =>
 };
 
 /** One tile's reading. A reader that throws (a 5xx, a timeout) is this tile's failure, not the block's. */
-async function readTile(tile: PulseTile, userId: string, tenantId: string, me: Me): Promise<PulseReading> {
+async function readTile(tile: PulseTile, userId: string, tenantId: string, me: Me, shared: SharedReads): Promise<PulseReading> {
   const read = tile.source ? READERS[tile.source] : undefined;
   if (!read) return UNAVAILABLE_READING;
   try {
-    return await read(userId, tenantId, me);
+    return await read(userId, tenantId, me, shared);
   } catch {
     return UNAVAILABLE_READING;
   }
@@ -108,7 +122,8 @@ export async function Pulse({ me, tenantId, deptId, pulse }: OverviewWidgetProps
   const tiles = pulse ?? [];
   // A workspace with no built tile draws no Pulse (the frame does not even place it).
   if (tiles.length === 0) return null;
-  const readings = await Promise.all(tiles.map((t) => readTile(t, me.userId, tenantId, me)));
+  const shared = sharedReads(me.userId, tenantId);
+  const readings = await Promise.all(tiles.map((t) => readTile(t, me.userId, tenantId, me, shared)));
   // A tile that is not for this viewer (a 403 on a source in PULSE_HIDDEN_WHEN_FORBIDDEN) is not drawn, and the others are.
   const models: PulseTileModel[] = tiles
     .map((t, i) => ({ tile: t, reading: readings[i] }))

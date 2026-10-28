@@ -4,32 +4,59 @@
 import type { PoolClient } from "pg";
 import { config } from "../../../../config";
 import { withTenants } from "../../../../db";
+import { isSocialSimulationEnabled } from "../../../social/publisher/simulation";
 import type { KpiValue } from "../../dept-kpis";
 import type { ModuleKpiReader, ReaderCtx } from "../types";
 import { deptClientIdsSql, localDateSql, windowEndSql, windowStartSql } from "../scope";
 
 const social = <T>(ctx: ReaderCtx, fn: (c: PoolClient) => Promise<T>) => withTenants([ctx.tenantId], fn, { modules: ["social"] });
 
-// n7 `social.posts_on_schedule`. $1 tenant, $2 unit, $3 start, $4 end, $5 zone, $6 asOf.
-// The slot is the variant's own scheduled_at, else the post's plan-level slot (social_posts.scheduled_at). A variant with
-// neither is not on any schedule and is left out. "Already due" is the slot's local date on or before asOf. The 15
-// minutes is a documented default, not a ruling.
+// n7 `social.posts_on_schedule`. $1 tenant, $2 unit, $3 start, $4 end, $5 zone, $6 asOf, $7 simulator switch.
+// Two kinds of unit, one ratio. "Already due" is the slot's local date on or before asOf. The 15 minutes is a documented default,
+// not a ruling. A unit with no slot is not on any schedule and is left out.
+//   * A COMPOSER variant (the post has no `pipeline_status`): as before. The slot is the variant's own scheduled_at, else the post's
+//     plan-level slot (social_posts.scheduled_at); a native import is left out, because a Composer import records a post made elsewhere.
+//   * A PIPELINE post (SCP-3f, BFF §63.10): the post itself, hand-posted ones included. `mark_live` writes each variant as a
+//     native-import row, so the variants cannot be the unit; the post's own `went_live_at` (the officer's `at`, or the publisher's
+//     last `published_at`) against its approved slot `scheduled_at` is. It counts once its variants exist (the post has reached the client);
+//     a post archived before it went live is not a promise kept or broken, one archived after is still the record.
+// SIMULATED rows (plan §5): counted only while the switch is on. A pipeline post is simulated by its own mark or by any live variant's
+// (`social_posts.simulated` is written on the way live only), a Composer variant by its own.
 const SLOT = `COALESCE(v.scheduled_at, p.scheduled_at)`;
+const POST_SIMULATED = `(p.simulated OR EXISTS (SELECT 1 FROM social_post_variants sv WHERE sv.tenant_id = p.tenant_id AND sv.post_id = p.id AND sv.deleted_at IS NULL AND sv.simulated))`;
 const ON_SCHEDULE_SQL = `
-  SELECT count(*)::text AS denominator,
-         (count(*) FILTER (WHERE v.published_at IS NOT NULL
-                             AND v.published_at <= ${SLOT} + interval '15 minutes'))::text AS numerator
-    FROM social_post_variants v
-    JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
-    JOIN social_engagements e ON e.id = p.engagement_id AND e.tenant_id = p.tenant_id
-   WHERE v.tenant_id = $1::uuid
-     AND v.deleted_at IS NULL AND p.deleted_at IS NULL
-     AND NOT v.native_import
-     AND v.status <> 'cancelled'
-     AND ${SLOT} >= ${windowStartSql(3, 5)}
-     AND ${SLOT} <  ${windowEndSql(4, 5)}
-     AND e.client_id IN ${deptClientIdsSql(1, 2)}
-     AND (v.published_at IS NOT NULL OR ${localDateSql(SLOT, 5)} <= $6::date)`;
+  WITH units AS (
+    SELECT (v.published_at IS NOT NULL AND v.published_at <= ${SLOT} + interval '15 minutes') AS on_time
+      FROM social_post_variants v
+      JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
+      JOIN social_engagements e ON e.id = p.engagement_id AND e.tenant_id = p.tenant_id
+     WHERE v.tenant_id = $1::uuid
+       AND v.deleted_at IS NULL AND p.deleted_at IS NULL
+       AND p.pipeline_status IS NULL
+       AND NOT v.native_import
+       AND v.status <> 'cancelled'
+       AND ($7::boolean OR NOT v.simulated)
+       AND ${SLOT} >= ${windowStartSql(3, 5)}
+       AND ${SLOT} <  ${windowEndSql(4, 5)}
+       AND e.client_id IN ${deptClientIdsSql(1, 2)}
+       AND (v.published_at IS NOT NULL OR ${localDateSql(SLOT, 5)} <= $6::date)
+    UNION ALL
+    SELECT (p.went_live_at IS NOT NULL AND p.went_live_at <= p.scheduled_at + interval '15 minutes') AS on_time
+      FROM social_posts p
+      JOIN social_engagements e ON e.id = p.engagement_id AND e.tenant_id = p.tenant_id
+     WHERE p.tenant_id = $1::uuid
+       AND p.deleted_at IS NULL
+       AND p.pipeline_status IS NOT NULL
+       AND (p.archived_at IS NULL OR p.went_live_at IS NOT NULL)
+       AND EXISTS (SELECT 1 FROM social_post_variants v
+                    WHERE v.tenant_id = p.tenant_id AND v.post_id = p.id AND v.deleted_at IS NULL AND v.status <> 'cancelled')
+       AND ($7::boolean OR NOT ${POST_SIMULATED})
+       AND p.scheduled_at >= ${windowStartSql(3, 5)}
+       AND p.scheduled_at <  ${windowEndSql(4, 5)}
+       AND e.client_id IN ${deptClientIdsSql(1, 2)}
+       AND (p.went_live_at IS NOT NULL OR ${localDateSql("p.scheduled_at", 5)} <= $6::date)
+  )
+  SELECT count(*)::text AS denominator, (count(*) FILTER (WHERE on_time))::text AS numerator FROM units`;
 
 export const postsOnSchedule: ModuleKpiReader = async (ctx): Promise<KpiValue | null> => {
   const row = await social(
@@ -43,6 +70,7 @@ export const postsOnSchedule: ModuleKpiReader = async (ctx): Promise<KpiValue | 
           ctx.end,
           config.reportsTz,
           ctx.asOf,
+          isSocialSimulationEnabled(),
         ])
       ).rows[0],
   );

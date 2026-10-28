@@ -3,6 +3,7 @@
 // with at(), never assumed to be UTC. Rows are seeded through the admin pool (RLS bypass) so the `social` wall is what
 // keeps a module-less tenant's rows out, which is exactly what the null cases prove.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { config } from "../../../../config";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../../../testing/setup";
 import { clientApprovalTurnaround, engagementGrowth, postsOnSchedule } from "./social";
 import { at, seedDept, uuid, UNIT, type DeptWorld } from "../../../../testing/dept-kpi-seed";
@@ -91,6 +92,55 @@ async function variant(tenant: string, client: string, o: VariantOpts): Promise<
 }
 const plus = (d: Date, seconds: number) => new Date(d.getTime() + seconds * 1000);
 
+interface PipelineOpts {
+  slot: Date;
+  /** The post's `went_live_at` (what `mark_live` writes); null for a post that has not gone live. */
+  live?: Date | null;
+  /** The post's own `simulated` mark, and the mark on its one variant. */
+  postSimulated?: boolean;
+  variantSimulated?: boolean;
+  /** A pipeline post whose variants do not exist yet (it has not reached the client). */
+  noVariants?: boolean;
+  /** A hand-posted post (the default): its variant is the native-import bookkeeping row `mark_live` writes. False: a publisher-live variant. */
+  native?: boolean;
+  /** Variants to write (default 1), each on its own account. */
+  variants?: number;
+}
+const cycles = new Map<string, string>();
+/** One PIPELINE post (a cycle, `pipeline_status`, a slot) with its variants, as `mark_live` leaves a hand-posted one. Returns the post id. */
+async function pipelinePost(tenant: string, client: string, o: PipelineOpts): Promise<string> {
+  const eng = await engagement(tenant, client);
+  const key = `${tenant}/${client}`;
+  let cycle = cycles.get(key);
+  if (!cycle) {
+    const { rows } = await adminPool().query<{ id: string }>(
+      `INSERT INTO social_cycles (tenant_id, engagement_id, month, deadline, ready_by, origin_site)
+       VALUES ($1,$2,'2020-03-01','2020-03-20','2020-03-15','central') RETURNING id`,
+      [tenant, eng],
+    );
+    cycle = rows[0].id;
+    cycles.set(key, cycle);
+  }
+  const live = o.live ?? null;
+  const post = await adminPool().query<{ id: string }>(
+    `INSERT INTO social_posts (tenant_id, engagement_id, title, cycle_id, scheduled_at, pipeline_status, status_since, went_live_at, live_url, simulated,
+                               schedule_via)
+     VALUES ($1,$2,'Pipeline post',$3,$4,$5,now(),$6,$7,$8,'manual') RETURNING id`,
+    [tenant, eng, cycle, o.slot, live ? "live" : "scheduled", live, live ? "https://example.invalid/live" : null, o.postSimulated ?? false],
+  );
+  // A non-native published variant must carry an approval (svar_dispatched_has_approval), which this reader never reads: it rests as approved.
+  const native = live !== null && (o.native ?? true);
+  for (let i = 0; i < (o.noVariants ? 0 : (o.variants ?? 1)); i++) {
+    const acct = await account(tenant, client);
+    await adminPool().query(
+      `INSERT INTO social_post_variants (tenant_id, post_id, account_id, status, native_import, scheduled_at, published_at, simulated)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [tenant, post.rows[0].id, acct, native ? "published" : "approved", native, o.slot, live, o.variantSimulated ?? false],
+    );
+  }
+  return post.rows[0].id;
+}
+
 describe.skipIf(!TEST_URL)("DW-6n social readers (live PG + RLS)", () => {
   let off: DeptWorld;
   let other: DeptWorld;
@@ -169,6 +219,58 @@ describe.skipIf(!TEST_URL)("DW-6n social readers (live PG + RLS)", () => {
       expect(await postsOnSchedule(ctx(w.tenant, "2020-03-20"))).toBeNull();
       // The wall is the declared scope, not companies.enabled_modules: a tenant without the module has no module rows.
       await expect(postsOnSchedule(ctx(off.tenant))).resolves.toBeNull();
+    });
+  });
+
+  // ═════════════════════════════════ n7 over the pipeline (SCP-3f) ═════════════════════════════════
+  describe("n7 postsOnSchedule reads the pipeline's posts", () => {
+    const before = config.socialSimulationEnabled;
+    afterAll(() => { config.socialSimulationEnabled = before; });
+
+    it("counts hand-posted pipeline posts by went_live_at against the slot; a Composer native import stays out", async () => {
+      const w = await seedDept("DW6n-n7 P1", ["social"]);
+      const t = w.tenant;
+      const s1 = await at("2020-03-05", 10 * 3600);
+      await pipelinePost(t, w.clients.inUnit, { slot: s1, live: plus(s1, 4 * MIN) }); // hand-posted, on time
+      const s2 = await at("2020-03-06", 10 * 3600);
+      await pipelinePost(t, w.clients.inUnit, { slot: s2, live: plus(s2, 15 * MIN) }); // exactly 15: on time
+      const s3 = await at("2020-03-07", 10 * 3600);
+      await pipelinePost(t, w.clients.inUnit, { slot: s3, live: plus(s3, 16 * MIN) }); // hand-posted, 16 min late
+      const s4 = await at("2020-03-08", 10 * 3600);
+      await pipelinePost(t, w.clients.child, { slot: s4, live: s4, native: false }); // a publisher-live post (no native import): on time
+      await pipelinePost(t, w.clients.inUnit, { slot: await at("2020-03-10", 10 * 3600) }); // scheduled, past due, never live: late
+      await pipelinePost(t, w.clients.inUnit, { slot: await at("2020-03-25", 10 * 3600) }); // scheduled, not yet due: excluded
+      const s5 = await at("2020-03-09", 10 * 3600);
+      await variant(t, w.clients.inUnit, { sched: s5, published: s5, native: true }); // a Composer native import: still excluded
+      expect(await postsOnSchedule(ctx(t, "2020-03-20"))).toEqual({ value: 3 / 5, numerator: 3, denominator: 5 });
+    });
+
+    it("counts a post once whatever its variants, and leaves out a post with no variants yet, a deleted one and a sibling unit's", async () => {
+      const w = await seedDept("DW6n-n7 P2", ["social"]);
+      const t = w.tenant;
+      const s = await at("2020-03-05", 10 * 3600);
+      await pipelinePost(t, w.clients.inUnit, { slot: s, live: s, variants: 3 }); // on time, three variants: one post
+      await pipelinePost(t, w.clients.inUnit, { slot: s, noVariants: true }); // no variants: never reached the client
+      const gone = await pipelinePost(t, w.clients.inUnit, { slot: s, live: plus(s, 60 * MIN) });
+      await adminPool().query(`UPDATE social_posts SET deleted_at = now() WHERE id = $1`, [gone]);
+      await pipelinePost(t, w.clients.sibling, { slot: s, live: plus(s, 60 * MIN) });
+      expect(await postsOnSchedule(ctx(t))).toEqual({ value: 1, numerator: 1, denominator: 1 });
+    });
+
+    it("simulated rows count only while the switch is on: a post simulated by its variant or its own mark, and a Composer variant", async () => {
+      const w = await seedDept("DW6n-n7 P3", ["social"]);
+      const t = w.tenant;
+      const s = await at("2020-03-05", 10 * 3600);
+      await pipelinePost(t, w.clients.inUnit, { slot: s, live: s }); // real, on time
+      await pipelinePost(t, w.clients.inUnit, { slot: s, live: plus(s, 60 * MIN), variantSimulated: true, native: false }); // simulated by its variant, late
+      await pipelinePost(t, w.clients.inUnit, { slot: s, live: s, postSimulated: true }); // simulated by its own mark, on time
+      await variant(t, w.clients.inUnit, { sched: s, published: plus(s, 60 * MIN) }); // a real Composer variant, late
+      const sim = await variant(t, w.clients.inUnit, { sched: s, published: s });
+      await adminPool().query(`UPDATE social_post_variants SET simulated = true WHERE id = $1`, [sim]); // a simulated Composer variant, on time
+      config.socialSimulationEnabled = false;
+      expect(await postsOnSchedule(ctx(t))).toEqual({ value: 1 / 2, numerator: 1, denominator: 2 });
+      config.socialSimulationEnabled = true;
+      expect(await postsOnSchedule(ctx(t))).toEqual({ value: 3 / 5, numerator: 3, denominator: 5 });
     });
   });
 

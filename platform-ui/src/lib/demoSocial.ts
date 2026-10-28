@@ -7,7 +7,7 @@ import { demoDesignQueue } from "./demoSocialDesignQueue";
 import { demoSocialMetrics } from "./demoSocialMetrics";
 import {
   DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCalendar, demoCreatePost, demoCycleHealth, demoCycleTable, demoDeadlineRange,
-  demoFeed, demoNeedsYou, demoPipelineRead, demoRealDate, demoWaiting, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement,
+  demoFeed, demoNeedsYou, demoOverview, demoPipelineRead, demoRealDate, demoWaiting, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement,
   type DemoBrandProfile, type DemoAllocation,
 } from "./demoSocialPipeline";
 import { demoBulkActions, runDemoPipelineAction, runDemoPipelineWrite } from "./demoSocialPipelineRun";
@@ -994,6 +994,8 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   // ── SCP-1d / SCP-1j: the feed, Messages and the pipeline's leg of Needs you (BFF §63.7) ─────────────────────────────────────────
   if (tail === "feed" && m === "GET") return demoFeed(params, userId);
   if (tail === "waiting" && m === "GET") return demoWaiting(userId);
+  // SCP-3f: the Overview's Pulse tiles; the one Failed posts number includes this store's failed Composer posts (`listPosts status=failed`'s own rows).
+  if (tail === "overview" && m === "GET") return demoOverview(userId, POSTS.filter((x) => x.status === "failed" && !isPipelinePostId(x.id)).length);
   if (tail === "needs-you" && m === "GET") return demoNeedsYou(p.match(/^\/api\/([^/]+)\//)![1], userId);
 
   // ── SCP-1o: the pipeline read (BFF §63.6.2) and the write hook ────────────────────────────────────────────────

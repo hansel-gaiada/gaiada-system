@@ -141,7 +141,8 @@ export interface PulseTile {
 /** The readers a Pulse tile can draw from: one per tile, each with its own failure semantics. */
 export type PulseSource =
   | "change-requests-new" | "pipeline-gates-pending" | "monitoring-problem-sites"
-  | "social-posts-scheduled" | "social-posts-failed" | "it-account-requests"
+  | "social-overview-in-production" | "social-overview-with-client" | "social-overview-late" | "social-overview-scheduled-week" | "social-overview-failed"
+  | "it-account-requests"
   | "hr-leave-pending" | "hr-onboarding-open" | "hr-cases-open" | "hr-payroll-waiting" | "it-devices-offline"
   | "finance-payments-to-confirm" | "finance-overdue-receivables" | "finance-close-progress" | "finance-integrity-findings"
   | "finance-instalments-due"
@@ -578,10 +579,15 @@ const SOCIAL_MEDIA: Workspace = {
   connections: [CONN.socialAccounts, CONN.drive, CONN.claudeSeats],
   overview: DEPARTMENT_OVERVIEW,
   pulse: [
-    { key: "posts-scheduled", label: "Posts scheduled", source: "social-posts-scheduled", href: deptPath("calendar") },
-    // No honest reader yet: client review is read one variant at a time, not as a list.
-    { key: "waiting-client-review", label: "Waiting client review", ticket: "DW-3e" },
-    { key: "failed-posts", label: "Failed posts", source: "social-posts-failed", href: deptPath("calendar") },
+    // SCP-3f (plan §6.4, BFF §63.7): the pipeline's tiles, all from ONE `GET overview` that the Pulse reads once. No page lists the posts of a phase, so the phase tiles open the
+    // client list (each client's cycle counts and health); the week's posts and the failures are on the calendar. "With client" closes DW-3e's "Waiting client review".
+    { key: "in-production", label: "In production", source: "social-overview-in-production", href: deptPath("profile") },
+    { key: "with-client", label: "With client", source: "social-overview-with-client", href: deptPath("profile") },
+    { key: "late", label: "Late", source: "social-overview-late", href: deptPath("profile") },
+    { key: "scheduled-this-week", label: "Scheduled this week", source: "social-overview-scheduled-week", href: deptPath("calendar") },
+    { key: "failed-posts", label: "Failed posts", source: "social-overview-failed", href: deptPath("calendar") },
+    // The boosts table is SCP-4a's: a placeholder until `GET overview` answers a number.
+    { key: "boosts-waiting", label: "Boosts waiting", ticket: "SCP-4a" },
     // Needs the inbox sync backend first (SMM-15).
     { key: "unanswered-inbox", label: "Unanswered inbox", ticket: "DW-3e after SMM-15" },
   ],

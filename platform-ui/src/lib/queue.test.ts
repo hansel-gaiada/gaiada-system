@@ -112,6 +112,28 @@ describe("getMyWorkQueue — the shared R-1 spine", () => {
     expect(queue.items.find((i) => i.id === "agency:co-c:ap-2")?.decidable).toBe(false);
   });
 
+  it("SCP-3g: an automation row the server marks approver_decides is decidable without approvals.decide; its neighbour is not", async () => {
+    const companies = [{ id: "co-s", name: "Social" }];
+    const m = me(companies, [{ role: "member", scopeType: "company", scopeId: "co-s" }]);
+    const row = (id: string, extra: Record<string, unknown> = {}) => ({
+      id, workflow_id: "agent:x", tool_name: "social.publishPost", tool_args: { variantId: "v" }, impact: "high", reason: null,
+      status: "pending", origin: "agent", agent_name: null, requested_by: "u2", decided_by: null, decided_at: null,
+      created_at: "2026-07-02T00:00:00Z", ...extra,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/co-s/automation-approvals")) {
+          return new Response(JSON.stringify([row("pub-1", { approver_decides: true }), row("pub-2")]), { status: 200 });
+        }
+        return new Response(JSON.stringify([]), { status: 200 });
+      }),
+    );
+    const queue = await getMyWorkQueue(m, "u1", companies);
+    expect(queue.items.find((i) => i.id === "automation:co-s:pub-1")?.decidable).toBe(true);
+    expect(queue.items.find((i) => i.id === "automation:co-s:pub-2")?.decidable).toBe(false);
+  });
+
   it("never throws when every source for a company fails outright", async () => {
     const companies = [{ id: "co-d", name: "Down" }];
     const m = me(companies, [{ role: "manager", scopeType: "company", scopeId: "co-d" }]);

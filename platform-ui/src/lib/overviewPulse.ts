@@ -18,7 +18,8 @@ import type { Guarded } from "./socialShared";
 import { WORKSPACES, hrefFor, isPlanned, type PulseSource, type PulseTile } from "./workspaces";
 
 export type PulseReading =
-  | { kind: "ok"; value: number; detail?: string }
+  /** `simulated`: the count includes simulated rows (SCP-3f), so the tile carries the SIMULATED mark. */
+  | { kind: "ok"; value: number; detail?: string; simulated?: true }
   | { kind: "forbidden" }
   /** `detail` says why there is no reading when the cause is known and is not a fault (no current period). */
   | { kind: "unavailable"; detail?: string };

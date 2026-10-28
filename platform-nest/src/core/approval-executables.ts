@@ -56,8 +56,8 @@ import { resolveXPricing } from "../modules/social/usage-ledger";
 import { EditorialScopeError, isEditorialRole, normaliseEditorialScope } from "../rbac/editorial-roles";
 import { checkWebdeskEnvironmentDomain } from "../modules/webdev/webdesk-domain";
 // PGL-06: the countersign approver rule asks Cerbos, as the approver, the same question the countersign route asks.
-import { check } from "../rbac/cerbos";
-import { assemblePrincipal, type Assurance } from "../rbac/principal";
+import { check, checkMany, type Resource } from "../rbac/cerbos";
+import { assemblePrincipal, type Assurance, type Principal } from "../rbac/principal";
 
 /** The result of a server-side precondition re-evaluation. `reason` is a TYPED token (snake_case,
  *  e.g. `run_blocked`, `stage_already_deployed`, `run_not_found`) — it is stored verbatim after the
@@ -226,6 +226,19 @@ export interface ApproverCheck {
   /** Which rows the replacement applies to. A read only (no writes, no network), on the decide surface's tenant client with
    *  the entry's `preconditionModules` in scope. A throw fails closed (decide answers 500 and decides nothing). */
   replacesDecideFor?(client: PoolClient, toolArgs: Record<string, unknown>): Promise<boolean>;
+  /**
+   * SCP-3g (PERMISSION-CONTRACT §53.12): the READ routes' batched form of the decide question. For each input, in order, true
+   * only when `replacesDecideFor` would answer true for that row AND this check would pass for `approver` on it, so a caller
+   * lists and opens exactly the rows they could decide by id under the replacement. Batched on purpose: an inbox asks it for up
+   * to 200 rows, so it reads the rows in a few queries and asks Cerbos in `checkMany` batches, never one call per row. Same
+   * client contract as `replacesDecideFor`, plus read-only Cerbos calls. Absent: the read routes widen nothing for the entry
+   * (its rows stay behind `automation_approval · read`). A throw propagates: the read fails closed.
+   */
+  replacedDecideAllowedMany?(
+    client: PoolClient,
+    toolArgsList: ReadonlyArray<Record<string, unknown>>,
+    approver: ApprovalApprover,
+  ): Promise<boolean[]>;
 }
 
 /** Who approved (or is approving) a D14 row. `actForUserId` is set when the decide call itself arrived
@@ -1382,31 +1395,60 @@ export const SOCIAL_APPROVER_REQUIRED = "social_approver_required";
 
 const VARIANT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** A publish approval's variant id, or null when its args name none (or not a uuid). */
+function publishVariantIdOf(toolArgs: Record<string, unknown>): string | null {
+  const v = toolArgs?.variantId;
+  return typeof v === "string" && VARIANT_UUID_RE.test(v) ? v.toLowerCase() : null;
+}
+
+/** The post each publish approval's variant belongs to, in input order, read under the caller's tenant client in ONE query:
+ *  null where the variant is gone (or the args name none). SCP-3g: batched so the read routes can ask it for a page of rows. */
+async function publishVariantPosts(
+  client: PoolClient,
+  toolArgsList: ReadonlyArray<Record<string, unknown>>,
+): Promise<Array<{ tenantId: string; postId: string; pipeline: boolean } | null>> {
+  const variantIds = toolArgsList.map(publishVariantIdOf);
+  const wanted = [...new Set(variantIds.filter((v): v is string => v !== null))];
+  if (wanted.length === 0) return variantIds.map(() => null);
+  await declareSocialModuleScope(client);
+  const { rows } = await client.query<{ id: string; tenant_id: string; post_id: string; pipeline_status: string | null }>(
+    `SELECT v.id::text AS id, v.tenant_id, v.post_id, p.pipeline_status
+       FROM social_post_variants v
+       JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
+      WHERE v.id = ANY($1::uuid[])`,
+    [wanted],
+  );
+  const byId = new Map(rows.map((r) => [r.id.toLowerCase(), { tenantId: r.tenant_id, postId: r.post_id, pipeline: r.pipeline_status !== null }]));
+  return variantIds.map((v) => (v ? byId.get(v) ?? null : null));
+}
+
 /** The post a publish approval's variant belongs to, read under the caller's tenant client: null when the variant is gone. */
 async function publishVariantPost(
   client: PoolClient,
   toolArgs: Record<string, unknown>,
 ): Promise<{ tenantId: string; postId: string; pipeline: boolean } | null> {
-  const v = toolArgs?.variantId;
-  const variantId = typeof v === "string" && VARIANT_UUID_RE.test(v) ? v : null;
-  if (!variantId) return null;
-  await declareSocialModuleScope(client);
-  const { rows } = await client.query<{ tenant_id: string; post_id: string; pipeline_status: string | null }>(
-    `SELECT v.tenant_id, v.post_id, p.pipeline_status
-       FROM social_post_variants v
-       JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
-      WHERE v.id = $1`,
-    [variantId],
-  );
-  const r = rows[0];
-  if (!r) return null;
-  return { tenantId: r.tenant_id, postId: r.post_id, pipeline: r.pipeline_status !== null };
+  return (await publishVariantPosts(client, [toolArgs]))[0];
 }
 
 /** `replacesDecideFor`: only a pipeline post's publish approval. A missing variant keeps the generic decide right (the
  *  precondition refuses such a row at execution anyway, so nothing can publish through it). */
 async function isPipelinePublish(client: PoolClient, toolArgs: Record<string, unknown>): Promise<boolean> {
   return (await publishVariantPost(client, toolArgs))?.pipeline === true;
+}
+
+/** The humans a decision must pass for, assembled as the decide check assembles them: the approver, and the person an act-for
+ *  call acts for (`authorize()`'s intersection). null when either does not assemble (fail closed). */
+async function approverPrincipals(approver: ApprovalApprover): Promise<Principal[] | null> {
+  const assurance: Assurance = approver.assurance ?? "linked";
+  const humans = [approver.userId];
+  if (approver.actForUserId && approver.actForUserId !== approver.userId) humans.push(approver.actForUserId);
+  const out: Principal[] = [];
+  for (const userId of humans) {
+    const principal = await assemblePrincipal(userId, assurance);
+    if (!principal) return null;
+    out.push(principal);
+  }
+  return out;
 }
 
 async function socialPublishApproverCheckFn(
@@ -1422,22 +1464,61 @@ async function socialPublishApproverCheckFn(
   const facts = await loadSocialPostAuthz(client, target.tenantId, target.postId);
   if (!facts) return { ok: false, reason: SOCIAL_APPROVER_REQUIRED };
   const resource = socialPostResource(target.tenantId, facts);
-  const assurance: Assurance = approver.assurance ?? "linked";
-  const humans = [approver.userId];
-  if (approver.actForUserId && approver.actForUserId !== approver.userId) humans.push(approver.actForUserId);
-  for (const userId of humans) {
-    const principal = await assemblePrincipal(userId, assurance);
-    if (!principal) return { ok: false, reason: SOCIAL_APPROVER_REQUIRED };
+  const principals = await approverPrincipals(approver);
+  if (!principals) return { ok: false, reason: SOCIAL_APPROVER_REQUIRED };
+  for (const principal of principals) {
     const decision = await check(principal, resource, "approve");
     if (!decision.allow) return { ok: false, reason: SOCIAL_APPROVER_REQUIRED };
   }
   return { ok: true };
 }
 
+/**
+ * SCP-3g — `replacedDecideAllowedMany`: the check above for a page of rows. True for a row only when it is a pipeline post's
+ * publish approval (`replacesDecideFor`) and every human the decision needs passes `social_post · approve` on that post, with
+ * the post's own attributes (`loadSocialPostAuthzMany` + `socialPostResource`, the builder the check uses). Cost: one variant
+ * query, the posts' facts (one posts query, the seat holders once per tenant, one PM read per distinct month request), one
+ * `assemblePrincipal` per human, and `checkMany` over the DISTINCT posts per human (50 resources per Cerbos call).
+ */
+async function socialPublishDecidableMany(
+  client: PoolClient,
+  toolArgsList: ReadonlyArray<Record<string, unknown>>,
+  approver: ApprovalApprover,
+): Promise<boolean[]> {
+  const targets = await publishVariantPosts(client, toolArgsList);
+  const keyOf = (tenantId: string, postId: string) => `${tenantId}:${postId}`;
+  const postsByTenant = new Map<string, Set<string>>();
+  for (const t of targets) {
+    if (!t?.pipeline) continue; // a Composer post or a gone variant: the replacement does not claim it
+    postsByTenant.set(t.tenantId, (postsByTenant.get(t.tenantId) ?? new Set<string>()).add(t.postId));
+  }
+  if (postsByTenant.size === 0) return targets.map(() => false);
+  const { loadSocialPostAuthzMany, socialPostResource } = await import("../modules/social/pipeline-authz");
+  const resourceByKey = new Map<string, Resource>();
+  for (const [tenantId, postIds] of postsByTenant) {
+    for (const facts of (await loadSocialPostAuthzMany(client, tenantId, [...postIds])).values()) {
+      resourceByKey.set(keyOf(tenantId, facts.postId), socialPostResource(tenantId, facts));
+    }
+  }
+  // A deleted post is refused, as the check refuses it.
+  const principals = resourceByKey.size > 0 ? await approverPrincipals(approver) : null;
+  if (!principals) return targets.map(() => false);
+  const keys = [...resourceByKey.keys()];
+  const resources = keys.map((k) => resourceByKey.get(k)!);
+  let allowed = keys.map(() => true);
+  for (const principal of principals) {
+    const answers = await checkMany(principal, resources, "approve");
+    allowed = allowed.map((a, i) => a && answers[i] === true);
+  }
+  const allowedByKey = new Map(keys.map((k, i) => [k, allowed[i]]));
+  return targets.map((t) => (t?.pipeline ? allowedByKey.get(keyOf(t.tenantId, t.postId)) === true : false));
+}
+
 /** The approverCheck both publish tools declare (exported for the registry tests). */
 export const socialPublishApproverCheck: ApproverCheck = Object.assign(socialPublishApproverCheckFn, {
   replacesDecide: true as const,
   replacesDecideFor: isPipelinePublish,
+  replacedDecideAllowedMany: socialPublishDecidableMany,
 });
 
 /**

@@ -62,7 +62,7 @@ const cycle = (over: Partial<CycleView> = {}): CycleView => ({
   client: lateHealth, posts: [{ ...posts[0], health: lateHealth }, ...posts.slice(1)], ...over,
 });
 const item = (over: Partial<CalendarItem>): CalendarItem => ({
-  postId: "p-1", clientName: "Brand Alpha", title: "Harvest teaser", format: "feed", scheduledAt: "2026-10-20T09:30:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: false, ...over,
+  postId: "p-1", clientName: "Brand Alpha", title: "Harvest teaser", format: "feed", scheduledAt: "2026-10-20T09:30:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: false, dateMove: "locked", dateMoveRefusal: "field_locked", ...over,
 });
 
 /** SCP-Sg: the client's accounts read back; the default is a synced simulated client (an invented one). */

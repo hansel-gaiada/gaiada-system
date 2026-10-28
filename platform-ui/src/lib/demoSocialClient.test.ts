@@ -32,9 +32,9 @@ describe("GET calendar", () => {
       "Studio tour in 30 seconds", "Launch day announcement", "Meet the packing team",
     ]); // SCP-2 added a story (the 22nd) and a reel (the 26th) that wait on the client
     const by = (t: string) => items.find((i) => i.title === t)!;
-    expect(by("Autumn collection teaser")).toMatchObject({ clientName: "Northwind Traders", pipelineStatus: "scheduled", phase: "client_approved", format: "feed", simulated: false });
-    expect(by("Five ways to style a scarf")).toMatchObject({ pipelineStatus: "client", phase: "with_client", format: "carousel" });
-    expect(by("Launch day announcement")).toMatchObject({ pipelineStatus: "changes", phase: "client_changes" });
+    expect(by("Autumn collection teaser")).toMatchObject({ clientName: "Northwind Traders", pipelineStatus: "scheduled", phase: "client_approved", format: "feed", simulated: false, dateMove: "reschedule", dateMoveRefusal: null });
+    expect(by("Five ways to style a scarf")).toMatchObject({ pipelineStatus: "client", phase: "with_client", format: "carousel", dateMove: "locked", dateMoveRefusal: "field_locked" });
+    expect(by("Launch day announcement")).toMatchObject({ pipelineStatus: "changes", phase: "client_changes", dateMove: "locked", dateMoveRefusal: "field_locked" });
     expect(by("Autumn collection teaser").scheduledAt).toBe("2026-10-20T09:30:00.000Z");
   });
 

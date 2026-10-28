@@ -260,47 +260,31 @@ test.describe("Inbox — RBAC: a plain member is denied, not shown an empty queu
   });
 });
 
-test.describe("Calendar — drag-to-reschedule: the discarded-approval warning must fire BEFORE the drop commits", () => {
-  test("names the count of approved variants, and cancelling leaves the schedule untouched", async ({ page, context }) => {
+// SCP-3e: `{D}/calendar` became the Social Media calendar (every client's pipeline posts, Monday first, a legend, drag to change a date by the fixture's rule). The
+// Composer's own posts stay on it as READ-ONLY links to the Composer: the drag-to-reschedule with the discarded-approval warning (SMM-12) and the client-review chips
+// (SMM-31/32) of the old grid are not on this page any more. The discard warning still belongs to the Composer's variant card (tested above), the review state to the
+// Composer and the portal (tested below); the date move of a pipeline post is proved by vitest and the demo twin (`demoSocialCalendar.test.ts`).
+test.describe("Calendar — the Composer's posts stay on the Social Media calendar, read-only", () => {
+  test("a Composer post is a link to the Composer on its own day, Monday first, and cannot be dragged", async ({ page, context }) => {
     await loginStaff(page, context, "superadmin");
     await page.goto(`${DEPT4}/calendar?month=2026-08`);
 
-    // soc-post-3 (Aug 27) carries TWO approved variants (soc-var-3, soc-var-4).
+    // soc-post-3 (Aug 27) carries two approved variants.
     const chip = page.getByRole("link", { name: /Weekly promo carousel/ });
     await expect(chip).toBeVisible();
-
-    const targetDay = page.locator("span", { hasText: /^20$/ }).locator("xpath=..");
-
-    let dialogMessage = "";
-    page.once("dialog", async (dialog) => {
-      dialogMessage = dialog.message();
-      await dialog.dismiss(); // CANCEL — the drop must not commit.
-    });
-    await chip.dragTo(targetDay);
-
-    expect(dialogMessage).toContain("2 approved variants");
-    expect(dialogMessage).toContain("discard 2 existing approvals");
-    expect(dialogMessage).toContain("drops back to draft");
-
-    // Cancelled — the post is still on its original day, still showing "approved" twice.
-    await expect(page.getByRole("link", { name: /Weekly promo carousel/ })).toBeVisible();
-    await page.reload();
-    await expect(page.getByRole("link", { name: /Weekly promo carousel/ })).toBeVisible();
+    await expect(chip).toHaveAttribute("href", `${DEPT4}/composer/soc-post-3`);
+    await expect(chip).not.toHaveAttribute("draggable", "true");
+    await expect(chip).toContainText("Composer post");
+    await expect(page.locator('td[data-day="2026-08-27"]')).toContainText("Weekly promo carousel");
+    await expect(page.getByRole("columnheader").first()).toHaveText("Mon");
+    await expect(page.getByRole("list", { name: "Phase colours" })).toContainText("Composer post");
   });
 
-  test("client-review chip on the calendar always shows the RAW status, never a derived 'stale'", async ({ page, context }) => {
+  test("the client filter keeps only that engagement's Composer posts", async ({ page, context }) => {
     await loginStaff(page, context, "superadmin");
     await page.goto(`${DEPT4}/calendar?month=2026-08&engagementId=soc-eng-2`);
-    // soc-var-8's chip must read "Client: approved" — the raw status. The Composer is the only
-    // surface with the live hash needed to know it's actually stale (VariantCard, tested above);
-    // the calendar roll-up carries no argsSha256 to compare against, and must not fabricate one.
-    // soc-post-7's own TITLE literally contains the word "stale" ("Approved, then edited — now
-    // stale") — a bare page-wide `/Client:.*stale/i` regex matches across that unrelated text
-    // node and the chip's, which is not what "no chip reads stale" means. Scoped to the review
-    // chip elements themselves (the ones the raw-status assertion above also targets).
-    const reviewChips = page.locator("a", { hasText: "Approved, then edited" }).getByText(/^Client:/);
-    await expect(reviewChips).toHaveText("Client: approved");
-    await expect(reviewChips).not.toHaveText(/stale/i);
+    await expect(page.getByRole("link", { name: /Approved, then edited/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Weekly promo carousel/ })).toHaveCount(0);
   });
 });
 
