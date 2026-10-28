@@ -408,7 +408,7 @@ describe("the boost card", () => {
     const changed = vi.fn();
     mount(boost({ id: "b-start", status: "approved" }), { canRun: true, canRecord: false }, { onChanged: changed });
     press("Start");
-    expect(runBoostAction).toHaveBeenCalledWith("b-start", { action: "start_boost", expectedStatus: "approved" });
+    expect(runBoostAction).toHaveBeenCalledWith("b-start", { action: "start_boost", expectedStatus: "approved", actionId: expect.any(String) });
     expect(await screen.findByText("Running")).toBeInTheDocument(); // the answer replaces what was shown
     expect(screen.getByRole("status")).toHaveTextContent("Start.");
     expect(changed).toHaveBeenCalled();
@@ -429,7 +429,7 @@ describe("the boost card", () => {
     fireEvent.change(within(dlg).getByLabelText(/Total spend/), { target: { value: "60,000" } });
     fireEvent.change(within(dlg).getByLabelText("Clicks (optional)"), { target: { value: "45" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Stop the boost" }));
-    expect(runBoostAction).toHaveBeenCalledWith("b-stop", { action: "stop_boost", expectedStatus: "running", spendMinor: 60_000, clicks: 45 });
+    expect(runBoostAction).toHaveBeenCalledWith("b-stop", { action: "stop_boost", expectedStatus: "running", spendMinor: 60_000, clicks: 45, actionId: expect.any(String) });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByText("Stopped")).toBeInTheDocument();
   });
@@ -447,7 +447,7 @@ describe("the boost card", () => {
     expect(within(dlg).getByText("Give the paid reach the network showed.")).toBeInTheDocument();
     fireEvent.change(within(dlg).getByLabelText("Paid reach (required)"), { target: { value: "9000" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Complete the boost" }));
-    expect(runBoostAction).toHaveBeenCalledWith("b-done", { action: "complete_boost", expectedStatus: "running", spendMinor: 350_000, paidReach: 9_000 });
+    expect(runBoostAction).toHaveBeenCalledWith("b-done", { action: "complete_boost", expectedStatus: "running", spendMinor: 350_000, paidReach: 9_000, actionId: expect.any(String) });
     const notice = await screen.findByText(/The spend is above the boost's budget/);
     expect(notice.closest("[role=status]")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
@@ -473,7 +473,7 @@ describe("the boost card", () => {
     fireEvent.change(within(dlg).getByLabelText("Note (required)"), { target: { value: "Agreed in the group chat." } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Record the client's approval" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(runBoostAction).toHaveBeenCalledWith(row.id, { action: "record_boost_approval", expectedStatus: "requested", channel: "whatsapp", note: "Agreed in the group chat." });
+    expect(runBoostAction).toHaveBeenCalledWith(row.id, { action: "record_boost_approval", expectedStatus: "requested", channel: "whatsapp", note: "Agreed in the group chat.", actionId: expect.any(String) });
     expect(screen.getByText("Approved, not started")).toBeInTheDocument();
     expect(screen.getByText(/recorded by our team/)).toBeInTheDocument();
     expect(changed).toHaveBeenCalled();

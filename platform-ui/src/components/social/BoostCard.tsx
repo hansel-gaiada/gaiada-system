@@ -16,7 +16,7 @@ import {
   APPROVED_VIA_LABEL, BOOST_AUDIENCE_LABEL, BOOST_GOAL_LABEL, boostOffers, boostStatusLabel, boostWarningText, buildBoostAction, daysText, emptyActionForm, formatBoostCount,
   formatBoostMoney, hasHiddenOffers, plainDate, type ActionForm, type BoostActionName, type BoostAudience, type BoostGoal, type BoostRow,
 } from "@/lib/socialBoosts";
-import { CHANNEL_LABEL, CHANNELS, NOTE_MAX, type Refusal } from "@/lib/socialPipeline";
+import { CHANNEL_LABEL, CHANNELS, NOTE_MAX, newActionId, type Refusal } from "@/lib/socialPipeline";
 import "@/components/social/cycles.css";
 import "@/components/social/post-page.css";
 import "@/components/social/boosts.css";
@@ -60,7 +60,8 @@ export function BoostCard({ boost: initial, canRun, canRecord, postHref, onChang
   function send(body: Record<string, unknown>, label: string) {
     setError(null);
     start(async () => {
-      const r = await runBoostAction(boost.id, body);
+      // `actionId` is a fresh uuid for this click: the server answers a replay of it `alreadyApplied` instead of acting twice.
+      const r = await runBoostAction(boost.id, { ...body, actionId: newActionId() });
       if (!r.ok) {
         setError({ refusal: r.refusal, message: r.message });
         if (r.refusal.error === "boost_status_changed" || r.refusal.error === "invalid_boost_transition") onChanged?.();

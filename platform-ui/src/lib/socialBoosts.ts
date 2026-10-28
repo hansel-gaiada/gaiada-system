@@ -26,7 +26,7 @@ const nameOf = (v: unknown): string | null => (isObj(v) ? str(v.name) : null);
 // ── The budget (GET cycles/:cycleId/boost-budget) ───────────────────────────────────────────────────────────────────────────
 
 export interface BoostAgreed {
-  amountMinor: number; currency: string; minorUnit: number; via: "portal" | "recorded" | null; agreedAt: string | null; agreedBy: string | null; channel: string | null;
+  id: string | null; amountMinor: number; currency: string; minorUnit: number; via: "portal" | "recorded" | null; agreedAt: string | null; agreedBy: string | null; channel: string | null;
 }
 /** One proposal or recording of a month's budget. The contract names the list `Proposal[]` without a shape: the fields below are the ones the pages draw, all read leniently. */
 export interface BudgetProposal {
@@ -34,7 +34,7 @@ export interface BudgetProposal {
   at: string | null; by: string | null; decidedAt: string | null; decidedBy: string | null; via: string | null; channel: string | null;
 }
 export interface BoostBudget {
-  agreed: BoostAgreed | null; pending: BudgetProposal | null; committedMinor: number; remainingMinor: number; history: BudgetProposal[]; canRecord: boolean;
+  cycleId: string | null; agreed: BoostAgreed | null; pending: BudgetProposal | null; committedMinor: number; remainingMinor: number; history: BudgetProposal[]; canRecord: boolean;
   /** The currency the figures are in: the agreement's, else a proposal's, else the department's (IDR). */
   currency: string; minorUnit: number;
 }
@@ -59,7 +59,8 @@ export function asBoostBudget(raw: unknown): BoostBudget {
   const fb = { currency, minorUnit };
   const via = a && (a.via === "portal" || a.via === "recorded") ? a.via : null;
   return {
-    agreed: a ? { amountMinor: a.amountMinor as number, currency: aCur as string, minorUnit, via, agreedAt: str(a.agreedAt), agreedBy: nameOf(a.agreedBy), channel: str(a.channel) } : null,
+    cycleId: str(raw.cycleId),
+    agreed: a ? { id: str(a.id), amountMinor: a.amountMinor as number, currency: aCur as string, minorUnit, via, agreedAt: str(a.agreedAt), agreedBy: nameOf(a.agreedBy), channel: str(a.channel) } : null,
     pending: asProposal(raw.pending, fb),
     committedMinor: raw.committedMinor as number, remainingMinor: raw.remainingMinor as number,
     history: arr(raw.history).map((h) => asProposal(h, fb)).filter((p): p is BudgetProposal => p !== null),

@@ -140,7 +140,7 @@ describe("the money rules", () => {
     expect(exact?.status).toBe(201);
     // the proposal waited; a boost committed more meanwhile, so the client's agreement is judged against committed at that moment
     ask(api, "soc-post-n-2", 100_000, 5, {}, "u-pm"); // fits 500,000? remaining 500,000 -> approved: committed 1,000,000
-    const id = (exact?.json.proposal as { id: string }).id;
+    const id = exact?.json.proposalId as string;
     expect(portal(api, "POST", `budgets/${id}/decide`, { decision: "agree" })).toMatchObject({ status: 409, json: { error: "budget_below_committed" } });
   });
 
@@ -259,6 +259,32 @@ describe("the order of checks", () => {
     expect(a.store.boosts).toHaveLength(1);
   });
 
+  it("an action carries a fresh actionId: a replay of it answers alreadyApplied and acts once; the request says whether it created the boost", () => {
+    const a = api();
+    staff(a, "POST", `cycles/${NORTHWIND_CYCLE}/boost-budget/record`, { amountMinor: 1000, channel: "email", note: "Agreed." });
+    const first = staff(a, "POST", "posts/soc-post-n-1/boosts", { ...request, id: "boost-r", dailyBudgetMinor: 1, days: 1 }, "u-social");
+    expect(first?.json).toMatchObject({ created: true });
+    expect(staff(a, "POST", "posts/soc-post-n-1/boosts", { ...request, id: "boost-r", dailyBudgetMinor: 1, days: 1 }, "u-social")?.json).toMatchObject({ created: false });
+    const act = (body: Record<string, unknown>) => staff(a, "POST", "boosts/boost-r/actions", body, "u-social");
+    expect(act({ action: "start_boost", expectedStatus: "approved", actionId: "act-1" })?.json).toMatchObject({ boost: { status: "running" }, warnings: [] });
+    expect(act({ action: "start_boost", expectedStatus: "approved", actionId: "act-1" })).toMatchObject({ status: 200, json: { alreadyApplied: true, boost: { status: "running" } } });
+    expect(act({ action: "start_boost", expectedStatus: "approved", actionId: "act-2" })).toMatchObject({ status: 409, json: { error: "boost_status_changed" } });
+    expect(act({ action: "start_boost", expectedStatus: "approved", actionId: "not a uuid!" })?.json).toEqual({ error: "invalid_field", field: "actionId" });
+  });
+
+  it("the budget read carries its cycle, currency and minor unit, and the agreement's id; a write answers the read with the proposal's id", () => {
+    const a = api();
+    const rec = staff(a, "POST", `cycles/${NORTHWIND_CYCLE}/boost-budget/record`, { amountMinor: 1000, channel: "email", note: "Agreed." });
+    expect(rec?.json).toMatchObject({ cycleId: NORTHWIND_CYCLE, currency: "IDR", minorUnit: 0, agreed: { id: expect.any(String), amountMinor: 1000 }, proposalId: expect.any(String) });
+    const b = asBoostBudget(rec?.json);
+    expect(b.cycleId).toBe(NORTHWIND_CYCLE);
+    expect(b.agreed?.id).toBeTruthy();
+    const prop = staff(a, "POST", `cycles/${NORTHWIND_CYCLE}/boost-budget/proposals`, { amountMinor: 2000 });
+    expect(prop?.status).toBe(201);
+    expect(asBoostBudget(prop?.json).pending).toMatchObject({ amountMinor: 2000 });
+    expect(staff(a, "POST", `boost-budget/proposals/${prop?.json.proposalId}/withdraw`, {})?.json).toMatchObject({ pending: null, proposalId: prop?.json.proposalId });
+  });
+
   it("the estimate: the words of its basis, the audience narrowing it, and the field named when a query value is wrong", () => {
     const a = api();
     const est = (q: string, post = "soc-post-n-1") => staff(a, "GET", `posts/${post}/boosts/estimate`, undefined, "u-social", q)!;
@@ -278,7 +304,7 @@ describe("the portal", () => {
     const api = boostApi(emptyBoostStore());
     staff(api, "POST", `cycles/${NORTHWIND_CYCLE}/boost-budget/record`, { amountMinor: 300_000, channel: "email", note: "Agreed." });
     const over = (staff(api, "POST", "posts/soc-post-n-1/boosts", { ...request, dailyBudgetMinor: 200_000, days: 5 }, "u-social")?.json.boost as { id: string }).id;
-    const proposal = (staff(api, "POST", `cycles/${NORTHWIND_CYCLE}/boost-budget/proposals`, { amountMinor: 1_500_000, note: "A bigger month." }, "u-pm")?.json.proposal as { id: string }).id;
+    const proposal = (staff(api, "POST", `cycles/${NORTHWIND_CYCLE}/boost-budget/proposals`, { amountMinor: 1_500_000, note: "A bigger month." }, "u-pm")?.json.proposalId as string);
     return { api, over, proposal };
   };
 

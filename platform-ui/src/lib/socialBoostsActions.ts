@@ -48,7 +48,7 @@ function boostAnswer(raw: unknown): BoostAnswer {
   try { boost = asBoostRow(o.boost); } catch { boost = null; }
   return {
     boost, remainingMinor: typeof o.remainingMinor === "number" ? o.remainingMinor : null, needsClient: o.needsClient === true,
-    warnings: Array.isArray(o.warnings) ? o.warnings.filter((w): w is string => typeof w === "string") : [], alreadyApplied: o.alreadyApplied === true,
+    warnings: Array.isArray(o.warnings) ? o.warnings.filter((w): w is string => typeof w === "string") : [], alreadyApplied: o.alreadyApplied === true || o.created === false,
   };
 }
 

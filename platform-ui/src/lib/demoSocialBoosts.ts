@@ -62,6 +62,8 @@ export interface BoostRec {
   dailyBudgetMinor: number; days: number; totalBudgetMinor: number; currency: string; startsOn: string; approvedVia: "budget" | "portal" | "recorded" | null; budgetId: string | null;
   approvedAt: string | null; startedAt: string | null; endedAt: string | null; spendMinor: number | null; paidReach: number | null; clicks: number | null;
   reachEstimate: { low: number; high: number } | null; simulated: boolean; requestedBy: string | null; requestedAt: string; channel: string | null; decisionNote: string | null;
+  /** The `actionId` of the last staff action applied: a replay of it answers `alreadyApplied: true` (the server's replay key). */
+  lastActionId?: string | null;
 }
 export interface BoostStore { budgets: BudgetRec[]; boosts: BoostRec[]; seq: number }
 
@@ -173,7 +175,8 @@ export function boostApi(store: BoostStore) {
     const a = agreedOf(cycleId);
     const p = pendingOf(cycleId);
     return {
-      agreed: a ? { amountMinor: a.amountMinor, currency: a.currency, minorUnit: MINOR_UNIT, via: a.via, agreedAt: a.decidedAt, agreedBy: a.decidedBy ? { name: a.decidedBy } : null, ...(a.channel ? { channel: a.channel } : {}) } : null,
+      cycleId, currency: CURRENCY, minorUnit: MINOR_UNIT,
+      agreed: a ? { id: a.id, amountMinor: a.amountMinor, currency: a.currency, minorUnit: MINOR_UNIT, via: a.via, agreedAt: a.decidedAt, agreedBy: a.decidedBy ? { name: a.decidedBy } : null, ...(a.channel ? { channel: a.channel } : {}) } : null,
       pending: p ? proposalOf(p) : null, committedMinor: committed(cycleId), remainingMinor: remaining(cycleId),
       history: store.budgets.filter((b) => b.cycleId === cycleId && b.status !== "pending" && b.status !== "agreed").sort((x, y) => (y.decidedAt ?? y.requestedAt).localeCompare(x.decidedAt ?? x.requestedAt)).map(proposalOf),
       canRecord: isDemoSocialApprover(userId),
@@ -227,7 +230,7 @@ export function boostApi(store: BoostStore) {
       proposedBy: userId, requestedAt: iso(Date.now()), decidedAt: null, decidedBy: null,
     };
     store.budgets.push(rec);
-    return ok({ proposal: proposalOf(rec) }, 201);
+    return ok({ ...budgetRead(cycleId, userId), proposalId: rec.id }, 201);
   }
 
   function withdraw(proposalId: string, userId: string): DemoResult {
@@ -239,7 +242,7 @@ export function boostApi(store: BoostStore) {
     rec.status = "withdrawn";
     rec.decidedAt = iso(Date.now());
     rec.decidedBy = who(userId).name;
-    return ok({ proposal: proposalOf(rec) });
+    return ok({ ...budgetRead(rec.cycleId, userId), proposalId: rec.id });
   }
 
   function record(cycleId: string, raw: string | undefined, userId: string): DemoResult {
@@ -264,7 +267,7 @@ export function boostApi(store: BoostStore) {
       proposedBy: userId, requestedAt: now, decidedAt: now, decidedBy: who(userId).name,
     };
     store.budgets.push(rec);
-    return ok(budgetRead(cycleId, userId));
+    return ok({ ...budgetRead(cycleId, userId), proposalId: rec.id });
   }
 
   // ── the list and the estimate ──
@@ -358,7 +361,7 @@ export function boostApi(store: BoostStore) {
     // A replay of the same id is the same boost (no second row).
     if (typeof b.id === "string") {
       const same = store.boosts.find((x) => x.id === b.id && x.postId === postId);
-      if (same) return ok({ boost: rowOf(same), remainingMinor: remaining(same.cycleId), needsClient: same.status === "requested" });
+      if (same) return ok({ boost: rowOf(same), remainingMinor: remaining(same.cycleId), needsClient: same.status === "requested", created: false });
     }
     // The fixture's guards, in its order: post_live, no_open_boost, currency_matches_budget.
     const guards = scpBoostAction("request_boost")!.guards.map((g) => g.refusal);
@@ -380,7 +383,7 @@ export function boostApi(store: BoostStore) {
     const ej = est.status === 200 ? (est.json as { reachLow: number; reachHigh: number; basis: string }) : null;
     rec.reachEstimate = ej && ej.basis !== "none" ? { low: ej.reachLow, high: ej.reachHigh } : null;
     store.boosts.push(rec);
-    return ok({ boost: rowOf(rec), remainingMinor: remaining(cycleId), needsClient: !fits }, 201);
+    return ok({ boost: rowOf(rec), remainingMinor: remaining(cycleId), needsClient: !fits, created: true }, 201);
   }
 
   // ── an action ──
@@ -403,6 +406,9 @@ export function boostApi(store: BoostStore) {
     // The body: expectedStatus, then the action's own params.
     if (absent(b.expectedStatus)) return bad("missing_field", "expectedStatus");
     if (typeof b.expectedStatus !== "string" || !scpBoostStatuses().includes(b.expectedStatus)) return bad("invalid_field", "expectedStatus");
+    if (!absent(b.actionId) && (typeof b.actionId !== "string" || !ID.test(b.actionId))) return bad("invalid_field", "actionId");
+    // A replay of the last applied action is answered as it was, before the status is judged.
+    if (typeof b.actionId === "string" && rec.lastActionId === b.actionId) return ok({ boost: rowOf(rec), remainingMinor: remaining(rec.cycleId), warnings: [], alreadyApplied: true });
     const count = (field: string, required: boolean): number | null | DemoResult => {
       const v = b[field];
       if (absent(v)) return required ? bad("missing_field", field) : null;
@@ -441,6 +447,7 @@ export function boostApi(store: BoostStore) {
       case "record_boost_decline": rec.status = "declined"; rec.channel = channel; rec.decisionNote = note; break;
     }
     if ((name === "stop_boost" || name === "complete_boost") && spend !== null && spend > rec.totalBudgetMinor) warnings.push("spend_above_budget");
+    if (typeof b.actionId === "string") rec.lastActionId = b.actionId;
     return ok({ boost: rowOf(rec), remainingMinor: remaining(rec.cycleId), warnings });
   }
 
