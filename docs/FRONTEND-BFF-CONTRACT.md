@@ -2323,14 +2323,23 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
 - ✅ `GET /api/:t/assistant/threads` — paginated (`limit`/`offset`, default 50 / max 200),
   substring search on title (`q`), optional `status` filter (`active`/`archived`), ordered
   pinned-first then `last_message_at DESC NULLS LAST`. Response `{ items, total }`.
-- ✅ `POST /api/:t/assistant/threads` — `{ title?, brainProvider?, brainModel? }` → `{ id }`. Owner
+- ✅ `POST /api/:t/assistant/threads` — `{ title?, brainProvider?, brainTier?, brainModel? }` → `{ id }`. Owner
   is always the caller; `brain` is stored but **not routed** until Phase 2 (ASST-06/Hermes) — see
-  that ticket, not this one, for per-brain dispatch.
+  that ticket, not this one, for per-brain dispatch. **AIP-08a:** `brainTier` is `'fast'|'standard'|'strong'|null`
+  (anything else is 400); a non-null `brainTier` together with a non-null `brainProvider` is 400 (`brain_conflict`).
 - ✅ `GET /api/:t/assistant/threads/:id` — thread + paged messages (`messageLimit` default 200/max
   500, `beforeSeq` cursor for older pages), returned oldest→newest. Response
-  `{ thread, messages, hasMoreMessages }`.
+  `{ thread, messages, hasMoreMessages }`. **AIP-08a:** `thread` carries `brainTier: 'fast'|'standard'|'strong'|null`
+  (`null` = Auto; never set together with `brainProvider`).
 - ✅ `PATCH /api/:t/assistant/threads/:id` — rename (`title`) / pin (`pinned`) / archive
-  (`status: 'active'|'archived'`) / brain (`brainProvider`/`brainModel`).
+  (`status: 'active'|'archived'`) / brain (`brainProvider`/`brainTier`/`brainModel`). **AIP-08a** (migration
+  `202610281200_assistant_thread_brain_tier.sql`): `brainTier` is `'fast'|'standard'|'strong'|null`, any other value is 400;
+  a non-null `brainTier` with a non-null `brainProvider` in one body is 400 (`brain_conflict`); a thread holds a tier OR a
+  provider, never both (two CHECKs). Setting a non-null `brainTier` also sets `brain_provider = NULL` in the same UPDATE and
+  counts as a provider change for the ASST-16 rule below (`hermes_session_id` is reset when the stored provider was non-null);
+  setting a non-null `brainProvider` also sets `brain_tier = NULL`; setting either to `null` touches only that column;
+  `brainModel` is never touched by it. Every reply in the thread sends the stored tier to the gateway's `/complete/stream` as
+  `tier` (only when set, so an Auto thread's body is unchanged); at the gateway `provider` > `tier` > the task's tier.
 - ✅ `DELETE /api/:t/assistant/threads/:id` — hard delete; CASCADEs to `assistant_messages` →
   `assistant_tool_calls`, and SETs NULL (row survives) on `assistant_memory.source_thread_id` —
   proven by `modules/assistant/assistant.test.ts`'s cascade probe (admin-pool reads, not just
@@ -2346,6 +2355,11 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   endpoints, budget, key state) is returned. Cached in memory for 60 s. Consumer: `lib/assistantActions.ts#refreshBrainsAction`
   -> `components/assistant/BrainPicker.tsx`, which offers Auto plus the available brains and keeps a thread's stored
   value visible as "<label> (unavailable)". The `openai` label is now "Cloud (default)" (the live endpoint is OpenRouter).
+  **AIP-08a:** the answer also carries `tiers: string[] | null`, the valid tier names (`fast`, `standard`, `strong`) from
+  `/health`'s `tiers`: `[]` when that key is absent (none configured), `null` when `/health` could not be read (the same cases
+  as `brains: null`). Anything else in `/health`'s `tiers` is dropped. The picker offers Auto, then Fast and Strong (each only
+  when listed), then the providers; Standard is not offered (Auto already means the gateway's default for the task) but a stored
+  `standard` still shows as the current choice. Select values are `tier:<name>` / `provider:<name>` / empty for Auto.
 - Deliberately **NO** `writeActivity()`/`notify()` call on any of the above: the tenant activity
   feed (`GET :t/activity`) is readable by every plain member, and writing thread metadata into it
   would leak a private thread's existence/title to people with no Cerbos grant to read it — the
