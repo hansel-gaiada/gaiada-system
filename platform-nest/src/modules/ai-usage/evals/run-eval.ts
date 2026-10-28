@@ -291,3 +291,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2), deps
   log(`\nexit ${report.exitCode} (${report.exitCode === 0 ? "PASS" : report.exitCode === 1 ? "FAIL" : "INVALID"})`);
   return report.exitCode;
 }
+
+// The container runs this file directly (`node dist/modules/ai-usage/evals/run-eval.js`): the image compiles only `src/`, so the
+// scripts/ wrapper is not there. Runs only when executed, never on import (the tests import `main`).
+if (require.main === module) void main().then((code) => process.exit(code));
