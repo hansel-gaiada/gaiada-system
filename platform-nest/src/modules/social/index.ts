@@ -153,6 +153,9 @@ export const socialModule: ModuleContract = {
     // changes once used (trg_social_accounts_kind_guard), and no OAuth grant names a simulated account
     // (trg_social_oauth_tokens_real_account_only). Backfills `simulated:<network>` onto simulated rows with no id.
     "202610280100_social_account_kind.sql",
+    // SCP-4a (BFF §63.1 file 7, §63.11) — boosts and the monthly boost budget: social_boost_budgets and social_boosts, both on
+    // the PLAIN tenant wall (the portal writes them, as social_post_client_reviews).
+    "202610281300_social_boosts.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
