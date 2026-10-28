@@ -170,11 +170,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610281210_assistant_brain_choose_provider.sql`
+- Head: `202610281300_social_boosts.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 345 (121 legacy `NNNN_`, 224 timestamped)
+- Applied files on disk: 346 (121 legacy `NNNN_`, 225 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -301,6 +301,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/linkedin-oauth.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/accounts-summary.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/allocation.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/boosts.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/calendar.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/cycles.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/design-queue.controller.ts` |
@@ -325,6 +326,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/webdev/editorial/contributors` | `platform-nest/src/modules/webdev/editorial-contributors.controller.ts` |
 | `/api/:tenantId/notices` | `platform-nest/src/core/dept-notices.controller.ts` |
 | `/api/:tenantId/portal/social` | `platform-nest/src/core/social-pipeline-portal.controller.ts` |
+| `/api/:tenantId/portal/social/spend` | `platform-nest/src/core/social-spend-portal.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
 | `/api/:tenantId/reports/group` | `platform-nest/src/modules/reports/group-report.controller.ts` |
 | `/api/:tenantId/requests` | `platform-nest/src/core/work-requests-outbound.controller.ts` |
@@ -429,6 +431,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/audit`
 - `/departments/[deptId]/ball`
 - `/departments/[deptId]/board`
+- `/departments/[deptId]/boosts`
 - `/departments/[deptId]/briefs`
 - `/departments/[deptId]/calendar`
 - `/departments/[deptId]/campaigns`
