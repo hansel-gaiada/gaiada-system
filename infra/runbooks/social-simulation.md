@@ -97,10 +97,11 @@ refused: nothing was sent to Postiz. The status and metrics sweeps log the same 
    A row in any of the first three is decided by a person (it is either simulated or real; make it one kind through the
    module's own tools, or revoke a grant through the disconnect flow) before the deploy.
 3. **The compose passthrough.** `SOCIAL_SIMULATION_ENABLED` is read from the container's environment, and a variable in `.env`
-   does nothing unless the platform service's `environment:` block lists it. As of SCP-Sb the VPS compose file does not carry
-   the row; it needs
-   `SOCIAL_SIMULATION_ENABLED: ${SOCIAL_SIMULATION_ENABLED:-}` in the `platform` service of
-   `infra/compose/docker-compose.vps.yml`. Prove it after the recreate (step 3), do not assume it.
+   does nothing unless the platform service's `environment:` block lists it. The VPS compose file carries the row since
+   release 444 (`SOCIAL_SIMULATION_ENABLED: ${SOCIAL_SIMULATION_ENABLED:-0}`), and since 449 also
+   `SOCIAL_METRICS_PULL_ENABLED` (default 0) and `SOCIAL_METRICS_PULL_INTERVAL_MS` (default 86400000; the dev review uses
+   3600000). On gda-aicenter `.env` had no `SOCIAL_SIMULATION_ENABLED` line at all: add it, do not just edit it. Prove it after
+   the recreate (step 3), do not assume it.
 4. **Postiz stays as it is.** `SOCIAL_POSTIZ_BASE_URL` stays set (the side-by-side mode is the point). Do not set
    `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS` to anything naming `simulated` (boot refuses it, switch on or off).
 5. **TikTok.** `SOCIAL_NETWORKS_ENABLED` defaults to `instagram,facebook,linkedin`; TikTok is off at the deployment level.
