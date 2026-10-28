@@ -20,6 +20,8 @@ vi.mock("../../db", () => ({
     }),
 }));
 vi.mock("../../core/http", () => ({ authorize: async () => undefined }));
+// AIP-08b: this file tests the AIP-08a mechanics with the choose_provider grant HELD; the grant itself is assistant-brain-provider-grant.test.ts.
+vi.mock("../../rbac/can", () => ({ can: async () => true }));
 
 import { AssistantController } from "./assistant.controller";
 import { relayGeneration, reserveGeneration } from "./stream";

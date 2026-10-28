@@ -9,6 +9,7 @@
 // module-scope handshake at the DB layer; this file proves the controller's use of it plus the
 // owner-only authorization surface end to end.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { randomUUID } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { withTenants, newId } from "../../db";
@@ -20,6 +21,19 @@ import { assistantModule } from "./index";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
+
+// AIP-08b (AIP-D5): picking a NAMED provider needs `assistant.brain.choose_provider`. The thread owner in this file picks named
+// providers, so they get it the way a non-admin really would: a tenant role holding the key (a role edit), granted at company scope.
+async function grantChooseProvider(userId: string, tenantId: string): Promise<void> {
+  const roleId = randomUUID();
+  const pool = adminPool();
+  await pool.query(`INSERT INTO roles (id, company_id, name) VALUES ($1, $2, $3)`, [roleId, tenantId, `aip08b_brain_chooser_${roleId.slice(0, 8)}`]);
+  const ins = await pool.query(
+    `INSERT INTO role_permissions (role_id, permission_id) SELECT $1, id FROM permissions WHERE key = 'assistant.brain.choose_provider'`, [roleId],
+  );
+  expect(ins.rowCount, "the 202610281210 seed must have created the key").toBe(1);
+  await grantRole(userId, roleId, "company", tenantId);
+}
 
 describe.skipIf(!TEST_URL)("Assistant module (ASST-05)", () => {
   let app: NestFastifyApplication;
@@ -56,6 +70,7 @@ describe.skipIf(!TEST_URL)("Assistant module (ASST-05)", () => {
     await grantRole(other, memberRole, "company", A);
     await grantRole(owner, memberRole, "company", A);
     await grantRole(owner, memberRole, "company", B);
+    await grantChooseProvider(owner, A);
 
     app = await buildApp();
   });
@@ -134,6 +149,62 @@ describe.skipIf(!TEST_URL)("Assistant module (ASST-05)", () => {
     expect(afterPatchBody.thread.status).toBe("archived");
     expect(afterPatchBody.thread.brainProvider).toBe("claude");
     expect(afterPatchBody.thread.brainModel).toBe("opus");
+  });
+
+  it("AIP-08b: a named provider needs assistant.brain.choose_provider — a plain member is refused (403, nothing written), tiers and clearing are not", async () => {
+    const created = await app.inject({
+      method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(other), payload: { title: "No provider for me", brainProvider: "openai" },
+    });
+    expect(created.statusCode).toBe(403);
+    expect(created.json().error).toMatch(/brain_provider_forbidden/);
+    const mine = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads`, headers: asUser(other) });
+    expect((mine.json() as { items: Array<{ title: string }> }).items.map((t) => t.title)).not.toContain("No provider for me");
+
+    const tiered = await app.inject({
+      method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(other), payload: { title: "Tier only", brainTier: "strong" },
+    });
+    expect(tiered.statusCode).toBe(201);
+    const id = tiered.json().id as string;
+    const patch = (payload: Record<string, unknown>) =>
+      app.inject({ method: "PATCH", url: `/api/${A}/assistant/threads/${id}`, headers: asUser(other), payload });
+    expect((await patch({ brainProvider: "openai", title: "sneaky rename" })).statusCode).toBe(403);
+    const read = (await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${id}`, headers: asUser(other) }))
+      .json() as { thread: { title: string; brainTier: string | null; brainProvider: string | null } };
+    expect(read.thread).toMatchObject({ title: "Tier only", brainTier: "strong", brainProvider: null });
+    expect((await patch({ brainTier: "fast" })).statusCode).toBe(200);
+    expect((await patch({ brainProvider: null })).statusCode).toBe(200);
+    expect((await patch({ brainTier: null })).statusCode).toBe(200);
+
+    // the role-edit holder (owner) and company_admin may
+    const ownerCreate = await app.inject({
+      method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(owner), payload: { title: "Pinned to openai", brainProvider: "openai" },
+    });
+    expect(ownerCreate.statusCode).toBe(201);
+    const adminCreate = await app.inject({
+      method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(admin), payload: { title: "Admin pin", brainProvider: "openai" },
+    });
+    expect(adminCreate.statusCode).toBe(201);
+    // ... but the owner's grant is at A only: in B they are a plain member
+    const ownerInB = await app.inject({
+      method: "POST", url: `/api/${B}/assistant/threads`, headers: asUser(owner), payload: { title: "B pin", brainProvider: "openai" },
+    });
+    expect(ownerInB.statusCode).toBe(403);
+  });
+
+  it("AIP-08b: GET assistant/brains says canChooseProvider per caller, and withholds the provider list (brains: []) without the grant", async () => {
+    const get = async (u: string, t = A) => {
+      const r = await app.inject({ method: "GET", url: `/api/${t}/assistant/brains`, headers: asUser(u) });
+      expect(r.statusCode).toBe(200);
+      return r.json() as { brains: unknown[] | null; tiers: string[] | null; canChooseProvider: boolean };
+    };
+    const plain = await get(other);
+    expect(plain.canChooseProvider).toBe(false);
+    expect(plain.brains).toEqual([]);
+    expect((await get(admin)).canChooseProvider).toBe(true);
+    expect((await get(owner)).canChooseProvider).toBe(true);
+    expect((await get(owner, B)).canChooseProvider).toBe(false);
+    // asked again for the plain member right after a holder: no answer is shared between callers
+    expect((await get(other)).canChooseProvider).toBe(false);
   });
 
   it("AIP-08a: brain_tier round-trips over HTTP, tier and provider clear each other, and the two CHECKs hold in the table", async () => {
