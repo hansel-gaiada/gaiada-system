@@ -2331,6 +2331,9 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   is always the caller; `brain` is stored but **not routed** until Phase 2 (ASST-06/Hermes) — see
   that ticket, not this one, for per-brain dispatch. **AIP-08a:** `brainTier` is `'fast'|'standard'|'strong'|null`
   (anything else is 400); a non-null `brainTier` together with a non-null `brainProvider` is 400 (`brain_conflict`).
+  **AIP-08b (BUILT, PROTOTYPED; ruling AIP-D5):** a non-null `brainProvider` needs `assistant.brain.choose_provider`
+  (`can()` on the `assistant_brain` kind for `:t`; company_admin and owner by default, anyone else through a role edit) or the
+  call is **403** `brain_provider_forbidden: ...` and no thread is created. A tier, Auto and a blank provider need no grant.
 - ✅ `GET /api/:t/assistant/threads/:id` — thread + paged messages (`messageLimit` default 200/max
   500, `beforeSeq` cursor for older pages), returned oldest→newest. Response
   `{ thread, messages, hasMoreMessages }`. **AIP-08a:** `thread` carries `brainTier: 'fast'|'standard'|'strong'|null`
@@ -2344,13 +2347,19 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   setting a non-null `brainProvider` also sets `brain_tier = NULL`; setting either to `null` touches only that column;
   `brainModel` is never touched by it. Every reply in the thread sends the stored tier to the gateway's `/complete/stream` as
   `tier` (only when set, so an Auto thread's body is unchanged); at the gateway `provider` > `tier` > the task's tier.
+  **AIP-08b (BUILT, PROTOTYPED; ruling AIP-D5):** setting a non-null `brainProvider` (even the value already stored) needs
+  `assistant.brain.choose_provider` or the PATCH is **403** `brain_provider_forbidden: ...` and nothing in the body is written
+  (not even a title sent with it). Clearing it (`null` or blank) and every `brainTier` value need no grant. At SEND time (the
+  stream route and `POST :t/assistant/ask`) a stored `brainProvider` is sent as the `provider` hint only while the thread's owner
+  holds the grant NOW; otherwise no `provider` and no `providerSession` go out (the reply routes as Auto: tier, then task), nothing
+  errors, and the stored value is kept. A failed check drops the hint; it never refuses the reply.
 - ✅ `DELETE /api/:t/assistant/threads/:id` — hard delete; CASCADEs to `assistant_messages` →
   `assistant_tool_calls`, and SETs NULL (row survives) on `assistant_memory.source_thread_id` —
   proven by `modules/assistant/assistant.test.ts`'s cascade probe (admin-pool reads, not just
   invisible-under-RLS).
 - **PROTOTYPED** (AIP-00c, 2026-10-27) `GET /api/:t/assistant/brains` (`modules/assistant/brains.ts`, route in
   `assistant.controller.ts`) — which gateway LLM brains can serve right now, for the brain picker. Authorized
-  exactly like `capabilities` (an authenticated user; no resource, no new Cerbos kind or action). Reads the
+  exactly like `capabilities` (an authenticated user; no resource; AIP-08b adds the per-caller `canChooseProvider` check below). Reads the
   gateway's `GET /health` (`providers.llm`; state `ok` = available, `open` and `unconfigured` = not) and answers
   `{ brains: [{ value: "<gateway provider name>", available: boolean }] | null, checkedAt: <ISO> }`. `echo` is never
   listed; a provider outside the live `LLM_CHAIN` is absent. **`brains: null` means UNKNOWN** (gateway unreachable,
@@ -2364,6 +2373,12 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   as `brains: null`). Anything else in `/health`'s `tiers` is dropped. The picker offers Auto, then Fast and Strong (each only
   when listed), then the providers; Standard is not offered (Auto already means the gateway's default for the task) but a stored
   `standard` still shows as the current choice. Select values are `tier:<name>` / `provider:<name>` / empty for Auto.
+  **AIP-08b (BUILT, PROTOTYPED; ruling AIP-D5):** the answer also carries `canChooseProvider: boolean`, whether THIS caller may
+  pick a named provider in `:t` (`assistant.brain.choose_provider` on the `assistant_brain` kind, a fresh Cerbos check per request;
+  the 60 s cache holds only the gateway read). When it is `false`, **`brains` is `[]`**, so the provider list never reaches the
+  browser; `tiers` is unchanged. The picker then offers Auto and the tiers only, and a thread whose stored provider the person can
+  no longer pick shows it as the current choice, labelled "<label> (not available to you)"; Auto, Fast or Strong can still be chosen.
+  The UI never derives this from its own role map: `canChooseProvider` is the source.
 - Deliberately **NO** `writeActivity()`/`notify()` call on any of the above: the tenant activity
   feed (`GET :t/activity`) is readable by every plain member, and writing thread metadata into it
   would leak a private thread's existence/title to people with no Cerbos grant to read it — the
