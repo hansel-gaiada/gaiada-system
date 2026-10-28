@@ -49,6 +49,26 @@ type Admin struct {
 	OverridableProviders []string
 }
 
+// EmbedProviders is the embed chain's provider list: the echo terminator is dropped whenever the chain holds a
+// real embedder. Echo's vectors are a 128-number word hash, not the configured model's. A store built with one
+// embedding model cannot use them: on 2026-10-28, while ollama's breaker was open, echo answered 8,507 embeds in
+// four minutes and pgvector refused every one ("expected 768 dimensions, not 128"). A store that could use them
+// would mix two vector spaces without a word. So when every real embedder fails, /embed fails (502) and the caller
+// knows. A chain that resolves to echo alone (a bare dev box, or EMBED_CHAIN=echo) keeps it. Boot and the console's
+// embedChain write both go through here, so a runtime reorder cannot put echo back.
+func EmbedProviders(list []providers.Provider) []providers.Provider {
+	out := make([]providers.Provider, 0, len(list))
+	for _, p := range list {
+		if p.Name() != "echo" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return list
+	}
+	return out
+}
+
 // runtimeTuning holds the settings that live OUTSIDE the chain/budget objects but are still
 // runtime-writable, so handlers read the current value rather than the boot-time config copy.
 type runtimeTuning struct {
@@ -745,6 +765,9 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 					return
 				}
 				built := admin.BuildProviders(names)
+				if key == "embedChain" {
+					built = EmbedProviders(built)
+				}
 				if len(built) == 0 {
 					writeErr(w, 400, "that order resolves to no usable providers")
 					return
@@ -801,7 +824,11 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 						target, names = chains.Embed, cfg.EmbedChain
 					}
 					if target != nil {
-						if built := admin.BuildProviders(names); len(built) > 0 {
+						built := admin.BuildProviders(names)
+						if key == "embedChain" {
+							built = EmbedProviders(built)
+						}
+						if len(built) > 0 {
 							target.SetProviders(built)
 						}
 					}

@@ -179,7 +179,8 @@ func main() {
 	chains := server.Chains{
 		LLM:   buildChain(cfg.LLMChain, cfg, client),
 		Media: buildChain(cfg.MediaChain, cfg, client),
-		Embed: buildChain(cfg.EmbedChain, cfg, client),
+		// No echo terminator on the embed chain while it holds a real embedder (server.EmbedProviders).
+		Embed: chain.NewChain(server.EmbedProviders(buildProviderList(cfg.EmbedChain, cfg, client)), cfg.BreakerThreshold, cfg.BreakerCooldownMs, time.Now),
 	}
 	b := budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap)
 	if cfg.DRMode { // env-declared failover: open the DR-burst window at boot
