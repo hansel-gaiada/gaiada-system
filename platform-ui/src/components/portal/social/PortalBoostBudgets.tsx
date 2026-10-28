@@ -19,7 +19,10 @@ import "./portalSocial.css";
 import "./portalBoosts.css";
 
 interface Settled { id: string; text: string }
-const HISTORY_STATUS: Readonly<Record<string, string>> = { agreed: "Agreed", declined: "Declined", approved: "Approved", superseded: "Replaced by a later agreement" };
+const HISTORY_STATUS: Readonly<Record<string, string>> = {
+  agreed: "Agreed", declined: "Declined", approved: "Approved", superseded: "Replaced by a later agreement", withdrawn: "Withdrawn by us",
+  running: "Approved, running", stopped: "Approved, stopped", completed: "Approved, completed", cancelled: "Cancelled",
+};
 
 export function PortalBoostBudgets({ spend, tenant }: { spend: PortalSpend; tenant: string }) {
   const uid = useId();

@@ -25,6 +25,9 @@ describe("the boost row and the answers", () => {
     expect(() => asBoostBudget({ agreed: null })).toThrow();
     expect(() => asPortalSpend({ budgets: [] })).toThrow();
     expect(() => asBoostEstimate({ reachLow: 1 })).toThrow();
+    expect(() => asBoostEstimate({ reachLow: 1, reachHigh: 2, basis: "guess" })).toThrow();
+    expect(asBoostEstimate({ reachLow: null, reachHigh: null, basis: "none" })).toEqual({ low: null, high: null, basis: "none" }); // no basis: no made-up number
+    expect(asBoostEstimate({ reachLow: 8, reachHigh: 12, basis: "history" })).toEqual({ low: 8, high: 12, basis: "history" });
   });
 
   it("reads the list, the candidates and the totals", () => {
@@ -57,6 +60,8 @@ describe("the boost row and the answers", () => {
     expect(s.budgets[0]).toMatchObject({ proposalId: "pr1", agreedMinor: null });
     expect(s.boosts[0]).toMatchObject({ boostId: "b1", thumbFileId: "f1" });
     expect(s.canDecide).toBe(false);
+    expect(s.history[0].title).toBe("October budget");
+    expect(asPortalSpend({ budgets: [], boosts: [], history: [{ kind: "budget", id: "x", month: "2026-10", postTitle: null, status: "agreed", amountMinor: 1 }], canDecide: true }).history[0]).toMatchObject({ title: "October 2026 budget", kind: "budget" });
     expect(portalSpendHasContent(s)).toBe(true);
     expect(portalSpendHasContent({ budgets: [], boosts: [], history: [], canDecide: true })).toBe(false);
     expect(portalSpendHasContent({ budgets: [], boosts: [], history: [{ id: "h", kind: "boost", title: "t", status: "approved", amountMinor: null, currency: "IDR", minorUnit: 0, decidedAt: null }], canDecide: true })).toBe(true);

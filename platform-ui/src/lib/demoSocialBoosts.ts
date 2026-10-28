@@ -322,7 +322,7 @@ export function boostApi(store: BoostStore) {
     if (!/^\d{1,4}$/.test(days) || Number(days) < 1) return bad("invalid_field", "days");
     if (audience !== null && audience !== "" && !AUDIENCES.includes(audience)) return bad("invalid_field", "audience");
     const basis = p.simulated ? "simulated" : p.metrics ? "history" : "none";
-    if (basis === "none") return ok({ reachLow: 0, reachHigh: 0, basis });
+    if (basis === "none") return ok({ reachLow: null, reachHigh: null, basis });
     const factor = audience === "local" ? 0.7 : audience === "custom" ? 0.5 : 1;
     const total = Number(daily) * Number(days);
     return ok({ reachLow: Math.round((total / 10_000) * 400 * factor), reachHigh: Math.round((total / 10_000) * 900 * factor), basis });
@@ -380,8 +380,8 @@ export function boostApi(store: BoostStore) {
       channel: null, decisionNote: null,
     };
     const est = estimate(postId, new URLSearchParams({ dailyBudgetMinor: String(b.dailyBudgetMinor), days: String(b.days), audience: b.audience }), userId);
-    const ej = est.status === 200 ? (est.json as { reachLow: number; reachHigh: number; basis: string }) : null;
-    rec.reachEstimate = ej && ej.basis !== "none" ? { low: ej.reachLow, high: ej.reachHigh } : null;
+    const ej = est.status === 200 ? (est.json as { reachLow: number | null; reachHigh: number | null; basis: string }) : null;
+    rec.reachEstimate = ej && ej.reachLow !== null && ej.reachHigh !== null ? { low: ej.reachLow, high: ej.reachHigh } : null;
     store.boosts.push(rec);
     return ok({ boost: rowOf(rec), remainingMinor: remaining(cycleId), needsClient: !fits, created: true }, 201);
   }

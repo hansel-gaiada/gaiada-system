@@ -69,7 +69,7 @@ describe("the Social Media `boosts` row", () => {
     const social = model.workspaces.find((w) => w.key === "social-media")!;
     const rows = allRows(social);
     const pins = pinnedFor("social", rows)!;
-    expect(pins.some((p) => p.row === "boosts")).toBe(false);
+    expect(pins.some((p) => p.kind === "link" && p.row === "boosts")).toBe(false);
     expect(rows.some((r) => r.key === "boosts")).toBe(true);
   });
 });

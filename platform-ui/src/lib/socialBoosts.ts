@@ -91,11 +91,12 @@ export function asBoostList(raw: unknown): BoostList {
   };
 }
 
-export interface BoostEstimate { low: number; high: number; basis: "history" | "simulated" | "none" }
+/** `low` and `high` are null when the server has no basis (`none`): it never makes a number up. */
+export interface BoostEstimate { low: number | null; high: number | null; basis: "history" | "simulated" | "none" }
 export function asBoostEstimate(raw: unknown): BoostEstimate {
-  if (!isObj(raw) || num(raw.reachLow) === null || num(raw.reachHigh) === null) throw new Error("estimate: not an estimate");
-  const basis = raw.basis === "history" || raw.basis === "simulated" ? raw.basis : "none";
-  return { low: raw.reachLow as number, high: raw.reachHigh as number, basis };
+  const basis = isObj(raw) && (raw.basis === "history" || raw.basis === "simulated" || raw.basis === "none") ? raw.basis : null;
+  if (!isObj(raw) || basis === null || (basis !== "none" && (num(raw.reachLow) === null || num(raw.reachHigh) === null))) throw new Error("estimate: not an estimate");
+  return { low: num(raw.reachLow), high: num(raw.reachHigh), basis };
 }
 export const ESTIMATE_BASIS_WORDS: Readonly<Record<BoostEstimate["basis"], string>> = {
   history: "From this client's own past posts.", simulated: "SIMULATED: from the simulator's numbers, not a real account.", none: "There is not enough history to estimate a reach.",
@@ -123,11 +124,18 @@ export function asPortalSpend(raw: unknown): PortalSpend {
     })),
     history: arr(raw.history).filter(isObj).map((h, i): PortalSpendHistory => ({
       id: str(h.id) ?? str(h.boostId) ?? str(h.proposalId) ?? `h${i}`, kind: h.kind === "boost" || typeof h.boostId === "string" ? "boost" : "budget",
-      title: str(h.title) ?? str(h.postTitle) ?? str(h.month) ?? "A decision", status: str(h.status) ?? str(h.decision) ?? "", amountMinor: num(h.amountMinor) ?? num(h.totalBudgetMinor),
+      title: str(h.title) ?? str(h.postTitle) ?? (str(h.month) ? `${monthName(str(h.month) as string)} budget` : "A decision"), status: str(h.status) ?? str(h.decision) ?? "", amountMinor: num(h.amountMinor) ?? num(h.totalBudgetMinor),
       currency: cur(h), minorUnit: num(h.minorUnit) ?? minorUnitOf(cur(h)), decidedAt: str(h.decidedAt) ?? str(h.at),
     })),
     canDecide: raw.canDecide === true,
   };
+}
+
+/** "October 2026" from `YYYY-MM` (pure: no Date, so no zone), else the text as it came. */
+function monthName(m: string): string {
+  const x = /^(d{4})-(d{2})$/.exec(m);
+  const names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  return x && Number(x[2]) >= 1 && Number(x[2]) <= 12 ? `${names[Number(x[2]) - 1]} ${x[1]}` : m;
 }
 
 /** True when the section has something to draw: an item waiting, or a history. It stays absent otherwise. */
