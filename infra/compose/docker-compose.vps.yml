@@ -611,6 +611,10 @@ services:
       # real 24 h, never empty: config.ts reads Number(...), and an empty string would make it 0, a tight loop.
       SOCIAL_METRICS_PULL_ENABLED: ${SOCIAL_METRICS_PULL_ENABLED:-0}
       SOCIAL_METRICS_PULL_INTERVAL_MS: ${SOCIAL_METRICS_PULL_INTERVAL_MS:-86400000}
+      # SCP-Se: how long a started SIMULATED boost runs before the simulated-boost job completes it (minutes; default 10, so a
+      # dev review sees the results the same hour). Real boosts are never touched by it. Whole minutes, 1 to 1440; anything
+      # else (an empty value too) falls back to 10 in config.ts.
+      SOCIAL_SIMULATED_BOOST_MINUTES: ${SOCIAL_SIMULATED_BOOST_MINUTES:-10}
       # Admin/Systems console aggregator (Phase C) — read-only probes of each downstream
       # service. All fail-soft: an unset URL just reports "not configured" in the console.
       GATEWAY_URL: http://ai-gateway:3002
