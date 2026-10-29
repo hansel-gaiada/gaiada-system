@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **284** capabilities across **17** owners
-- **149** writes · 135 reads
+- **285** capabilities across **17** owners
+- **149** writes · 136 reads
 - Writes by impact: **high 28** · medium 41 · low 80
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -54,7 +54,7 @@ unfalsifiable after.
 | pm | `pm` | 17 |
 | reports | `checkins` · `reports` | 24 |
 | search | `search` | 30 |
-| social | `social` | 33 |
+| social | `social` | 34 |
 | webdev | `webdev` | 41 |
 
 ## Capabilities
@@ -273,6 +273,7 @@ unfalsifiable after.
 | social | `social.sendReply` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send` | write | `high` |
 | social | `social.setEngagementScope` | `PATCH` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | write | `medium` |
 | social | `social.syncConnectorRegistry` | `POST` | `/api/:tenantId/modules/social/publisher-orgs/:clientId/sync` | write | `low` |
+| social | `social.teamDashboard` | `GET` | `/api/:tenantId/modules/social/team` | read | — |
 | social | `social.updateReplyDraft` | `PATCH` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId` | write | `low` |
 | social | `social.validateVariant` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/validation` | read | — |
 | social | `social.withdrawClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review/withdraw` | write | `low` |

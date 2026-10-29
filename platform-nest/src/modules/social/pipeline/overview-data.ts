@@ -12,7 +12,7 @@ export const OVERVIEW_TAG = "/* scp-overview */";
 
 /** A post is simulated when it says so or when any of its live variants was served by the simulator (`social_posts.simulated` is derived on the way
  *  live only, so a scheduled post whose publisher dispatch failed has the mark on its variants alone). */
-const SIMULATED_SQL = `(p.simulated OR EXISTS (SELECT 1 FROM social_post_variants v WHERE v.tenant_id = p.tenant_id AND v.post_id = p.id AND v.deleted_at IS NULL AND v.simulated))`;
+export const SIMULATED_SQL = `(p.simulated OR EXISTS (SELECT 1 FROM social_post_variants v WHERE v.tenant_id = p.tenant_id AND v.post_id = p.id AND v.deleted_at IS NULL AND v.simulated))`;
 
 export interface OverviewFacts {
   /** Pipeline posts with engine status `failed` or `partially_published`, plus Composer posts with status `failed`. One count, no post twice. */

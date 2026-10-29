@@ -1328,6 +1328,29 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "accountId"],
       },
     },
+    {
+      name: "social.teamDashboard",
+      description:
+        "Read the Social Media Team dashboard for one month (BFF §63.19): what needs attention (late and at-risk posts, blocked posts, failed posts, "
+        + "boosts waiting, monthly reports due or waiting for the HoD check), each client's target against what is counted, approved and live, the "
+        + "workload per person by role, where work waits longest (counted against whoever holds the post, never the officer), the average working "
+        + "days each step took, and the clients with no step estimates. Only the four social approvers (the Social Media head, the GM, the owner, the "
+        + "superadmin) may read it: anyone else, and an unattended automation, gets 403 `not_a_social_approver`. It runs as the person who asked, so "
+        + "a person outside the Social Media unit appears in `workload` and `waits[].people` only where the person-axis rule lets that person be read "
+        + "(`personRowsLimited` says rows were left out). Rows carry an id, a name and counts, never a last sign-in. `partial` names a section that "
+        + "could not be read: treat it as unavailable, not empty.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/team",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          month: { type: "string", description: "Optional content month, YYYY-MM. Default: this month in the company's report zone." },
+        },
+        required: ["tenantId"],
+      },
+    },
   ],
   rollupProviders: [socialRollups],
   // D-18: the console is the department template's reserved "Publish" craft group, under the
