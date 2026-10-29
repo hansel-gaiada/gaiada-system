@@ -6,10 +6,10 @@ import { pulseValueText, type PulseTileModel } from "@/lib/overviewPulse";
 // lists what it counts. A tile that could not be read says why in words ("No access", "Unavailable") in the
 // figure's place; it is never an empty tile and never 0. A refused tile has no link, because its page would refuse too.
 // A count that includes simulated rows (SCP-3f) carries the one SIMULATED mark (SimulatedMark.tsx), in words, so it is never colour alone.
-export function PulseBlock({ tiles }: { tiles: readonly PulseTileModel[] }) {
+export function PulseBlock({ tiles, title = "Pulse" }: { tiles: readonly PulseTileModel[]; title?: string }) {
   return (
-    <section className="ov-block ov-pulse" aria-label="Pulse">
-      <h3 className="ov-block__title">Pulse</h3>
+    <section className="ov-block ov-pulse" aria-label={title}>
+      <h3 className="ov-block__title">{title}</h3>
       <ul className="ov-pulse__tiles">
         {tiles.map((t) => {
           const body = (

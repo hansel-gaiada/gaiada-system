@@ -3,19 +3,24 @@
 //
 // It draws ONLY on an ok answer. A 403 (`not_a_social_approver`: the person is not one of the four) or a failed read hides it, as the contract says: the roster below it
 // is the page's own and is not touched. A department that is not the Social Media one never reads it.
+import type { ReactElement } from "react";
 import Link from "next/link";
 import { getDepartment } from "@/lib/departments";
 import { activeCompany } from "@/lib/companyContext";
 import { workspaceFor } from "@/lib/workspaces";
 import { todayIsoInDisplayZone } from "@/lib/format";
 import { getTeamDashboard } from "@/lib/socialTeam-data";
-import { dashboardHref, lateOrAtRiskCount, postsCount } from "@/lib/socialTeam";
+import { dashboardHref, lateOrAtRiskCount } from "@/lib/socialTeam";
 import type { Me } from "@/lib/platform";
 import "./teamDashboard.css";
 
-export async function SocialTeamBlock({ me, userId, tenantId, unit }: { me: Me; userId: string; tenantId: string; unit: string }) {
-  let dept: Awaited<ReturnType<typeof getDepartment>> = null;
-  try { dept = await getDepartment(userId, tenantId, unit); } catch { return null; }
+export async function SocialTeamBlock(props: { me: Me; userId: string; tenantId: string; unit: string }): Promise<ReactElement | null> {
+  // Whatever goes wrong, the block is absent and the page it sits on is untouched.
+  try { return await draw(props); } catch { return null; }
+}
+
+async function draw({ me, userId, tenantId, unit }: { me: Me; userId: string; tenantId: string; unit: string }): Promise<ReactElement | null> {
+  const dept = await getDepartment(userId, tenantId, unit);
   if (!dept || workspaceFor(activeCompany(me, tenantId)?.vertical, dept.name).key !== "social-media") return null;
   const today = todayIsoInDisplayZone();
   const month = today.slice(0, 7);
@@ -28,7 +33,7 @@ export async function SocialTeamBlock({ me, userId, tenantId, unit }: { me: Me; 
       <p className="std-block__text">
         <strong>{total === 0 ? "Nothing needs attention" : `${total} ${total === 1 ? "item needs" : "items need"} attention`}</strong>
         {" this month; "}
-        {late === 0 ? "none is late or at risk." : `${postsCount(late).replace(/ posts?$/, "")} ${late === 1 ? "is" : "are"} late or at risk.`}
+        {late === 0 ? "none is late or at risk." : `${late} of them ${late === 1 ? "is" : "are"} late or at risk.`}
       </p>
       <Link href={dashboardHref(unit, month, today)} className="lux-btn lux-btn--ghost lux-btn--sm">Open the Team dashboard</Link>
     </section>
