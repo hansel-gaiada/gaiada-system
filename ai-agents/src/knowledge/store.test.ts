@@ -205,6 +205,8 @@ describe.skipIf(!dbUp)("knowledge store (D9)", () => {
       calls = [];
       failAfter = Infinity;
       counting = new KnowledgeStore(pool, embed, { dim: DIMS });
+      // init() is what detects pgvector; without it the store sends float arrays, which a vector column refuses.
+      await counting.init();
       await pool.query(`DELETE FROM knowledge_chunks WHERE source_ref = $1`, [REF]);
     });
 
