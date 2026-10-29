@@ -1,4 +1,4 @@
--- 202610291300_social_reports_monthly.sql — SCP-5a: the monthly report's notes, action plan and SIMULATED mark.
+-- 202610291600_social_reports_monthly.sql — SCP-5a: the monthly report's notes, action plan and SIMULATED mark.
 -- Contract: docs/FRONTEND-BFF-CONTRACT.md §63.1 file 9 ("<prefix+8>_social_reports_monthly.sql") and §63.18; plan
 -- docs/plans/2026-10-15-social-content-pipeline.md (SCP-Q5, SCP-Q20, SCP-Q22). The routes are social-reports.controller.ts.
 --
@@ -54,7 +54,7 @@ BEGIN
        OR (column_name = 'action_plan' AND data_type = 'jsonb' AND column_default LIKE '''[]''::jsonb%')
        OR (column_name = 'simulated' AND data_type = 'boolean' AND column_default = 'false'));
   IF n <> 3 THEN
-    RAISE EXCEPTION '202610291300: social_reports needs notes jsonb NOT NULL DEFAULT ''{}'', action_plan jsonb NOT NULL DEFAULT ''[]'' and simulated boolean NOT NULL DEFAULT false, found % of 3 right', n;
+    RAISE EXCEPTION '202610291600: social_reports needs notes jsonb NOT NULL DEFAULT ''{}'', action_plan jsonb NOT NULL DEFAULT ''[]'' and simulated boolean NOT NULL DEFAULT false, found % of 3 right', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_constraint
@@ -62,18 +62,18 @@ BEGIN
      AND ((conname = 'social_reports_notes_ck' AND pg_get_constraintdef(oid) = 'CHECK ((jsonb_typeof(notes) = ''object''::text))')
        OR (conname = 'social_reports_action_plan_ck' AND pg_get_constraintdef(oid) = 'CHECK ((jsonb_typeof(action_plan) = ''array''::text))'));
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610291300: expected social_reports_notes_ck and social_reports_action_plan_ck with their exact expressions, found % of 2', n;
+    RAISE EXCEPTION '202610291600: expected social_reports_notes_ck and social_reports_action_plan_ck with their exact expressions, found % of 2', n;
   END IF;
 
   -- The wall is untouched: social_reports still has RLS enabled and forced, and its policy still carries the module wall.
   SELECT count(*) INTO n FROM pg_class
    WHERE oid = to_regclass('social_reports') AND relrowsecurity AND relforcerowsecurity;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610291300: social_reports must keep RLS ENABLED and FORCED';
+    RAISE EXCEPTION '202610291600: social_reports must keep RLS ENABLED and FORCED';
   END IF;
   SELECT count(*) INTO n FROM pg_policies
    WHERE schemaname = current_schema() AND tablename = 'social_reports' AND qual LIKE '%app_module_allowed%';
   IF n < 1 THEN
-    RAISE EXCEPTION '202610291300: social_reports must keep its module wall (app_module_allowed) policy';
+    RAISE EXCEPTION '202610291600: social_reports must keep its module wall (app_module_allowed) policy';
   END IF;
 END $$;
