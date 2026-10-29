@@ -119,18 +119,23 @@ async function readTile(tile: PulseTile, userId: string, tenantId: string, me: M
   }
 }
 
-export async function Pulse({ me, tenantId, deptId, pulse }: OverviewWidgetProps) {
+/** The Pulse's tiles as data: each built tile read once, all at once, minus the ones that are not for this viewer. Shared by the Overview's Pulse and the Social Team
+ *  dashboard's pipeline tiles (SCP-5d), so both draw the same readings and the same "No access" / "Unavailable"; one `GET overview` however many tiles share it. */
+export async function pulseModels({ me, tenantId, deptId, pulse }: Pick<OverviewWidgetProps, "me" | "tenantId" | "deptId" | "pulse">): Promise<PulseTileModel[]> {
   const tiles = pulse ?? [];
-  // A workspace with no built tile draws no Pulse (the frame does not even place it).
-  if (tiles.length === 0) return null;
+  if (tiles.length === 0) return [];
   const shared = sharedReads(me.userId, tenantId);
   const readings = await Promise.all(tiles.map((t) => readTile(t, me.userId, tenantId, me, shared)));
   // A tile that is not for this viewer (a 403 on a source in PULSE_HIDDEN_WHEN_FORBIDDEN) is not drawn, and the others are.
-  const models: PulseTileModel[] = tiles
+  return tiles
     .map((t, i) => ({ tile: t, reading: readings[i] }))
     .filter(({ tile, reading }) => !hidesTile(tile, reading))
     .map(({ tile, reading }) => ({ key: tile.key, label: tile.label, href: pulseHref(tile, { deptId, companyId: tenantId }), reading }));
-  // Nothing left to draw (the one tile was hidden): no Pulse, like a workspace with no built tile.
+}
+
+export async function Pulse(props: OverviewWidgetProps) {
+  // A workspace with no built tile draws no Pulse (the frame does not even place it); nor does one whose only tile was hidden.
+  const models = await pulseModels(props);
   if (models.length === 0) return null;
   if (everyTileFailed(models)) throw new Error("Pulse: every tile failed to read");
   return <PulseBlock tiles={models} />;

@@ -24,7 +24,7 @@ type SearchParams = Promise<{ month?: string | string[] }>;
 const first = (v: string | string[] | undefined): string | undefined => (typeof v === "string" ? v : v?.[0]);
 
 // SCP-5d (BFF §63.19, §63.17; plan §6.2; SCP-Q24): the Social Media Team dashboard, the four approvers' (the registry row `dashboard` gates on `canLeadSocial`,
-// PERMISSION §53.4). The order is fixed: the department's KPI strip, the slot for SCP-3f's pipeline tiles, then Needs attention, Clients this cycle, Workload per
+// PERMISSION §53.4). The order is fixed: the department's KPI strip, SCP-3f's pipeline tiles (the Standard Overview's Social Pulse), then Needs attention, Clients this cycle, Workload per
 // person, Where work waits longest, Step averages and Estimates not set.
 //
 // The read IS the authorisation (`GET team`: `social_engagement` · `plan`), so anyone else who opens this address gets the page's refusal (the house "no access"
@@ -64,7 +64,7 @@ export default async function SocialTeamDashboardPage({ params, searchParams }: 
       </nav>
       <div className="std-top">
         <TeamDashboardKpis userId={userId} tenantId={tenant} deptId={deptId} month={month} />
-        <TeamDashboardTiles />
+        <TeamDashboardTiles me={me} tenantId={tenant} deptId={deptId} />
       </div>
       <TeamDashboard data={team.data} deptId={deptId} />
     </Card>

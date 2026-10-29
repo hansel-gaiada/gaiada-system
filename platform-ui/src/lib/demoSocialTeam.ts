@@ -8,9 +8,15 @@
 // Per-person rows (BFF §63.19): a person in the Social Media unit is shown to all four; a person outside it (the Creatives designer, the GM's own row) is shown
 // to the owner and the superadmin (the company-wide tiers), and to that person themselves, and is left out for the HoD and the GM, with `personRowsLimited: true`.
 //
-// The report rows (`report_due`, `report_to_check`) are invented from the allocations' report day: the demo has no reports store for the dashboard to read yet.
+// Boost rows (`boost_waiting`) are the boosts demo store's own (`demoSocialBoosts.ts`): a boost `requested` (waiting for the client), or `approved` and not started, the
+// same rule as the Overview's Boosts waiting tile (BFF §63.7), on an unarchived post, in the month its `startsOn` falls in (a boost belongs to that month's cycle).
+//
+// The report rows are INVENTED (the demo has no reports store for the dashboard to read yet; a later lane gives it one) but follow the real rule (BFF §63.18): a monthly
+// report for period M-1 is due on the allocation's report day in month M, so `report_due` appears once that day is reached, `since` the first of M, and carries no
+// `reportId` when no report exists yet. `report_to_check` is a report in the HoD check (it has an id).
 import "server-only";
 import { todayIsoInDisplayZone } from "./format";
+import { demoBoosts } from "./demoSocialBoosts";
 import { scpHolderOf } from "./scpStageMachine";
 import {
   COPYWRITER, CREATIVES_DESIGNER, DEMO_MEMBER_NAMES, IN_TEAM_DESIGNER, PIPE_ENGAGEMENTS, PIPE_POSTS, SEAT_APPROVERS, allocStore, demoCycleTable, demoPostHealth,
@@ -45,6 +51,8 @@ const holdersOf = (p: PipePost, role: Role): string[] => {
 const ROLE_LABEL: Record<string, string> = { officer: "Officer", copywriter: "Copywriter", approver: "Approvers", designer: "Designer", client: "Client", external: "Outside party" };
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
+/** §63.7 `boostsWaiting`: `requested`, plus `approved` but not started. */
+const isBoostWaiting = (b: { status: string; startedAt: string | null }): boolean => b.status === "requested" || (b.status === "approved" && b.startedAt === null);
 const olderOf = (a: string | null, b: string): string => (a === null || b < a ? b : a);
 /** Calendar days to working days, roughly (the demo has no holiday data; the server counts real working days). */
 const workingDaysBetween = (from: string, to: string): number => {
@@ -85,12 +93,37 @@ export function demoTeamDashboard(month: string, userId: string, opts: DemoTeamO
     if (h.state === "late") needsAttention.push({ kind: "late", ...base });
     else if (h.state === "at_risk") needsAttention.push({ kind: "at_risk", ...base });
     if (p.pipelineStatus === "blocked") needsAttention.push({ kind: "blocked", ...base });
-    if (p.pipelineStatus === "live" && p.metrics && p.metrics.reach >= 2000) needsAttention.push({ kind: "boost_waiting", boostId: `boost-demo-${p.id}`, ...base });
   }
+
+  // boosts waiting: from the boosts store, never invented from reach.
+  for (const b of demoBoosts.store.boosts) {
+    if (!isBoostWaiting(b) || b.startsOn.slice(0, 7) !== month) continue;
+    const post = PIPE_POSTS.find((p) => p.id === b.postId);
+    if (!post || post.archivedAt) continue;
+    const requested = b.status === "requested";
+    const officer = allocStore.byEngagement[b.engagementId]?.officerId ?? null;
+    needsAttention.push({
+      kind: "boost_waiting", boostId: b.id, engagementId: b.engagementId, clientName: PIPE_ENGAGEMENTS.find((e) => e.id === b.engagementId)?.clientName ?? "", title: post.title,
+      since: dayOf(requested ? b.requestedAt : b.approvedAt ?? b.requestedAt),
+      holder: requested ? { role: "client", label: ROLE_LABEL.client } : officer ? { role: "officer", label: nameOf(officer) } : undefined,
+    });
+  }
+
+  // monthly reports (invented, on the real rule): month M is on or before the current month, and the report day of M has come (a past month's has).
   if (month <= today.slice(0, 7)) {
     const engs = PIPE_ENGAGEMENTS.filter((e) => e.status !== "closed");
-    if (engs[1]) needsAttention.push({ kind: "report_due", reportId: `rep-demo-${engs[1].id}-${month}`, engagementId: engs[1].id, clientName: engs[1].clientName, since: `${month}-05`, holder: { role: "officer", label: nameOf(allocStore.byEngagement[engs[1].id]?.officerId ?? "") } });
-    if (engs[2]) needsAttention.push({ kind: "report_to_check", reportId: `rep-demo-${engs[2].id}-${month}`, engagementId: engs[2].id, clientName: engs[2].clientName, since: `${month}-07`, holder: { role: "approver", label: "Approvers" } });
+    const reportDayReached = (engagementId: string): boolean => {
+      const day = allocStore.byEngagement[engagementId]?.reportDueDay ?? null;
+      return day !== null && today >= `${month}-${String(day).padStart(2, "0")}`;
+    };
+    const officerHolder = (engagementId: string) => ({ role: "officer", label: nameOf(allocStore.byEngagement[engagementId]?.officerId ?? "") });
+    // the second client's report has not been drafted (no id); the third's is in the HoD check.
+    if (engs[1] && reportDayReached(engs[1].id)) {
+      needsAttention.push({ kind: "report_due", engagementId: engs[1].id, clientName: engs[1].clientName, since: `${month}-01`, holder: officerHolder(engs[1].id) });
+    }
+    if (engs[2]) {
+      needsAttention.push({ kind: "report_to_check", reportId: `rep-demo-${engs[2].id}-${month}`, engagementId: engs[2].id, clientName: engs[2].clientName, since: `${month}-01`, holder: { role: "approver", label: ROLE_LABEL.approver } });
+    }
   }
 
   // ── who holds what (the post's holder, never the officer for time with someone else) ──
