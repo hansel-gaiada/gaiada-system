@@ -539,6 +539,21 @@ describe("nothing loses its home in the Social skin (plan §8)", () => {
     expect(missing).toEqual([]);
   });
 
+  // SCP-5d (BFF §63.17): the Team dashboard is the registry's `dashboard` row, gated on `canLeadSocial` like Settings, with one built tab on a page file that exists. Its
+  // key is unique in the workspace (the Social skin's pin names it), and the Reports > Team block is NOT a row (it sits on the shared `reports` row's existing `team` page).
+  it("has the Team dashboard row: `dashboard`, gated on leadSocial, one built tab at {dept}/dashboard", () => {
+    const rows = [...reg.top, ...reg.work, ...reg.performance, ...reg.you];
+    const hits = rows.filter((r) => r.key === "dashboard");
+    expect(hits).toHaveLength(1);
+    const row = hits[0];
+    expect(row.gate).toEqual({ kind: "leadSocial" });
+    expect(row.tabs.map((t) => [t.key, t.href])).toEqual([["dashboard", "/departments/{dept}/dashboard"]]);
+    expect(isPlanned(row.tabs[0])).toBe(false);
+    expect(existsSync(pageFile(row.tabs[0].href))).toBe(true);
+    // Settings has the same gate; no other Social row is leadSocial-gated.
+    expect(rows.filter((r) => r.gate?.kind === "leadSocial").map((r) => r.key).sort()).toEqual(["dashboard", "settings"]);
+  });
+
   it("keeps the Asset Library the Saved pin opens a built, gated-as-before page of the Social Media toolkit", () => {
     const assets = reg.work.find((r) => r.key === "publish")!.tabs.find((t) => t.key === "assets")!;
     expect(assets.href).toBe("/departments/{dept}/assets");
