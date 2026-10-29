@@ -213,6 +213,26 @@ const seed = (): Store => ({
 
 const G = globalThis as unknown as { __demoClientReports?: Store };
 const store = (): Store => (G.__demoClientReports ??= seed());
+/**
+ * SCP-5a (BFF §63.18): sending a Social Media monthly report publishes its PDF into the client's reports (PV7-04a, `publishDeliveredReport`), where the client's contacts in reach read it.
+ * Idempotent per source report (the server's own rule): a second publication of the same `sourceId` is the first one, `created: false`.
+ */
+export function demoPublishSocialReport(i: {
+  sourceId: string; clientId: string; clientName: string; title: string; periodStart: string; periodEnd: string; filename: string;
+}): { id: string; created: boolean } {
+  const s = store();
+  const prior = s.reports.find((r) => r.source === "social_report" && r.sourceId === i.sourceId && r.status === "published");
+  if (prior) return { id: prior.id, created: false };
+  const now = new Date().toISOString();
+  const id = `rep-sr-${i.sourceId}`;
+  s.reports.push({
+    id, clientId: i.clientId, clientName: i.clientName, projectId: null, portalProjectId: null, projectName: null, source: "social_report", sourceId: i.sourceId, deliverableId: null,
+    title: i.title, periodStart: i.periodStart, periodEnd: i.periodEnd, status: "published", file: { id: `file-${id}`, filename: i.filename, contentType: PDF, byteSize: 214_000 },
+    createdAt: now, publishedAt: now, publishedByName: "Social Media team", withdrawnAt: null, withdrawnByName: null, withdrawnReason: null,
+  });
+  return { id, created: true };
+}
+
 /** For tests: back to the seed. */
 export function resetDemoClientReports(): void { G.__demoClientReports = undefined; }
 

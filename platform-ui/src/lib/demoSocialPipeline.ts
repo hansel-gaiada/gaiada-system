@@ -515,11 +515,8 @@ const FAILED_ENGINE = ["failed", "partially_published"];
 /**
  * `GET overview` (§63.7, SCP-3f): the Pulse tiles, computed from the demo posts the way the server computes them (the same phase map, the demo's fixed health,
  * the display zone's week). `composerFailed` is the legacy Composer store's failed posts, which the one Failed posts number includes. The demo's simulator is always
- * on (as `POST simulated-accounts` already says), so simulated rows are counted and the answer says so. Boosts have no demo store: the tile shows a fixed number of waiting boosts.
+ * on (as `POST simulated-accounts` already says), so simulated rows are counted and the answer says so. The Boosts waiting tile is the boost store's own count (`setDemoBoostsWaitingReader`: requested, plus approved and not started, on posts not archived).
  */
-/** SCP-4d: the demo has no boost store, so the Boosts waiting tile shows a fixed, plausible number (a requested boost and an approved one). */
-const DEMO_BOOSTS_WAITING = 2;
-
 export function demoOverview(userId: string, composerFailed: number): DemoResult {
   if (isClientContact(userId)) return err(403, "not authorized: social_post read");
   const week = demoWeekOf(todayIsoInDisplayZone());
@@ -534,7 +531,7 @@ export function demoOverview(userId: string, composerFailed: number): DemoResult
       return day >= week.from && day < week.to;
     }).length,
     failedPosts: live.filter((p) => FAILED_ENGINE.includes(String(scpEngineStatusOf(view(p))))).length + composerFailed,
-    boostsWaiting: DEMO_BOOSTS_WAITING,
+    boostsWaiting: boostsWaitingReader(),
   };
   return ok({ tiles, simulatedIncluded: true });
 }
@@ -788,6 +785,13 @@ export function demoPipelinePost(p: PipePost, userId: string): Record<string, un
   };
 }
 
+/** SCP-5a: the Overview's Boosts waiting tile and the monthly reports' leg of Needs you come from stores that import this file, so each registers a reader here (the boost
+ *  store and the report store, as `setDemoBoostReader` does for the post read). A reader that has not registered reads 0 waiting boosts and no report items. */
+let boostsWaitingReader: () => number = () => 0;
+export function setDemoBoostsWaitingReader(fn: () => number): void { boostsWaitingReader = fn; }
+let reportNeedsReader: (tenantId: string, userId: string) => Array<Record<string, unknown>> = () => [];
+export function setDemoReportNeedsReader(fn: (tenantId: string, userId: string) => Array<Record<string, unknown>>): void { reportNeedsReader = fn; }
+
 /** SCP-4b (BFF §63.6.2): the post read's `boost`. The boost store lives in `demoSocialBoosts.ts`, which imports this file, so it registers its reader here; null until it has. */
 let boostReader: (postId: string) => unknown = () => null;
 export function setDemoBoostReader(fn: (postId: string) => unknown): void { boostReader = fn; }
@@ -804,7 +808,7 @@ export const demoPipelineMetrics = (postId: string) => store.posts.find((p) => p
 
 // ── SCP-1d / SCP-1j: the feed, Messages and the pipeline's leg of Needs you (BFF §63.7) ────────────────────────────────────────
 // The same holder, maker and health rules as the server, over the store above. Health is the store's FIXED mock value (`demoPostHealth`).
-const DEMO_SOCIAL_DEPT = "dept-4";
+export const DEMO_SOCIAL_DEPT = "dept-4";
 const HEALTH_RANK: Record<string, number> = { late: 4, at_risk: 3, tight: 2 };
 const FEED_MAX = 50;
 const PHASE_KEYS: readonly string[] = SCP_PHASES.map((p) => p.key);
@@ -950,6 +954,8 @@ export function demoNeedsYou(tenantId: string, userId: string): DemoResult {
       href: `/departments/${DEMO_SOCIAL_DEPT}/posts/${p.id}`,
     });
   }
+  // SCP-5a (BFF §63.7, §63.18): the monthly reports' items (due for the officer; to check and to send for the HoD and GM seats), from the report store.
+  items.push(...reportNeedsReader(tenantId, userId));
   items.sort((a, b) => (String(a.since) < String(b.since) ? -1 : String(a.since) > String(b.since) ? 1 : String(a.id) < String(b.id) ? -1 : 1));
   return ok({ items: items.slice(0, 50), partial: [] });
 }
