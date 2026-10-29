@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { Me } from "@/lib/platform";
 import type { ReportOverview } from "@/lib/reports-data";
 
@@ -19,11 +19,18 @@ vi.mock("@/lib/reports-data", async () => {
   const actual = await vi.importActual<typeof import("@/lib/reports-data")>("@/lib/reports-data");
   return { ...actual, getReportOverview: vi.fn() };
 });
+// SCP-5d: the Social Media block's reads. The page is shared by every department, so these are only what the block needs to decide whether to draw.
+vi.mock("@/lib/departments", () => ({ getDepartment: vi.fn() }));
+vi.mock("@/lib/companyContext", () => ({ activeCompany: vi.fn(() => ({ id: "co-1", vertical: "agency" })) }));
+vi.mock("@/lib/socialTeam-data", () => ({ getTeamDashboard: vi.fn() }));
 // The period bar is a client component wired to the router; it is not what is under test.
 vi.mock("@/components/reports/ReportPeriodBar", () => ({ ReportPeriodBar: () => <div data-testid="period-bar" /> }));
 
 import { getMe, PlatformError } from "@/lib/platform";
 import { getReportOverview } from "@/lib/reports-data";
+import { getDepartment } from "@/lib/departments";
+import { getTeamDashboard } from "@/lib/socialTeam-data";
+import { asTeamDashboard } from "@/lib/socialTeam";
 import TeamReportPage from "./page";
 
 const ME: Me = { userId: "u-head", name: "Head", email: "h@example.test", title: null, assurance: "high", companies: [{ id: "co-1", name: "Example", type: null }], roles: [] };
@@ -39,7 +46,18 @@ const mount = async (sp: { unit?: string; periodKind?: string; start?: string; e
   return render(await TeamReportPage({ searchParams: Promise.resolve(sp) }));
 };
 
-beforeEach(() => { overviewMock.mockReset(); });
+const dept = vi.mocked(getDepartment);
+const teamRead = vi.mocked(getTeamDashboard);
+const dashboardOf = (n: number) => asTeamDashboard({
+  month: "2026-10", needsAttention: Array.from({ length: n }, (_, i) => ({ kind: i === 0 ? "late" : "blocked", postId: `p-${i}`, engagementId: "e-1", clientName: "Northwind Traders", since: "2026-10-05" })),
+  clients: [], workload: [], waits: [], stepAverages: [], estimatesNotSet: [], personRowsLimited: false, partial: [],
+});
+
+beforeEach(() => {
+  overviewMock.mockReset();
+  dept.mockReset().mockResolvedValue({ id: "dept-1", name: "Web Dev" } as never);
+  teamRead.mockReset().mockResolvedValue({ kind: "ok", data: dashboardOf(3) });
+});
 
 describe("Team report page · print and export (DW-4k)", () => {
   it("with a unit: offers Print and a link to the department report for the same unit and period, and no export of its own", async () => {
@@ -70,5 +88,77 @@ describe("Team report page · print and export (DW-4k)", () => {
     await mount({ unit: "dept-1" });
     expect(screen.queryByRole("button", { name: /Print/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Export the department report" })).not.toBeInTheDocument();
+  });
+});
+
+// SCP-5d (BFF §63.19): the Social Media Team dashboard's block sits on this page for the Social Media unit only, and never changes the rest of the page.
+describe("Team report page · the Social Media Team dashboard block (SCP-5d)", () => {
+  const social = () => dept.mockResolvedValue({ id: "dept-soc", name: "Social Media" } as never);
+  const block = () => screen.queryByTestId("social-team-block");
+
+  it("draws the block for the Social Media unit, above the roster, with a link to the full dashboard", async () => {
+    social();
+    overviewMock.mockResolvedValue(ROSTER);
+    await mount({ unit: "dept-soc", periodKind: "month", start: "2026-07-01" });
+    expect(dept).toHaveBeenCalledWith("u-head", "co-1", "dept-soc");
+    expect(block()).toHaveTextContent("3 items need attention");
+    expect(screen.getByRole("link", { name: "Open the Team dashboard" }).getAttribute("href")).toMatch(/^\/departments\/dept-soc\/dashboard/);
+    // The roster is still there, after the block.
+    const roster = screen.getByText("Made Putra");
+    expect(block()!.compareDocumentPosition(roster) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("hides the block on a 403 (not one of the four) and on a failed read, and the rest of the page is as it was", async () => {
+    social();
+    overviewMock.mockResolvedValue(ROSTER);
+    const withBlock = await mount({ unit: "dept-soc", periodKind: "month", start: "2026-07-01" });
+    const shown = withBlock.container.innerHTML;
+    withBlock.unmount();
+    for (const refusal of [{ kind: "forbidden" }, { kind: "unavailable", reason: "503" }] as const) {
+      teamRead.mockResolvedValue(refusal);
+      const { container, unmount } = await mount({ unit: "dept-soc", periodKind: "month", start: "2026-07-01" });
+      expect(block()).not.toBeInTheDocument();
+      expect(screen.getByText("Made Putra")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Export the department report" })).toBeInTheDocument();
+      // Removing the block's own markup from the drawn page leaves exactly what a refusal draws.
+      const blockHtml = shown.slice(shown.indexOf('<section class="std-block"'), shown.indexOf("</section>", shown.indexOf('<section class="std-block"')) + "</section>".length);
+      expect(shown.replace(blockHtml, "")).toBe(container.innerHTML);
+      unmount();
+    }
+  });
+
+  it("never reads the dashboard for another unit, and renders it exactly as before: the same markup as a Social unit that was refused", async () => {
+    overviewMock.mockResolvedValue(ROSTER);
+    const { container } = await mount({ unit: "dept-1", periodKind: "month", start: "2026-07-01" });
+    expect(teamRead).not.toHaveBeenCalled();
+    expect(block()).not.toBeInTheDocument();
+    expect(container.querySelector(".std-block")).toBeNull();
+    const web = container.innerHTML;
+    cleanup();
+    social();
+    teamRead.mockResolvedValue({ kind: "forbidden" });
+    const refused = await mount({ unit: "dept-1", periodKind: "month", start: "2026-07-01" });
+    expect(refused.container.innerHTML).toBe(web);
+  });
+
+  it("does not draw it on the department picker (no unit), and does not break the page when the department lookup fails", async () => {
+    overviewMock.mockResolvedValue({ periodKind: "month", start: "2026-07-01", end: "2026-07-31", scopes: [{ scopeRef: "dept-soc", scopeName: "Social Media", kpis: [] }] });
+    await mount({});
+    expect(dept).not.toHaveBeenCalled();
+    expect(block()).not.toBeInTheDocument();
+    cleanup();
+    dept.mockRejectedValue(new Error("platform down"));
+    overviewMock.mockResolvedValue(ROSTER);
+    await mount({ unit: "dept-1", periodKind: "month", start: "2026-07-01" });
+    expect(block()).not.toBeInTheDocument();
+    expect(screen.getByText("Made Putra")).toBeInTheDocument();
+  });
+
+  it("a refused roster read (403) still shows the page's own refusal, and no block", async () => {
+    social();
+    overviewMock.mockRejectedValue(new PlatformError(403, "forbidden"));
+    await mount({ unit: "dept-soc" });
+    expect(block()).not.toBeInTheDocument();
+    expect(teamRead).not.toHaveBeenCalled();
   });
 });
