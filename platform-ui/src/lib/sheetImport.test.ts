@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  ALLOCATION_FIELDS, HEADER_ALIASES, IMPORT_STEPS, PLAN_FIELDS, asImportAnswer, asParseAnswer, blankRowIndexes, buildImportBody, columnLetter, duplicateColumns,
-  guessColumns, importRefusalText, normalizeHeader, rowCodeText, scheduledText, templateCsv, templateHeaders, valueText, type ImportDraft,
+  ALLOCATION_FIELDS, HEADER_ALIASES, IMPORT_STEPS, PLAN_FIELDS, asImportAnswer, asParseAnswer, blankRowIndexes, buildImportBody, columnLetter, detectHeaderRow,
+  duplicateColumns, guessColumns, headerCandidates, headerRowLabel, importRefusalText, normalizeHeader, rowCodeText, scheduledText, templateCsv, templateHeaders, valueText, type ImportDraft,
 } from "./sheetImport";
 
 // SCP-6a (BFF §63.23): the sheet import's pure half: the header aliases and the guess, the CSV template, the request body, the answers' parsers and the
@@ -79,6 +79,70 @@ describe("guessColumns: plan", () => {
       for (const f of fields) expect(HEADER_ALIASES[kind][f.key]?.length, `${kind}.${f.key}`).toBeGreaterThan(0);
       expect(Object.keys(HEADER_ALIASES[kind]).sort()).toEqual(fields.map((f) => f.key).sort());
     }
+  });
+});
+
+// SCP-6 rehearsal finding: the mock team sheet's allocation headers the guess missed.
+describe("guessColumns: the mock team sheet's headers", () => {
+  it("reads Jumlah Konten/Bulan, Desain and Laporan", () => {
+    expect(guessColumns("allocation", ["Klien", "Jumlah Konten/Bulan", "Desain", "Laporan"])).toEqual({ client: 0, postsPerCycle: 1, creativeSource: 2, reportFormat: 3 });
+  });
+  it("reads the other spellings of each", () => {
+    expect(guessColumns("allocation", ["Klien", "Jumlah Konten", "Tim Desain", "Jenis Laporan"])).toEqual({ client: 0, postsPerCycle: 1, creativeSource: 2, reportFormat: 3 });
+    expect(guessColumns("allocation", ["Klien", "Konten per Bulan", "Desainer", "Bentuk Laporan"])).toEqual({ client: 0, postsPerCycle: 1, creativeSource: 2, reportFormat: 3 });
+    expect(guessColumns("allocation", ["Klien", "Kuota Konten", "Sumber Kreatif"])).toEqual({ client: 0, postsPerCycle: 1, creativeSource: 2 });
+  });
+  it("keeps 'Tgl Laporan' on the due day and 'Laporan' on the format, whichever comes first", () => {
+    expect(guessColumns("allocation", ["Klien", "Tgl Laporan", "Laporan"])).toEqual({ client: 0, reportDueDay: 1, reportFormat: 2 });
+    expect(guessColumns("allocation", ["Klien", "Laporan", "Tgl Laporan"])).toEqual({ client: 0, reportDueDay: 2, reportFormat: 1 });
+  });
+  it("leaves the plan's aliases as they were", () => {
+    expect(guessColumns("plan", ["Topik / Ide", "Jenis Konten", "Referensi Visual", "Hari", "Status", "Link Post"])).toEqual({ title: 0, format: 1, visualDirection: 2 });
+  });
+  it("does not take the plan's 'Desain' or 'Laporan' for anything", () => {
+    expect(guessColumns("plan", ["Client", "Laporan", "Desain"])).toEqual({ client: 0 });
+  });
+});
+
+// SCP-6 rehearsal finding: title rows above the header.
+describe("detectHeaderRow", () => {
+  const PLAN_HEADER = ["No", "Tanggal", "Hari", "Jam", "Klien", "Platform", "Jenis Konten", "Pilar", "Topik / Ide", "Caption"];
+  it("finds the header under title rows and a blank row", () => {
+    const rows = [["CONTENT PLAN DESEMBER 2026", "", "", ""], ["PIC: Sam Officer"], [], PLAN_HEADER, ["1", "3/11/2026", "Selasa", "09:00", "Brand Alpha", "IG", "Reel", "Edu", "Hello", "Hi"]];
+    expect(detectHeaderRow("plan", rows)).toBe(3);
+  });
+  it("finds row 0 on a plain sheet", () => {
+    expect(detectHeaderRow("plan", [["Client", "Date", "Title"], ["Brand Alpha", "3/11/2026", "Hello"]])).toBe(0);
+    expect(detectHeaderRow("allocation", [["Klien", "PIC", "Jumlah Post"], ["Brand Alpha", "Sam", "12"]])).toBe(0);
+  });
+  it("falls back to row 0 when it has text but nothing maps to two fields, and to none when row 0 is empty", () => {
+    expect(detectHeaderRow("plan", [["Memo"], ["x"]])).toBe(0);
+    expect(detectHeaderRow("plan", [["Client"], ["Brand Alpha"]])).toBe(0);
+    expect(detectHeaderRow("plan", [[], ["", " "], ["a", "b"]])).toBeNull();
+    expect(detectHeaderRow("plan", [])).toBeNull();
+  });
+  it("is not led by a title that holds one alias word", () => {
+    const rows = [["ALOKASI KLIEN DESEMBER 2026"], ["PIC: Sam"], ["Klien", "PIC", "Jumlah Konten/Bulan", "Desain", "Laporan"], ["Brand Alpha", "Sam", "12", "Tim", "Email"]];
+    expect(detectHeaderRow("allocation", rows)).toBe(2);
+    expect(detectHeaderRow("allocation", [["ALOKASI KLIEN DESEMBER 2026"], ["Brand Alpha", "Sam"]])).toBe(0);
+  });
+  it("takes the earliest of two rows that map the same number of fields", () => {
+    expect(detectHeaderRow("plan", [["x"], ["Client", "Date"], ["Klien", "Tanggal"]])).toBe(1);
+  });
+  it("looks at the first ten rows only", () => {
+    const filler = Array.from({ length: 10 }, (_, i) => [`note ${i}`]);
+    expect(detectHeaderRow("plan", [...filler, ["Client", "Date", "Title"]])).toBe(0);
+    expect(detectHeaderRow("plan", [...filler.slice(0, 9), ["Client", "Date", "Title"]])).toBe(9);
+  });
+});
+
+describe("the header select's rows", () => {
+  it("words a row with its own number and its first three non-empty cells", () => {
+    expect(headerRowLabel(3, ["", "No", " ", "Tanggal", "Hari", "Jam"])).toBe("Row 4: No · Tanggal · Hari");
+    expect(headerRowLabel(0, ["x".repeat(80)])).toBe(`Row 1: ${"x".repeat(60)}…`);
+  });
+  it("offers the first ten rows that have anything in them, by index", () => {
+    expect(headerCandidates([["Title"], [], ["", " "], ["a"], ...Array.from({ length: 8 }, () => ["b"])])).toEqual([0, 3, 4, 5, 6, 7, 8, 9]);
   });
 });
 

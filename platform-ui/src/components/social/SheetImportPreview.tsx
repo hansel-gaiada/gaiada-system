@@ -2,6 +2,7 @@
 // SCP-6a — the sheet import's preview (BFF §63.23.3, §63.23.6 step 5): every row of the sheet as a real table, its outcome in words (never colour alone),
 // what it would write, the reasons in plain sentences, and a box to untick a row (`skip`). A refused row is marked with a rule down its edge and says
 // "Refused". Rows the person ticked back in after the preview was made have no verdict yet and say so: the page asks for a new preview first.
+// SCP-6 rehearsal finding: a row is numbered as in the sheet, `r.row + 1 + offset` (the rows above the header are not sent, so the server counts from it).
 import {
   OUTCOME_LABEL, fieldLabel, rowCodeText, scheduledText, valueText,
   type ImportAnswer, type ImportKind, type ImportRow, type RowIssue,
@@ -67,10 +68,12 @@ function WhatItDoes({ row, kind, timeZone }: { row: ImportRow; kind: ImportKind;
 }
 
 export function SheetImportPreview({
-  kind, answer, skip, previewedSkip, cellOf, timeZone, onToggle, disabled, caption,
+  kind, answer, offset, skip, previewedSkip, cellOf, timeZone, onToggle, disabled, caption,
 }: {
   kind: ImportKind;
   answer: ImportAnswer;
+  /** The header's index in the sheet (0 when it has none): added to the server's row index for the number the sheet shows. */
+  offset: number;
   /** The rows currently unticked. */
   skip: ReadonlySet<number>;
   /** The rows that were unticked when the preview was made. */
@@ -105,10 +108,10 @@ export function SheetImportPreview({
               <tr key={r.row} className={shown === "refused" ? "scp-import__row--refused" : shown === "skipped" ? "scp-import__row--skipped" : undefined}>
                 <td>
                   <span className="scp-import__check">
-                    <input type="checkbox" checked={included} disabled={disabled} aria-label={`Import row ${r.row + 1}`} onChange={(e) => onToggle(r.row, e.target.checked)} />
+                    <input type="checkbox" checked={included} disabled={disabled} aria-label={`Import row ${r.row + 1 + offset}`} onChange={(e) => onToggle(r.row, e.target.checked)} />
                   </span>
                 </td>
-                <td className="scp-table__num">{r.row + 1}</td>
+                <td className="scp-table__num">{r.row + 1 + offset}</td>
                 <td><span className="scp-table__client">{r.clientName ?? (cellOf(r.row) || "No client")}</span></td>
                 <td>{shown === "skipped" || shown === "unchecked" ? null : <WhatItDoes row={r} kind={kind} timeZone={timeZone} />}</td>
                 <td><span className={`scp-import__outcome scp-import__outcome--${shown}`}>{label}</span></td>

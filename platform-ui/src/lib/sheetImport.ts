@@ -22,7 +22,7 @@ export const DATE_ORDER_LABEL: Readonly<Record<DateOrder, string>> = {
 /** BFF §63.23.6's six steps: what the wizard walks through, and what the page explains where the wizard is not (DEMO_MODE, or no right to import). */
 export const IMPORT_STEPS: ReadonlyArray<{ key: string; title: string; blurb: string }> = [
   { key: "what", title: "What", blurb: "Choose what the sheet holds: the allocation (one row per client), or a month's plan (one row per post)." },
-  { key: "sheet", title: "The sheet", blurb: "Upload an .xlsx or .csv file, or paste rows copied from Google Sheets or Excel. Pick the tab, and say whether the first row is the header." },
+  { key: "sheet", title: "The sheet", blurb: "Upload an .xlsx or .csv file, or paste rows copied from Google Sheets or Excel. Pick the tab, and say which row holds the column names." },
   { key: "columns", title: "Columns", blurb: "Say which column is which field. The page guesses from the header row, and you can change every guess. For a plan, choose the date order." },
   { key: "names", title: "Names", blurb: "Pick the client, or the officer, for any name the ERP could not match on its own. A client is never created here: its engagement is opened in the ERP first." },
   { key: "preview", title: "Preview", blurb: "See what every row would do and why, before anything is written. Untick a row to skip it." },
@@ -100,10 +100,14 @@ export const HEADER_ALIASES: Readonly<Record<ImportKind, Readonly<Record<string,
   allocation: {
     client: ["client", "client name", "klien", "nama klien", "brand", "brand name", "account", "customer"],
     officer: ["officer", "social media officer", "smm", "pic", "penanggung jawab", "handler", "managed by"],
-    postsPerCycle: ["posts per month", "post per month", "post per bulan", "jumlah post", "jumlah posting", "quota", "kuota", "monthly posts", "posts"],
-    creativeSource: ["creative source", "sumber kreatif", "sumber desain", "designer", "design by", "creative"],
+    postsPerCycle: [
+      "posts per month", "post per month", "post per bulan", "jumlah post", "jumlah posting", "quota", "kuota", "monthly posts", "posts",
+      // SCP-6 rehearsal finding: the mock team sheet's "Jumlah Konten/Bulan".
+      "jumlah konten", "jumlah konten bulan", "konten per bulan", "konten bulan", "jumlah konten per bulan", "kuota konten",
+    ],
+    creativeSource: ["creative source", "sumber kreatif", "sumber desain", "designer", "design by", "creative", "desain", "tim desain", "desainer"],
     deliveryBatch: ["batch", "delivery batch", "batch delivery"],
-    reportFormat: ["report format", "format laporan", "report type", "reporting format"],
+    reportFormat: ["report format", "format laporan", "report type", "reporting format", "laporan", "jenis laporan", "bentuk laporan"],
     reportDueDay: ["report due", "report due day", "report day", "report due date", "tanggal laporan", "tgl laporan", "due day"],
     platforms: ["platforms", "platform", "channels", "channel", "networks", "network"],
     formats: ["formats", "content formats", "content format", "jenis konten", "post formats"],
@@ -160,6 +164,38 @@ export function guessColumns(kind: ImportKind, headers: readonly string[]): Reco
     });
     if (best) { out[field] = (best as { col: number }).col; used.add((best as { col: number }).col); }
   }
+  return out;
+}
+
+/** How many rows from the top the wizard looks at for the header (SCP-6 rehearsal finding: title rows sit above it). */
+export const HEADER_SCAN_ROWS = 10;
+
+/**
+ * The row that holds the column names. Real sheets put one to three title rows above them ("CONTENT PLAN DESEMBER 2026", "PIC: ...", a blank row), so
+ * among the first `HEADER_SCAN_ROWS` rows it takes the one where `guessColumns` finds the most fields (a tie goes to the earliest), if that is at least two:
+ * a title that happens to hold one alias word, such as "ALOKASI KLIEN ...", must not win. Failing that, row 0 when it has any text, else null (no header).
+ */
+export function detectHeaderRow(kind: ImportKind, rows: readonly (readonly string[])[]): number | null {
+  let best = -1;
+  let bestCount = 0;
+  rows.slice(0, HEADER_SCAN_ROWS).forEach((r, i) => {
+    const n = Object.keys(guessColumns(kind, r)).length;
+    if (n > bestCount) { best = i; bestCount = n; }
+  });
+  if (bestCount >= 2) return best;
+  return rows.length > 0 && rows[0].some((c) => c.trim() !== "") ? 0 : null;
+}
+
+/** The header select's words for one row: `Row N: <first three non-empty cells joined by " · ", cut at 60 characters>`. N is the sheet's own row number. */
+export function headerRowLabel(index: number, cells: readonly string[]): string {
+  const text = cells.map((c) => c.trim()).filter((c) => c !== "").slice(0, 3).join(" · ");
+  return `Row ${index + 1}: ${text.length > 60 ? `${text.slice(0, 60)}…` : text}`;
+}
+
+/** The first `HEADER_SCAN_ROWS` rows that have any non-empty cell, with their 0-based indexes: what the header select offers. */
+export function headerCandidates(rows: readonly (readonly string[])[]): number[] {
+  const out: number[] = [];
+  rows.slice(0, HEADER_SCAN_ROWS).forEach((r, i) => { if (r.some((c) => c.trim() !== "")) out.push(i); });
   return out;
 }
 
@@ -260,7 +296,7 @@ export function buildImportBody(d: ImportDraft, dryRun: boolean): ImportBody {
 export interface RowIssue { field: string; code: string }
 
 export interface ImportRow {
-  /** The index into `rows`: the sheet's row number less one. */
+  /** The index into the `rows` that were sent: the sheet's row number less one, less the rows left out above the header. */
   row: number;
   outcome: Outcome;
   refusals: RowIssue[];

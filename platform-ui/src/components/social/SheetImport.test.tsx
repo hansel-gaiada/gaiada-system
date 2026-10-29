@@ -198,10 +198,10 @@ describe("the columns", () => {
     expect(screen.getByLabelText("Date order")).toHaveValue("dmy");
   });
 
-  it("guesses nothing when the first row is not a header, and stops the preview until the required columns are chosen", async () => {
+  it("guesses nothing when the sheet has no header row, and stops the preview until the required columns are chosen", async () => {
     await toColumns();
     click("Back");
-    fireEvent.click(screen.getByLabelText("The first row is the header"));
+    fireEvent.change(screen.getByLabelText("Which row holds the column names?"), { target: { value: "none" } });
     click("Next: the columns");
     expect(await screen.findByLabelText(/^Client/)).toHaveValue("");
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
@@ -228,6 +228,122 @@ describe("the columns", () => {
     expect(await screen.findByLabelText(/^Officer/)).toHaveValue("1");
     expect(screen.getByLabelText(/^Posts per month/)).toHaveValue("2");
     expect(screen.queryByLabelText("Date order")).toBeNull();
+  });
+});
+
+// SCP-6 rehearsal finding: title rows above the header. The select proposes the header's row; only the rows from it on are sent; every row number drawn is
+// the sheet's own (the server's index + 1 + the header's index).
+describe("title rows above the header", () => {
+  const HEADER = ["No", "Tanggal", "Hari", "Jam", "Klien", "Platform", "Jenis Konten", "Pilar", "Topik / Ide", "Caption"];
+  const DATA_1 = ["1", "3/11/2026", "Selasa", "09:00", "Brand Alpha", "IG", "Reel", "Edu", "Hello", "Hi"];
+  const DATA_2 = ["2", "4/11/2026", "Rabu", "10:00", "Alfa Co", "IG", "Feed", "Edu", "Second", "Hey"];
+  const TITLED = [["CONTENT PLAN DESEMBER 2026", "", ""], ["PIC: Sam Officer"], [], HEADER, DATA_1, DATA_2];
+  const SENT = [HEADER, DATA_1, DATA_2];
+  const headerSelect = () => screen.getByLabelText("Which row holds the column names?");
+
+  it("offers the rows that have text, words each with the sheet's row number, and picks the header's row", async () => {
+    await toColumns([{ name: "Pasted", rows: TITLED }]);
+    click("Back");
+    const select = headerSelect();
+    expect(select).toHaveValue("3");
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Row 1: CONTENT PLAN DESEMBER 2026", "Row 2: PIC: Sam Officer", "Row 4: No · Tanggal · Hari", "Row 5: 1 · 3/11/2026 · Selasa", "Row 6: 2 · 4/11/2026 · Rabu",
+      "No header row: I’ll choose the columns myself",
+    ]);
+    expect(screen.getByText("Rows above it, such as a title, are left out.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("The first row is the header")).toBeNull();
+  });
+
+  it("guesses the columns from the header row, not from the title above it", async () => {
+    await toColumns([{ name: "Pasted", rows: TITLED }]);
+    expect(screen.getByLabelText(/^Client/)).toHaveValue("4");
+    expect(screen.getByLabelText(/^Posting date/)).toHaveValue("1");
+    expect(screen.getByLabelText(/^Posting time/)).toHaveValue("3");
+    expect(screen.getByLabelText(/^Title/)).toHaveValue("8");
+    expect(screen.getByLabelText(/^Format/)).toHaveValue("6");
+    expect(screen.getByLabelText(/^Content pillar/)).toHaveValue("7");
+    expect(screen.getByLabelText(/^Caption/)).toHaveValue("9");
+    expect(within(screen.getByLabelText(/^Client/)).getAllByRole("option")[5].textContent).toBe("Column E: Klien");
+  });
+
+  it("sends the rows from the header on, and draws the sheet's own row numbers", async () => {
+    preview.mockResolvedValue({
+      ok: true, answer: answer([
+        rowOf({ row: 1, outcome: "ready", engagementId: "e-alpha", clientName: "Brand Alpha", post: post("Hello") }),
+        rowOf({ row: 2, outcome: "refused", refusals: [{ field: "client", code: "client_not_found" }] }),
+      ], { unmatched: { clients: [{ sheetName: "Alfa Co", rows: [2], suggestions: [] }], officers: [] } }),
+    });
+    await toColumns([{ name: "Pasted", rows: TITLED }]);
+    click("Preview");
+    await screen.findByRole("heading", { name: /Names the ERP could not match/ });
+    const body = preview.mock.calls[0][1];
+    expect(body.headerRow).toBe(true);
+    expect(body.rows).toEqual(SENT);
+    expect(body.columns).toMatchObject({ client: 4, date: 1, time: 3, title: 8, format: 6, pillar: 7, caption: 9 });
+    expect(body).not.toHaveProperty("skip");
+    // The names step: the server's row 2 is the sheet's row 6 (offset 3).
+    expect(screen.getByText("Row 6")).toBeInTheDocument();
+    click("Preview again");
+    await screen.findByRole("heading", { name: /5\. Preview/ });
+    const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByRole("cell", { name: "5" })).toHaveClass("scp-table__num"); // answer row 1 with offset 3
+    expect(within(rows[1]).getByRole("cell", { name: "6" })).toHaveClass("scp-table__num");
+    expect(within(rows[1]).getByText("Alfa Co")).toBeInTheDocument(); // the cell of the SENT row 2
+    expect(screen.getByRole("checkbox", { name: "Import row 5" })).toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "Import row 2" })).toBeNull();
+    // Unticking is by the server's index into the rows sent.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Import row 6" }));
+    click("Update the preview");
+    await waitFor(() => expect(preview).toHaveBeenCalledTimes(3));
+    expect(preview.mock.calls[2][1].skip).toEqual([2]);
+    expect(preview.mock.calls[2][1].rows).toEqual(SENT);
+  });
+
+  it("sends every row, with headerRow false, when the person says there is no header row", async () => {
+    preview.mockResolvedValue({ ok: true, answer: answer([rowOf({ row: 4, outcome: "ready", clientName: "Brand Alpha", post: post("Hello") })]) });
+    await toColumns([{ name: "Pasted", rows: TITLED }]);
+    click("Back");
+    fireEvent.change(headerSelect(), { target: { value: "none" } });
+    expect(headerSelect()).toHaveValue("none");
+    click("Next: the columns");
+    expect(await screen.findByLabelText(/^Client/)).toHaveValue("");
+    expect(screen.getByText(/There is no header row to guess from/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/^Client/), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText(/^Posting date/), { target: { value: "1" } });
+    click("Preview");
+    await screen.findByRole("heading", { name: /5\. Preview/ });
+    const body = preview.mock.calls[0][1];
+    expect(body.headerRow).toBe(false);
+    expect(body.rows).toEqual(TITLED);
+    expect(body.skip).toEqual([2]); // the blank row, by its index in what is sent
+    // No offset: the server's index 4 is the sheet's row 5.
+    expect(within(screen.getByRole("table")).getByRole("cell", { name: "5" })).toBeInTheDocument();
+  });
+
+  it("moves the header and the guess with the person's choice of row, and counts the row limit on the rows sent", async () => {
+    await toColumns([{ name: "Pasted", rows: TITLED }]);
+    click("Back");
+    fireEvent.change(headerSelect(), { target: { value: "0" } });
+    click("Next: the columns");
+    expect(await screen.findByLabelText(/^Client/)).toHaveValue("");
+    click("Back");
+    fireEvent.change(headerSelect(), { target: { value: "3" } });
+    click("Next: the columns");
+    expect(await screen.findByLabelText(/^Client/)).toHaveValue("4");
+
+    const filler = Array.from({ length: 1000 }, (_, i) => [`${i}`, "3/11/2026", "x", "09:00", `Brand ${i}`]);
+    // 1003 rows in the tab, 1001 from the header on: over the limit.
+    parse.mockResolvedValue({ ok: true, tabs: [{ name: "Big", rows: [["CONTENT PLAN"], [], HEADER, ...filler] }] });
+    click("Back");
+    click("Read the sheet again");
+    expect(await screen.findByText(/1001 rows from the header row on; one import takes 1000 at most/)).toBeInTheDocument();
+    // 1002 rows in the tab, 1000 from the header on (the plan takes 1,000): allowed, though the tab itself holds more than the limit.
+    parse.mockResolvedValue({ ok: true, tabs: [{ name: "Big", rows: [["CONTENT PLAN"], [], HEADER, ...filler.slice(0, 999)] }] });
+    click("Read the sheet again");
+    await waitFor(() => expect(screen.queryByText(/one import takes 1000 at most/)).toBeNull());
+    expect(screen.getByRole("button", { name: "Next: the columns" })).toBeEnabled();
   });
 });
 

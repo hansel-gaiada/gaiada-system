@@ -3,6 +3,10 @@
 // month's plan), the sheet (an .xlsx or .csv, or pasted rows), the columns (guessed from the header row, changeable), the names the server could not
 // match, the preview (every row's outcome, untick to skip) and the import with its result.
 //
+// SCP-6 rehearsal finding: a real sheet has title rows above the column names. The person says which row holds them (the page proposes one with
+// `detectHeaderRow`); only the rows from there on are sent, so the server's row indexes are into those. Every row number the page shows is the sheet's own:
+// the server's index + 1 + `offset` (the header's index, 0 when there is none).
+//
 // WHAT THE PAGE DOES AND DOES NOT DO. It reads the file in the browser only to hand it to `import/parse`, maps columns, and shows what the server
 // answered. Which cell is a client, how a date is read and why a row is refused are the server's (`lib/sheetImport.ts` words the codes). Nothing is
 // written until "Import N rows", which the server runs again in one transaction; if a row the person kept is refused it writes nothing and answers the
@@ -13,8 +17,8 @@ import Link from "next/link";
 import { applyImport, parseSheet, previewImport } from "@/lib/socialImportActions";
 import { shiftMonth } from "@/lib/deptCalendar";
 import {
-  DATE_ORDER_LABEL, IMPORT_KIND_LABEL, IMPORT_STEPS, MAX_IMPORT_ROWS, MAX_SHEET_BYTES, blankRowIndexes, buildImportBody, columnLetter, duplicateColumns,
-  fieldLabel, fieldsFor, guessColumns, templateCsv, templateFilename, type DateOrder, type ImportAnswer, type ImportDraft, type ImportKind, type SheetTab,
+  DATE_ORDER_LABEL, IMPORT_KIND_LABEL, IMPORT_STEPS, MAX_IMPORT_ROWS, MAX_SHEET_BYTES, blankRowIndexes, buildImportBody, columnLetter, detectHeaderRow,
+  duplicateColumns, fieldLabel, fieldsFor, guessColumns, headerCandidates, headerRowLabel, templateCsv, templateFilename, type DateOrder, type ImportAnswer, type ImportDraft, type ImportKind, type SheetTab,
   type UnmatchedClient, type UnmatchedOfficer,
 } from "@/lib/sheetImport";
 import { SheetImportPreview, previewCounts, summaryText } from "./SheetImportPreview";
@@ -85,7 +89,10 @@ export function ImportSteps({ current }: { current?: Step }) {
   );
 }
 
-const rowLabel = (rows: number[]): string => `Row${rows.length === 1 ? "" : "s"} ${rows.map((r) => r + 1).join(", ")}`;
+const rowLabel = (rows: number[], offset: number): string => `Row${rows.length === 1 ? "" : "s"} ${rows.map((r) => r + 1 + offset).join(", ")}`;
+
+/** The header select's value for "No header row". */
+const NO_HEADER = "none";
 
 /** Names the server could not match stay listed (with the person's pick) when a later preview no longer lists them. */
 function mergeNames(prev: { clients: UnmatchedClient[]; officers: UnmatchedOfficer[] }, next: ImportAnswer["unmatched"]) {
@@ -115,7 +122,8 @@ export function SheetImport({
   const [pasted, setPasted] = useState("");
   const [tabs, setTabs] = useState<SheetTab[] | null>(null);
   const [tabIdx, setTabIdx] = useState(0);
-  const [headerRow, setHeaderRow] = useState(true);
+  /** The index (into the tab's rows) of the row that holds the column names; null: the sheet has none. */
+  const [headerIdx, setHeaderIdx] = useState<number | null>(0);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [dateOrder, setDateOrder] = useState<DateOrder>("dmy");
   const [skip, setSkip] = useState<ReadonlySet<number>>(new Set());
@@ -141,21 +149,30 @@ export function SheetImport({
   const tab = tabs?.[tabIdx] ?? null;
   const rows = tab?.rows ?? [];
   const fields = fieldsFor(kind);
-  const headers = headerRow && rows.length > 0 ? rows[0] : [];
+  const headerRow = headerIdx !== null;
+  const offset = headerIdx ?? 0;
+  /** What is sent: the rows from the header on (nothing above it), or every row when there is no header. The server's row indexes and `skip` are into these. */
+  const sentRows = headerIdx === null ? rows : rows.slice(headerIdx);
+  const headers = headerIdx !== null ? (rows[headerIdx] ?? []) : [];
   const columnCount = rows.reduce((n, r) => Math.max(n, r.length), 0);
   const hasNames = names.clients.length + names.officers.length > 0;
   const errId = `${uid}-error`;
   const rowLimit = MAX_IMPORT_ROWS[kind];
 
   const draft = (over: Partial<ImportDraft> = {}): ImportDraft => ({
-    kind, rows, headerRow, mapping, skip, clientMatches, officerMatches, month, dateOrder, timeZone: browserZone(), ...over,
+    kind, rows: sentRows, headerRow, mapping, skip, clientMatches, officerMatches, month, dateOrder, timeZone: browserZone(), ...over,
   });
 
-  /** A fresh read of a tab (or of the same tab under another header setting or kind): the guess, the blank rows unticked, every later step cleared. */
-  function startTab(nextKind: ImportKind, t: SheetTab | null, header: boolean) {
-    const guess = header && t && t.rows.length > 0 ? guessColumns(nextKind, t.rows[0]) : {};
+  /**
+   * A fresh read of a tab (or of the same tab under another header row or kind): the header row (proposed by `detectHeaderRow` unless the person chose
+   * one; `null` is "no header row"), the guess from it, the blank rows from it on unticked, every later step cleared.
+   */
+  function startTab(nextKind: ImportKind, t: SheetTab | null, header?: number | null) {
+    const idx = header !== undefined ? header : t ? detectHeaderRow(nextKind, t.rows) : null;
+    setHeaderIdx(idx);
+    const guess = idx !== null && t && t.rows[idx] ? guessColumns(nextKind, t.rows[idx]) : {};
     setMapping(Object.fromEntries(fieldsFor(nextKind).map((x) => [x.key, x.key in guess ? String(guess[x.key]) : ""])));
-    setSkip(new Set(t ? blankRowIndexes(t.rows) : []));
+    setSkip(new Set(t ? blankRowIndexes(idx === null ? t.rows : t.rows.slice(idx)) : []));
     setPreviewedSkip(new Set());
     setClientMatches({}); setOfficerMatches({});
     setNames({ clients: [], officers: [] });
@@ -164,7 +181,7 @@ export function SheetImport({
 
   function chooseKind(next: ImportKind) {
     setKind(next);
-    if (tab) startTab(next, tab, headerRow);
+    if (tab) startTab(next, tab);
   }
 
   async function guarded(work: () => Promise<void>) {
@@ -188,18 +205,17 @@ export function SheetImport({
       if (res.tabs.length === 0) { setProblem({ text: "The sheet has no tabs with anything in them.", field: source === "file" ? "file" : "text" }); return; }
       setTabs(res.tabs);
       setTabIdx(0);
-      startTab(kind, res.tabs[0], headerRow);
+      startTab(kind, res.tabs[0]);
     });
   }
 
   function chooseTab(i: number) {
     setTabIdx(i);
-    startTab(kind, tabs?.[i] ?? null, headerRow);
+    startTab(kind, tabs?.[i] ?? null);
   }
 
-  function chooseHeader(on: boolean) {
-    setHeaderRow(on);
-    startTab(kind, tab, on);
+  function chooseHeader(value: string) {
+    startTab(kind, tab, value === NO_HEADER ? null : Number(value));
   }
 
   function goTo(next: Step) {
@@ -262,9 +278,9 @@ export function SheetImport({
   }
 
   // ── Step 2's checks ────────────────────────────────────────────────────────────────────────────────────────
-  const rowsToImport = rows.length - (headerRow ? 1 : 0);
-  const tooManyRows = rows.length > rowLimit;
-  const sheetProblem = !tab ? null : rowsToImport <= 0 ? "This tab has no rows to import." : tooManyRows ? `This tab has ${rows.length} rows; one import takes ${rowLimit} at most. Split the sheet.` : null;
+  const rowsToImport = sentRows.length - (headerRow ? 1 : 0);
+  const tooManyRows = sentRows.length > rowLimit;
+  const sheetProblem = !tab ? null : rowsToImport <= 0 ? "This tab has no rows to import." : tooManyRows ? `This tab has ${sentRows.length} rows${offset > 0 ? " from the header row on" : ""}; one import takes ${rowLimit} at most. Split the sheet.` : null;
 
   // ── Step 3's checks ────────────────────────────────────────────────────────────────────────────────────────
   const missing = fields.filter((x) => x.required && (mapping[x.key] ?? "") === "").map((x) => x.label);
@@ -275,7 +291,7 @@ export function SheetImport({
   // ── Step 5 ─────────────────────────────────────────────────────────────────────────────────────────────────
   const counts = answer ? previewCounts(answer, skip, previewedSkip) : null;
   const clientCol = mapping.client !== undefined && mapping.client !== "" ? Number(mapping.client) : -1;
-  const cellOf = (row: number): string => (clientCol >= 0 ? (rows[row]?.[clientCol] ?? "").trim() : "");
+  const cellOf = (row: number): string => (clientCol >= 0 ? (sentRows[row]?.[clientCol] ?? "").trim() : "");
   const stale = counts !== null && counts.unchecked > 0;
   const canImport = counts !== null && counts.ready > 0 && counts.refused === 0 && !stale && !busy;
 
@@ -387,10 +403,14 @@ export function SheetImport({
                   </select>
                 </div>
               )}
-              <label className="scp-import__choice">
-                <input type="checkbox" checked={headerRow} onChange={(e) => chooseHeader(e.target.checked)} />
-                <span>The first row is the header</span>
-              </label>
+              <div className="scp-field">
+                <label htmlFor={`${uid}-header`}>Which row holds the column names?</label>
+                <select id={`${uid}-header`} className="scp-input" value={headerIdx === null ? NO_HEADER : String(headerIdx)} onChange={(e) => chooseHeader(e.target.value)} aria-describedby={`${uid}-header-hint`}>
+                  {headerCandidates(rows).map((i) => <option key={i} value={String(i)}>{headerRowLabel(i, rows[i])}</option>)}
+                  <option value={NO_HEADER}>No header row: I&rsquo;ll choose the columns myself</option>
+                </select>
+                <span className="scp-field__hint" id={`${uid}-header-hint`}>Rows above it, such as a title, are left out.</span>
+              </div>
               <div className="scp-tablewrap">
                 <table className="scp-table scp-import__sample">
                   <caption>The first rows of {tab.name}, as the ERP read them.</caption>
@@ -483,7 +503,7 @@ export function SheetImport({
                   <select id={id} className="scp-input" value={clientMatches[c.sheetName] ?? ""} aria-describedby={`${id}-rows`} onChange={(e) => setClientMatches((m) => ({ ...m, [c.sheetName]: e.target.value }))}>
                     {clientOptions(c)}
                   </select>
-                  <small id={`${id}-rows`}>{rowLabel(c.rows)}</small>
+                  <small id={`${id}-rows`}>{rowLabel(c.rows, offset)}</small>
                 </li>
               );
             })}
@@ -496,7 +516,7 @@ export function SheetImport({
                     <option value="">Leave unmatched (its rows are refused)</option>
                     {officers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
-                  <small id={`${id}-rows`}>{rowLabel(o.rows)}</small>
+                  <small id={`${id}-rows`}>{rowLabel(o.rows, offset)}</small>
                 </li>
               );
             })}
@@ -523,7 +543,7 @@ export function SheetImport({
           )}
           {stale && <p className="scp-note" role="status">You ticked rows back in. Update the preview so they are checked before you import.</p>}
           <SheetImportPreview
-            kind={kind} answer={answer} skip={skip} previewedSkip={previewedSkip} cellOf={cellOf} timeZone={browserZone()} onToggle={toggleRow} disabled={busy}
+            kind={kind} answer={answer} offset={offset} skip={skip} previewedSkip={previewedSkip} cellOf={cellOf} timeZone={browserZone()} onToggle={toggleRow} disabled={busy}
             caption={`${IMPORT_KIND_LABEL[kind]}${kind === "plan" ? " for the month you chose" : ""}: every row of the sheet, what the import would do with it and why. Nothing has been written yet.`}
           />
           <div className="scp-import__nav">
