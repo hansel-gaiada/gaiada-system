@@ -213,7 +213,8 @@ describe("More as a full-screen sheet", () => {
     expect(Array.from(menu.querySelectorAll(".ws-more__label")).map((l) => l.textContent)).toEqual(["Calendar", "Reports", "Saved", "AI Assistant"]);
     expect(within(menu).getByRole("link", { name: "Calendar" })).toHaveAttribute("href", "/departments/d-soc/calendar");
     expect(within(menu).getByRole("link", { name: "Saved" })).toHaveAttribute("href", "/departments/d-soc/assets");
-    expect(within(menu).getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/reports/person");
+    // SCP-5a: the Reports pin opens the Social reports tab of the shared Reports row (it opened the row's first tab, Mine, until that tab existed).
+    expect(within(menu).getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/departments/d-soc/social-reports");
     // Nothing the bar or the top holds is repeated there, and the rows below are the model's own, as on the desktop.
     for (const name of ["Home", "Tasks", "Notifications", "Search", "Create"]) expect(within(menu).queryByRole("link", { name })).toBeNull();
     expect(Array.from(groups[2].querySelectorAll("a[data-result]")).map((a) => (a as HTMLElement).dataset.result)).toEqual(socialWs(model).rows.work.map((r) => r.key));

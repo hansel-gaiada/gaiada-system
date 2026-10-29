@@ -36,6 +36,9 @@ vi.mock("@/lib/socialBoostsActions", () => ({
   runBoostAction: vi.fn(), proposeBudget: vi.fn(), recordBudget: vi.fn(), withdrawProposal: vi.fn(), loadBoostEstimate: vi.fn(), loadBudgetForPost: vi.fn(), requestBoost: vi.fn(),
 }));
 vi.mock("@/lib/portalSpendActions", () => ({ decideBoost: vi.fn(), decideBoostBudget: vi.fn() }));
+vi.mock("@/lib/socialReportsActions", () => ({
+  draftMonthlyReport: vi.fn(), saveReport: vi.fn(), submitReport: vi.fn(), sendBackReport: vi.fn(), proposeReportDraft: vi.fn(), approveReport: vi.fn(), deliverReport: vi.fn(),
+}));
 
 import { SIMULATED_MARK_NAME } from "./SimulatedMark";
 import { ClientAccounts } from "./ClientAccounts";
@@ -57,6 +60,10 @@ import { PortalSocialToasts } from "@/components/portal/social/PortalSocialToast
 import { PortalBoostBudgets } from "@/components/portal/social/PortalBoostBudgets";
 import { BoostBoard } from "./BoostBoard";
 import { BoostCard } from "./BoostCard";
+import { SocialReportList } from "./SocialReportList";
+import { SocialReportView } from "./SocialReportView";
+import { asReportDetail, asReportList } from "@/lib/socialReports";
+import { socialDemo } from "@/lib/demoSocial";
 import { asBoostRow, type BoostRow, type PortalSpend } from "@/lib/socialBoosts";
 import { post as portalPost, TENANT } from "@/components/portal/social/portalSocialFixtures";
 import { PIPE_POSTS, demoPipelineRead } from "@/lib/demoSocialPipeline";
@@ -143,6 +150,11 @@ const portalSpend = (simulated: boolean): PortalSpend => ({
   boosts: [{ boostId: "b-2", clientName: "Northwind Traders", postTitle: "A post", thumbFileId: null, totalBudgetMinor: 600_000, days: 6, startsOn: "2026-10-20", currency: "IDR", minorUnit: 0, remainingMinor: 0, simulated }],
 });
 
+// SCP-5a: a monthly report from the demo store: Harborlight Hotel's is built from simulated numbers, Northwind Traders' from real ones.
+const demoGet = (tail: string) => socialDemo("GET", `/api/co-agency/modules/social/${tail}`, new URLSearchParams(), undefined, "u-pm")!.json;
+const reportRows = (simulated: boolean) => asReportList(demoGet("reports")).filter((r) => r.simulated === simulated);
+const reportDetail = (simulated: boolean) => asReportDetail(demoGet(`reports/${reportRows(simulated)[0].id}`));
+
 type Case = (simulated: boolean) => RenderResult;
 /** Every component that reads a simulated flag, by file, and how to draw it. */
 const COVERED: Record<string, Case> = {
@@ -172,6 +184,8 @@ const COVERED: Record<string, Case> = {
   "components/social/BoostBoard.tsx": (s) => render(
     <BoostBoard deptId="d-soc" data={{ items: [boostRow(s)], candidates: [], totals: { committedMinor: 300_000, spendMinor: 0, currency: "IDR" }, nextCursor: null }} />,
   ),
+  "components/social/SocialReportList.tsx": (s) => render(<SocialReportList deptId="d-soc" rows={reportRows(s)} filters={{ status: null, period: null }} />),
+  "components/social/SocialReportView.tsx": (s) => render(<SocialReportView deptId="d-soc" report={reportDetail(s)} clientName="A client" clientReportsHref={null} />),
   "components/portal/social/PortalBoostBudgets.tsx": (s) => render(<PortalBoostBudgets spend={portalSpend(s)} tenant={TENANT} />),
   "components/portal/social/PortalSocialPostCard.tsx": (s) => render(
     <PortalSocialToasts>

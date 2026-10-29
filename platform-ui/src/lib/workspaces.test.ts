@@ -574,3 +574,40 @@ describe("nothing loses its home in the Social skin (plan §8)", () => {
     expect(soc.admin).toEqual(std.admin);
   });
 });
+
+// SCP-5a (BFF §63.17, §63.18): the Social reports tab of the shared Reports row. It comes from the workspace's own `reports`, its key is unique in the row, it opens the list, and the
+// department's `{D}/reports` stays SEO's, unchanged.
+describe("the Social reports tab (SCP-5a)", () => {
+  const social = workspaceBySlug("social-media")!;
+  const reportsRow = (ws: Workspace) => sidebarRows(ws).performance.find((r) => r.key === "reports")!;
+
+  it("adds one tab, 'Social reports', with the key the Social skin's Reports pin names, to the shared Reports row of Social Media", () => {
+    expect(social.reports).toHaveLength(1);
+    expect(social.reports[0]).toMatchObject({ key: "social", label: "Social reports", href: "/departments/{dept}/social-reports" });
+    expect(reportsRow(social).tabs.map((t) => t.key)).toEqual(["mine", "team", "department", "client", "social"]);
+    expect(hrefFor(social.reports[0].href, { deptId: "d-soc", companyId: "co" })).toBe("/departments/d-soc/social-reports");
+  });
+  it("has a key that is unique in the row, and no other workspace gets the tab", () => {
+    for (const ws of [...WORKSPACES, GENERIC_WORKSPACE]) {
+      const keys = reportsRow(ws).tabs.map((t) => t.key);
+      expect(new Set(keys).size, ws.key).toBe(keys.length);
+      expect(keys.includes("social"), ws.key).toBe(ws.key === "social-media");
+    }
+  });
+  it("is ungated: the whole team reads the list, and the server decides each write", () => {
+    expect(social.reports[0].gate).toBeUndefined();
+    expect(social.reports[0].ticket).toBeUndefined();
+  });
+  it("leaves {D}/reports to SEO: its Client reports tab still opens it, and Social Media has no tab or row on that address", () => {
+    const seo = workspaceBySlug("seo")!;
+    const seoTabs = sidebarRows(seo).work.flatMap((r) => r.tabs);
+    expect(seoTabs.find((t) => t.label === "Client reports")?.href).toBe("/departments/{dept}/reports");
+    const socialHrefs = [...sidebarRows(social).work, ...sidebarRows(social).performance].flatMap((r) => r.tabs).map((t) => t.href);
+    expect(socialHrefs).not.toContain("/departments/{dept}/reports");
+    expect(socialHrefs).toContain("/departments/{dept}/social-reports");
+  });
+  it("the report page is no menu row: nothing in the registry opens /social-reports/[reportId]", () => {
+    const all = [...sidebarRows(social).top, ...sidebarRows(social).work, ...sidebarRows(social).performance].flatMap((r) => r.tabs).map((t) => t.href);
+    expect(all.filter((h) => h.includes("social-reports"))).toEqual(["/departments/{dept}/social-reports"]);
+  });
+});

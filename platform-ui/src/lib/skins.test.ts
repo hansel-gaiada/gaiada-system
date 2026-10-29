@@ -119,16 +119,18 @@ describe("skins: the pinned menu", () => {
     expect(pinsOf(me([member(), lead("d-web")]))).toEqual(officer);
   });
 
-  it("opens the shared Reports row's first tab until a Social reports tab is in the model, then that tab", () => {
+  it("the Reports pin opens the Social reports tab SCP-5a adds to the shared Reports row, and falls back to the row's first tab when that tab is not offered", () => {
     const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
     const reportsRow = allRows(soc).find((r) => r.key === "reports")!;
-    expect(reportsRow.tabs.some((t) => t.key === "social")).toBe(false);
+    const tab = reportsRow.tabs.find((t) => t.key === "social");
+    expect(tab).toMatchObject({ label: "Social reports", href: "/departments/d-soc/social-reports" });
+    expect(reportsRow.tabs.map((t) => t.key)).toEqual([...reportsRow.tabs.map((t) => t.key).filter((k) => k !== "social"), "social"]);
     const now = pinnedFor("social", allRows(soc))!.find((p) => p.key === "reports");
-    expect(now).toMatchObject({ kind: "link", label: "Reports", href: reportsRow.tabs[0].href, tab: reportsRow.tabs[0].key, wholeRow: true });
-    // The tab SCP-5a builds, as a synthetic row: the entry now opens it.
-    const withSocial: ConcreteRow = { ...reportsRow, tabs: [...reportsRow.tabs, { key: "social", label: "Social", href: "/departments/d-soc/social-reports", icon: "chart" }] };
-    const later = pinnedFor("social", [withSocial])!.find((p) => p.key === "reports");
-    expect(later).toMatchObject({ kind: "link", href: "/departments/d-soc/social-reports", tab: "social" });
+    expect(now).toMatchObject({ kind: "link", label: "Reports", href: "/departments/d-soc/social-reports", tab: "social" });
+    // Without the tab (a synthetic row), the pin still opens the row's first tab.
+    const without: ConcreteRow = { ...reportsRow, tabs: reportsRow.tabs.filter((t) => t.key !== "social") };
+    const fallback = pinnedFor("social", [without])!.find((p) => p.key === "reports");
+    expect(fallback).toMatchObject({ kind: "link", href: without.tabs[0].href, tab: without.tabs[0].key, wholeRow: true });
   });
 
   it("does not fall back for an entry that did not ask to: Calendar is dropped when its tab is not offered", () => {
