@@ -11,6 +11,27 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.205.0` + platform-ui `0.225.0` - SCP-6 dress rehearsal fixes: the sheet import reads a sheet the way people write one (plan §8 SCP-6; FRONTEND-BFF-CONTRACT §63.23.4, §63.23.6) - PROTOTYPED
+
+- **Why.** The owner asked for a rehearsal on the mock seed before the team sends its real sheet. A mock team sheet shaped like an agency's was previewed live on 464, with nothing written. It had title rows above the header, Indonesian headers, a tab per officer, spacer rows, columns the ERP does not use and a hidden tab. The preview found:
+  - 6 of 22 plan rows refused for formats written with a network or a filler ("IG Story", "Carousel Post", "Single Post", "Feed Post", "Video Reels");
+  - "Tim Creative" and the allocation's "Single Post, …, IG Story" refused;
+  - title rows above the column names breaking the page's guesses, and its real header sent as a refused data row;
+  - three allocation headers not guessed ("Jumlah Konten/Bulan", "Desain", "Laporan").
+- **platform-nest** (`sheet-import.ts`).
+  - An item that is not a known name as a whole is read word by word:
+    - the format reader ignores network words and the fillers post, posting, konten, content and upload, so "IG Story" is story and "IG Post" is feed;
+    - the network reader ignores format words, so "IG Story" is instagram.
+  - Every word left must be known, and two formats in one plan cell stay refused.
+  - The creative source and the report format learn their Indonesian forms (Tim Creative, Tim Kreatif, Internal, Tim Sosmed; Rapat, Google Meet).
+  - 107 pure tests.
+- **platform-ui** (`SheetImport.tsx`, `lib/sheetImport.ts`).
+  - "The first row is the header" becomes **"Which row holds the column names?"**, proposed by `detectHeaderRow`: among the first ten rows, the one that maps the most fields, with at least two.
+  - Only the rows from the header on are sent.
+  - Every row number on the page stays the sheet's own.
+  - The allocation guesses "Jumlah Konten", "Desain" and "Laporan".
+  - `sheetImport.ts` is stored with LF line endings, like the rest of the tree.
+
 ### platform-ui `0.224.0` - SCP-5a and SCP-5d: Social reports (the monthly report's list and page) and the Team dashboard - PROTOTYPED
 
 - **Social reports (SCP-5a, BFF §63.17, §63.18).** `{D}/social-reports` (each client's monthly reports by month and state; "Draft this month's report", always with an explicit period) and `{D}/social-reports/[reportId]`: the frozen numbers, an insight and a suggestion per area (followers, engagement, audience), an action plan of up to 10 rows, the narrative, "Draft with AI" (a proposal in the form, saved only on Save; says when it fell back to the template), and the four states Draft, HoD check, Ready, Sent. Submit is the officer's; send back, approve and send follow the row's `canApprove` / `canDeliver` (no new UI capability; SCP-Q20). The Reports row gains the `social` tab "Social reports", which the Social skin's Reports pin names; `{D}/reports` stays SEO's.
