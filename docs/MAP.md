@@ -170,11 +170,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610291510_iam_dept_assistant_preamble_permissions.sql`
+- Head: `202610291600_social_reports_monthly.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 349 (121 legacy `NNNN_`, 228 timestamped)
+- Applied files on disk: 350 (121 legacy `NNNN_`, 229 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -311,6 +311,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/metrics.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/pipeline.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/sheet-import.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/team.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/simulated-accounts.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social-reports.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social.controller.ts` |
@@ -444,6 +445,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/composer`
 - `/departments/[deptId]/composer/[postId]`
 - `/departments/[deptId]/connections`
+- `/departments/[deptId]/dashboard`
 - `/departments/[deptId]/decisions`
 - `/departments/[deptId]/deliverables`
 - `/departments/[deptId]/depts`
@@ -485,6 +487,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/sites/[slug]`
 - `/departments/[deptId]/sites/portfolio`
 - `/departments/[deptId]/sites/portfolio/[siteId]`
+- `/departments/[deptId]/social-reports`
+- `/departments/[deptId]/social-reports/[reportId]`
 - `/departments/[deptId]/studio`
 - `/departments/[deptId]/timeline`
 - `/departments/[deptId]/tools`
