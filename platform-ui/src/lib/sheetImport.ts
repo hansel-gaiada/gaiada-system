@@ -384,7 +384,7 @@ export function importRefusalText(code: string, field?: string): string {
   switch (code) {
     case "not_a_social_approver": return IMPORT_REFUSAL_REASON;
     case "sheet_too_large": {
-      const what = field === "tabs" ? "more than 20 tabs" : field === "rows" ? "more than 2,000 rows in a tab" : field === "columns" ? "more than 60 columns" : field === "cell" ? "a cell of more than 5,000 characters" : "too much";
+      const what = field === "tabs" ? "more than 20 tabs" : field === "rows" ? "more than 2,000 rows in a tab" : field === "columns" ? "more than 60 columns" : field === "cell" ? "a cell of more than 5,000 characters" : field === "file" ? "more than 32 MB of data once unpacked" : "too much";
       return `The sheet has ${what}. Cut it down and try again.`;
     }
     case "unreadable_sheet": return "The file could not be opened as a spreadsheet. Save it as .xlsx or .csv and try again.";

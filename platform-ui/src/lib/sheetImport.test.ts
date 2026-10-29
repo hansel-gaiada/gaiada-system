@@ -223,6 +223,7 @@ describe("the words", () => {
     expect(importRefusalText("not_a_social_approver")).toMatch(/Social Media head, the GM, the owner and the superadmin/);
     expect(importRefusalText("sheet_too_large", "rows")).toMatch(/2,000 rows/);
     expect(importRefusalText("sheet_too_large", "tabs")).toMatch(/20 tabs/);
+    expect(importRefusalText("sheet_too_large", "file")).toMatch(/32 MB/);
     expect(importRefusalText("unreadable_sheet")).toMatch(/\.xlsx or \.csv/);
     expect(importRefusalText("invalid_field", "contentBase64")).toMatch(/2 MB/);
     expect(importRefusalText("invalid_field", "filename")).toMatch(/\.xlsx or \.csv/);
