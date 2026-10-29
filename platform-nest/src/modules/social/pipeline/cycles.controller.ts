@@ -25,7 +25,7 @@ import {
   BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, Put, Query, Req, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import { newId, withTenants } from "../../../db";
+import { withTenants } from "../../../db";
 import { config } from "../../../config";
 import { authorize } from "../../../core/http";
 import { check } from "../../../rbac/cerbos";
@@ -37,10 +37,10 @@ import { loadSocialApproverIds, socialEngagementResource } from "../pipeline-aut
 import {
   HEALTH_LOOKBACK_DAYS, READY_BY_LOOKBACK_DAYS, composeCycleHealth, composeCycleTable, loadCalendarInfo,
   openCycleDeadlineRange, readApprovalSamples, readCycle, readCyclePosts, readCycleTableData, readEngagements, readSettings,
-  recomputeOpenReadyBy, tableAnchors, todayIsoInTz,
+  recomputeOpenReadyBy, tableAnchors, todayIsoInTz, writeCycleInTx,
   type CalendarInfo, type CycleTable, type SocialSettings,
 } from "./cycles-data";
-import { syncContentMonthTask, type ContentMonthTaskResult } from "./content-month";
+import type { ContentMonthTaskResult } from "./content-month";
 import { isMonthKey, lastDayOfMonth, readyByFor, looksLikeIsoDate } from "./schedule-health";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -230,15 +230,8 @@ export class SocialCyclesController {
         for (const r of rows) if (!found.has(r.engagementId)) throw new NotFoundException({ message: "engagement_not_found", failedId: r.engagementId });
         for (const r of rows) {
           const readyBy = readyByFor(r.deadline, buffer, info.calendar);
-          const { rows: out } = await c.query<{ id: string }>(
-            `INSERT INTO social_cycles (id, tenant_id, engagement_id, month, deadline, ready_by, created_by, updated_by, origin_site)
-             VALUES ($1, $2, $3, $4::date, $5::date, $6::date, $7, $7, $8)
-             ON CONFLICT (tenant_id, engagement_id, month) WHERE deleted_at IS NULL
-             DO UPDATE SET deadline = EXCLUDED.deadline, ready_by = EXCLUDED.ready_by, updated_by = EXCLUDED.updated_by, updated_at = now()
-             RETURNING id`,
-            [newId(), tenantId, r.engagementId, `${month}-01`, r.deadline, readyBy, actorId, config.originSite],
-          );
-          tasks.set(r.engagementId, await syncContentMonthTask(c, { tenantId, cycleId: out[0].id, engagementId: r.engagementId, month, deadline: r.deadline, readyBy, actorId }));
+          const written = await writeCycleInTx(c, { tenantId, engagementId: r.engagementId, month, deadline: r.deadline, readyBy, actorId });
+          tasks.set(r.engagementId, written.task);
         }
       },
       { modules: ["social"] },

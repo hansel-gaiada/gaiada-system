@@ -58,7 +58,7 @@ export interface AllocationRow {
 }
 
 /** The validated PATCH: the columns to write, in `social_engagements` terms. */
-interface AllocationPatch {
+export interface AllocationPatch {
   ownerId?: string | null;
   postsPerCycle?: number | null;
   creativeSource?: (typeof CREATIVE_SOURCES)[number];
@@ -153,7 +153,7 @@ interface AllocationDbRow {
  * The allocation rows of the company's engagements, in the caller's transaction. `engagementId` narrows to one (closed ones answer too);
  * without it, closed engagements are left out. `officerId` keeps one officer's clients.
  */
-async function readAllocation(
+export async function readAllocation(
   c: PoolClient, tenantId: string, today: string, canPlan: boolean, opts: { engagementId?: string; officerId?: string } = {},
 ): Promise<AllocationRow[]> {
   await declareSocialModuleScope(c);
@@ -203,7 +203,7 @@ async function readAllocation(
 }
 
 /** An active employee member of the company (see the header). */
-async function isActiveEmployeeMember(c: PoolClient, tenantId: string, userId: string): Promise<boolean> {
+export async function isActiveEmployeeMember(c: PoolClient, tenantId: string, userId: string): Promise<boolean> {
   const { rows } = await c.query(
     `SELECT 1
        FROM company_memberships m JOIN users u ON u.id = m.user_id
@@ -212,6 +212,42 @@ async function isActiveEmployeeMember(c: PoolClient, tenantId: string, userId: s
     [tenantId, userId],
   );
   return rows.length > 0;
+}
+
+/**
+ * The PATCH's write for one engagement, in the caller's transaction (`withTenants(..., { modules: ["social"] })`): the engagement locked
+ * `FOR UPDATE` (404 `engagement_not_found`), an officer checked (409 `officer_not_member`), the UPDATE of the patch's columns, and the
+ * `social.engagement.allocation_changed` event naming `fields` (the patch's keys as sent). The PATCH route and the sheet import (BFF §63.23)
+ * both write through it, so the two cannot drift. The caller reads the row back and writes the activity after the commit.
+ */
+export async function applyAllocationPatchInTx(c: PoolClient, tenantId: string, engagementId: string, patch: AllocationPatch, fields: string[]): Promise<void> {
+  await declareSocialModuleScope(c);
+  const locked = await c.query(
+    `SELECT 1 FROM social_engagements WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE`,
+    [tenantId, engagementId],
+  );
+  if (locked.rows.length === 0) throw new NotFoundException({ message: "engagement_not_found" });
+  if (patch.ownerId !== undefined && patch.ownerId !== null && !(await isActiveEmployeeMember(c, tenantId, patch.ownerId))) {
+    throw new ConflictException({ message: "officer_not_member" });
+  }
+  const sets: string[] = [];
+  const params: unknown[] = [tenantId, engagementId];
+  const set = (col: string, val: unknown, cast = ""): void => {
+    params.push(val);
+    sets.push(`${col} = $${params.length}${cast}`);
+  };
+  if (patch.ownerId !== undefined) set("owner_id", patch.ownerId);
+  if (patch.postsPerCycle !== undefined) set("posts_per_cycle", patch.postsPerCycle);
+  if (patch.creativeSource !== undefined) set("creative_source", patch.creativeSource);
+  if (patch.deliveryBatch !== undefined) set("delivery_batch", patch.deliveryBatch);
+  if (patch.reportFormat !== undefined) set("report_format", patch.reportFormat);
+  if (patch.reportDueDay !== undefined) set("report_due_day", patch.reportDueDay);
+  if (patch.platforms !== undefined) set("platforms", patch.platforms, "::text[]");
+  if (patch.formats !== undefined) set("formats", patch.formats, "::text[]");
+  if (patch.defaultPostTime !== undefined) set("default_post_time", patch.defaultPostTime, "::time");
+  if (patch.stepEstimates !== undefined) set("step_estimates", JSON.stringify(patch.stepEstimates), "::jsonb");
+  await c.query(`UPDATE social_engagements SET ${sets.join(", ")}, updated_at = now() WHERE tenant_id = $1 AND id = $2`, params);
+  await emitEvent(c, tenantId, "social_engagement", engagementId, "social.engagement.allocation_changed", { fields });
 }
 
 @Controller("api/:tenantId/modules/social")
@@ -254,34 +290,7 @@ export class SocialAllocationController {
     const row = await withTenants(
       [tenantId],
       async (c) => {
-        await declareSocialModuleScope(c);
-        const locked = await c.query(
-          `SELECT 1 FROM social_engagements WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE`,
-          [tenantId, id],
-        );
-        if (locked.rows.length === 0) throw new NotFoundException({ message: "engagement_not_found" });
-        if (patch.ownerId !== undefined && patch.ownerId !== null && !(await isActiveEmployeeMember(c, tenantId, patch.ownerId))) {
-          throw new ConflictException({ message: "officer_not_member" });
-        }
-        const sets: string[] = [];
-        const params: unknown[] = [tenantId, id];
-        const set = (col: string, val: unknown, cast = ""): void => {
-          params.push(val);
-          sets.push(`${col} = $${params.length}${cast}`);
-        };
-        if (patch.ownerId !== undefined) set("owner_id", patch.ownerId);
-        if (patch.postsPerCycle !== undefined) set("posts_per_cycle", patch.postsPerCycle);
-        if (patch.creativeSource !== undefined) set("creative_source", patch.creativeSource);
-        if (patch.deliveryBatch !== undefined) set("delivery_batch", patch.deliveryBatch);
-        if (patch.reportFormat !== undefined) set("report_format", patch.reportFormat);
-        if (patch.reportDueDay !== undefined) set("report_due_day", patch.reportDueDay);
-        if (patch.platforms !== undefined) set("platforms", patch.platforms, "::text[]");
-        if (patch.formats !== undefined) set("formats", patch.formats, "::text[]");
-        if (patch.defaultPostTime !== undefined) set("default_post_time", patch.defaultPostTime, "::time");
-        if (patch.stepEstimates !== undefined) set("step_estimates", JSON.stringify(patch.stepEstimates), "::jsonb");
-        await c.query(`UPDATE social_engagements SET ${sets.join(", ")}, updated_at = now() WHERE tenant_id = $1 AND id = $2`, params);
-        const fields = Object.keys(body as Record<string, unknown>);
-        await emitEvent(c, tenantId, "social_engagement", id, "social.engagement.allocation_changed", { fields });
+        await applyAllocationPatchInTx(c, tenantId, id, patch, Object.keys(body as Record<string, unknown>));
         const [out] = await readAllocation(c, tenantId, today, true, { engagementId: id });
         return out;
       },

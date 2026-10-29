@@ -551,7 +551,7 @@ export function cerbosActionsToAsk(action: string, post: PipelinePostState | nul
 // The body: one validator per fixture param
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-type ParamProblem = { code: "missing_field" | "invalid_field"; field: string };
+export type ParamProblem = { code: "missing_field" | "invalid_field"; field: string };
 type ParamCheck = (name: string, value: unknown, all: Record<string, unknown>, env: { principal: StagePrincipal; post: PipelinePostState | null }) => ParamProblem | null;
 
 const missing = (field: string): ParamProblem => ({ code: "missing_field", field });
@@ -776,6 +776,14 @@ function fieldValueProblem(field: string, v: unknown, reportAs: string): ParamPr
   const rule = FIELD_VALUE_RULES[field];
   if (!rule) return invalid(reportAs);
   return rule(v) ? null : invalid(reportAs);
+}
+
+/**
+ * The machine's own value rule for one content field (`FIELD_VALUE_RULES`, BFF §63.1), as a problem naming `field`, or null when the value
+ * passes. The sheet import (BFF §63.23) validates every post field through this and restates no length or list of values of its own.
+ */
+export function contentFieldProblem(field: string, value: unknown): ParamProblem | null {
+  return fieldValueProblem(field, value, field);
 }
 
 /** A content field's column name (camelCase → snake_case: keyMessage → key_message). */

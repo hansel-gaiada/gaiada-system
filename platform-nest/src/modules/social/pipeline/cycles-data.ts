@@ -8,12 +8,12 @@
 // ready-by) to a little past the latest day. A holiday outside the window would silently read as a working day, so the window is a
 // generous constant, and a ready-by recompute skips (and reports) any cycle whose deadline lies outside the window it was given.
 import type { PoolClient } from "pg";
-import { withTenants } from "../../../db";
+import { newId, withTenants } from "../../../db";
 import { config } from "../../../config";
 import { loadWorkingCalendar, HOLIDAY_LOOKAHEAD_DAYS } from "../../reports/dept-kpi-readers/functional/working-calendar";
 import { addDays, type WorkingCalendar } from "../../hr/working-days";
 import { declareSocialModuleScope } from "../module-scope";
-import { pushReadyByToContentMonthTask } from "./content-month";
+import { pushReadyByToContentMonthTask, syncContentMonthTask, type ContentMonthTaskResult } from "./content-month";
 import {
   APPROVAL_WINDOW_DAYS, averageApprovalDays, clientHealth, isClientSlower, lastDayOfMonth, looksLikeIsoDate, parseStepEstimates,
   postHealth, postHolder, postPhase, prefillDeadline, readyByFor, tallyCounts,
@@ -150,6 +150,30 @@ export async function recomputeOpenReadyBy(
     updated += 1;
   }
   return { checked: rows.length, updated, skipped };
+}
+
+/**
+ * One `(engagement, month)` deadline written, in the caller's transaction: the upsert of the cycle row with its `ready_by`, then the content-month
+ * PM task (`syncContentMonthTask`, BFF §63.13). `PUT cycles` (BFF §63.5) writes each of its rows through this, and so does the sheet import
+ * (BFF §63.23) for a month that has no cycle yet. `readyBy` is the caller's (`readyByFor`: the deadline, the buffer and the calendar).
+ */
+export async function writeCycleInTx(
+  c: PoolClient,
+  a: { tenantId: string; engagementId: string; month: string; deadline: string; readyBy: string; actorId: string | null },
+): Promise<{ cycleId: string; task: ContentMonthTaskResult }> {
+  const { rows: out } = await c.query<{ id: string }>(
+    `INSERT INTO social_cycles (id, tenant_id, engagement_id, month, deadline, ready_by, created_by, updated_by, origin_site)
+     VALUES ($1, $2, $3, $4::date, $5::date, $6::date, $7, $7, $8)
+     ON CONFLICT (tenant_id, engagement_id, month) WHERE deleted_at IS NULL
+     DO UPDATE SET deadline = EXCLUDED.deadline, ready_by = EXCLUDED.ready_by, updated_by = EXCLUDED.updated_by, updated_at = now()
+     RETURNING id`,
+    [newId(), a.tenantId, a.engagementId, `${a.month}-01`, a.deadline, a.readyBy, a.actorId, config.originSite],
+  );
+  const cycleId = out[0].id;
+  const task = await syncContentMonthTask(c, {
+    tenantId: a.tenantId, cycleId, engagementId: a.engagementId, month: a.month, deadline: a.deadline, readyBy: a.readyBy, actorId: a.actorId,
+  });
+  return { cycleId, task };
 }
 
 // The content-month PM task of a cycle (BFF §63.13) is SCP-1n's: `content-month.ts` (the task, made by `PUT cycles`) and

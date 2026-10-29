@@ -30,7 +30,7 @@ import { loadSocialApproverIds, loadSocialPostAuthz, socialPostResource, type So
 import { scpAction } from "./fixture";
 import {
   cerbosActionsToAsk, cerbosChecksFor, changeCaseOf, decide, holderOf, primaryCerbosAction,
-  type CerbosDecisions, type PipelinePostState, type StageApplied, type StageRefusal,
+  type CerbosDecisions, type PipelinePostState, type StageApplied, type StageContext, type StageRefusal,
 } from "./machine";
 import {
   findDepartmentBySlug, holderUserIds, loadCycle, loadEngagement, loadFacts, loadPostRow, roleHolders, stateOf,
@@ -113,7 +113,7 @@ async function assertSessionCurrent(principal: Principal): Promise<void> {
   }
 }
 
-const isAutomationPrincipal = (p: Principal) => p.kind === "automation" || p.kind === "bot";
+export const isAutomationPrincipal = (p: Principal) => p.kind === "automation" || p.kind === "bot";
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // One stage action on one post
@@ -316,6 +316,35 @@ function statusChanged(state: PipelinePostState): StageRefusal {
 // Create (BFF §63.6.1)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
+/** What `decide()` takes for a create besides the post and the facts: the action, the body, the Cerbos answers and who is asking. */
+export type CreateBase = Pick<StageContext, "action" | "params" | "cerbos" | "principal">;
+
+/**
+ * Step 4 of the create (BFF §63.6.1), on the caller's client: the cycle locked, the engagement read, `decide()` in full, the machine's `set` as the
+ * INSERT, and the content-month task's progress. A refusal is RETURNED with nothing written. The Cerbos answers come in `base`, asked BEFORE the
+ * transaction (`cerbosDecisionsFor` on the would-be resource), so a caller that holds a transaction for many posts (the sheet import, BFF §63.23) asks
+ * once per officer, not once per post.
+ *
+ * `extra` is the sheet import's one addition: more `social_posts` columns (the planning and copy fields, by `columnOf`) merged into the machine's
+ * `set` before the INSERT, so a post arrives with its starting text in the same statement. `syncProgress: false` leaves the content-month progress
+ * to the caller (the import syncs each touched cycle once, after its posts). `createPipelinePost` passes neither, and is what it was.
+ */
+export async function createPostInTx(
+  c: PoolClient,
+  a: { tenantId: string; cycleId: string; callerId: string; base: CreateBase; extra?: Record<string, unknown>; syncProgress?: boolean },
+): Promise<{ refusal: StageRefusal } | { applied: StageApplied; id: string; created: boolean; engagement: EngagementRow; cycle: CycleRow }> {
+  const { tenantId, cycleId, callerId, base } = a;
+  const cycle = await loadCycle(c, tenantId, cycleId, true);
+  const engagement = cycle ? await loadEngagement(c, tenantId, cycle.engagement_id) : null;
+  const facts = { now: new Date(), cycleExists: cycle !== null && engagement !== null, cycleId: cycle?.id, engagementId: engagement?.id };
+  const r = decide({ ...base, post: null, facts, mode: "apply" });
+  if (!r.ok) return { refusal: r };
+  const ins = await insertPostRow(c, tenantId, engagement!.id, callerId, a.extra ? { ...r.set, ...a.extra } : r.set);
+  // A new counted post that is not approved yet reopens a done content-month task (SCP-1n, BFF §63.13).
+  if (ins.created && a.syncProgress !== false) await syncContentMonthProgress(c, tenantId, cycle!.id, callerId);
+  return { applied: r, ...ins, engagement: engagement!, cycle: cycle! };
+}
+
 export async function createPipelinePost(principal: Principal, tenantId: string, cycleId: string, params: Record<string, unknown>): Promise<{ postId: string; created: boolean }> {
   const callerId = principal.userId ?? null;
   const pre = await withTenants([tenantId], async (c) => {
@@ -342,17 +371,7 @@ export async function createPipelinePost(principal: Principal, tenantId: string,
   if (!callerId) throw new ForbiddenException("not authorized: an authenticated user is required");
   if (pre.existing && !existing) throw new ScpRouteError(400, "invalid_field", { field: "id" }); // an id taken elsewhere
 
-  const out = await withTenants([tenantId], async (c) => {
-    const cycle = await loadCycle(c, tenantId, cycleId, true);
-    const engagement = cycle ? await loadEngagement(c, tenantId, cycle.engagement_id) : null;
-    const facts = { now: new Date(), cycleExists: cycle !== null && engagement !== null, cycleId: cycle?.id, engagementId: engagement?.id };
-    const r = decide({ ...base, post: null, facts, mode: "apply" });
-    if (!r.ok) return { refusal: r };
-    const ins = await insertPostRow(c, tenantId, engagement!.id, callerId, r.set);
-    // A new counted post that is not approved yet reopens a done content-month task (SCP-1n, BFF §63.13).
-    if (ins.created) await syncContentMonthProgress(c, tenantId, cycle!.id, callerId);
-    return { applied: r, ...ins, engagement: engagement!, cycle: cycle! };
-  }, SOCIAL);
+  const out = await withTenants([tenantId], (c) => createPostInTx(c, { tenantId, cycleId, callerId, base }), SOCIAL);
   if ("refusal" in out && out.refusal) return authorizeStage(principal, resource, "create", out.refusal);
   const ok = out as { applied: StageApplied; id: string; created: boolean; engagement: EngagementRow; cycle: CycleRow };
   if (ok.created) {

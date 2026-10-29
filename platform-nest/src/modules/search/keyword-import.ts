@@ -11,97 +11,20 @@
 // (keyword.lowercase(), locale) pairs are deduped, keeping first occurrence — so import is
 // idempotent-ish against a pasted list that repeats a keyword under different casing.
 //
-// SM-32 gate defect fix: row/column splitting is now quote-aware end to end (parseCsvRows below),
+// SM-32 gate defect fix: row/column splitting is now quote-aware end to end (parseCsvRows, now in core/csv.ts),
 // replacing the previous `raw.split(/\r?\n/)` then `line.split(",")` pipeline, which ran BEFORE any
 // quote-awareness existed and so corrupted any RFC4180-quoted field containing a comma or an
 // embedded newline (see the fixed keyword-import.test.ts cases for exact before/after behaviour).
+import { parseCsvRows, UnterminatedQuoteError } from "../../core/csv";
+
 export interface ParsedKeywordRow {
   keyword: string;
   locale: string;
 }
 
-/** Thrown by parseCsvRows when the input ends while still inside an open quoted field — reject with
- *  a clear error rather than silently mangling or hanging (SM-32 AC). The controller converts this
- *  into a 400. */
-export class UnterminatedQuoteError extends Error {
-  constructor() {
-    super("unterminated quoted field in keyword import CSV (a \" was opened but never closed)");
-    this.name = "UnterminatedQuoteError";
-  }
-}
-
-/** Minimal RFC4180-style quote-aware CSV tokenizer, operating on the WHOLE input (not pre-split by
- *  line) so a quoted field may itself contain a comma or a literal newline without being corrupted:
- *   - a field is "quoted" only when its FIRST character is `"` (mirrors the old stripQuotes()
- *     semantics of "strip a quote pair that wraps the whole value", just applied correctly — a
- *     stray `"` elsewhere in an unquoted field is kept as a literal character, not a mode switch);
- *   - inside a quoted field, `,` and `\n`/`\r\n` are literal content, not separators;
- *   - `""` inside a quoted field is an escaped literal `"`;
- *   - `\r\n` and bare `\n` both end a row (outside quotes);
- *   - an input that ends still inside an open quote throws UnterminatedQuoteError.
- */
-function parseCsvRows(raw: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-  let i = 0;
-  const n = raw.length;
-
-  const endField = () => {
-    row.push(field);
-    field = "";
-  };
-  const endRow = () => {
-    endField();
-    rows.push(row);
-    row = [];
-  };
-
-  while (i < n) {
-    const ch = raw[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (raw[i + 1] === '"') {
-          field += '"';
-          i += 2;
-          continue;
-        }
-        inQuotes = false;
-        i++;
-        continue;
-      }
-      field += ch;
-      i++;
-      continue;
-    }
-    if (ch === '"' && field === "") {
-      inQuotes = true;
-      i++;
-      continue;
-    }
-    if (ch === ",") {
-      endField();
-      i++;
-      continue;
-    }
-    if (ch === "\r" && raw[i + 1] === "\n") {
-      endRow();
-      i += 2;
-      continue;
-    }
-    if (ch === "\n") {
-      endRow();
-      i++;
-      continue;
-    }
-    field += ch;
-    i++;
-  }
-  if (inQuotes) throw new UnterminatedQuoteError();
-  if (field.length > 0 || row.length > 0) endRow();
-  return rows;
-}
+// The RFC 4180 tokenizer (`parseCsvRows`) and `UnterminatedQuoteError` now live in `core/csv.ts` (moved verbatim by SCP-6a, which shares them
+// with the Social sheet import). Re-exported here so every existing import of the error from this file keeps working.
+export { UnterminatedQuoteError };
 
 export function parseKeywordImport(raw: string, defaultLocale = "id-ID"): ParsedKeywordRow[] {
   const rawRows = parseCsvRows(raw);

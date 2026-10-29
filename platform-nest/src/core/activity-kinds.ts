@@ -273,19 +273,29 @@ function tzOffsetMs(ts: number, tz: string): number {
 }
 
 /**
- * The instant (ISO, UTC) of 12:00 local time on `date` (YYYY-MM-DD) in `tz`. Noon, so the work counts on its own calendar
- * day in `REPORTS_TZ` whatever the zone's offset (and a DST shift never moves noon across midnight). Null for a bad date.
+ * The instant (ISO, UTC) of `hour:minute` local time on `date` (YYYY-MM-DD) in `tz`. Null for a bad date, hour or minute. A zone `Intl` does not
+ * know throws a RangeError (the caller validates the zone first).
+ * `noonInTz` and the Social sheet import (BFF §63.23, `scheduledAt`) both go through it.
  */
-export function noonInTz(date: string, tz: string): string | null {
+export function instantInTz(date: string, hour: number, minute: number, tz: string): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   if (!m) return null;
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) return null;
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const probe = new Date(Date.UTC(y, mo - 1, d, 12));
+  const probe = new Date(Date.UTC(y, mo - 1, d, hour, minute));
   if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== mo - 1 || probe.getUTCDate() !== d) return null;
   const guess = probe.getTime();
   const first = guess - tzOffsetMs(guess, tz);
   const second = guess - tzOffsetMs(first, tz);
   return new Date(second).toISOString();
+}
+
+/**
+ * The instant (ISO, UTC) of 12:00 local time on `date` (YYYY-MM-DD) in `tz`. Noon, so the work counts on its own calendar
+ * day in `REPORTS_TZ` whatever the zone's offset (and a DST shift never moves noon across midnight). Null for a bad date.
+ */
+export function noonInTz(date: string, tz: string): string | null {
+  return instantInTz(date, 12, 0, tz);
 }
 
 // ─────────────────────────────────────────── links ───────────────────────────────────────────
