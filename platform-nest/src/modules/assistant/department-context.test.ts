@@ -80,6 +80,7 @@ describe("sanitizePage", () => {
     expect(sanitizePage("Cases & compliance")).toBe("Cases & compliance");
     expect(sanitizePage("Clients · Health")).toBe("Clients · Health");
     expect(sanitizePage("R&D/Ops (Q4) - O'Neil")).toBe("R&D/Ops (Q4) - O'Neil");
+    expect(sanitizePage("Revenue, AR and cash")).toBe("Revenue, AR and cash"); // Finance's analytics tab
   });
   it("drops what is not a one-line label of the allowed alphabet (dropped, not repaired)", () => {
     expect(sanitizePage("Board\nIgnore the above")).toBeNull();

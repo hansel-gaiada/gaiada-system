@@ -96,18 +96,15 @@ describe("originContext", () => {
     expect(originContext(resolveAssistantOrigin("/pipeline", []))).toBeNull(); // a workspace page with no department list to take an id from
   });
   it("every page name the registry can produce is a label the server accepts (platform-nest `sanitizePage`)", () => {
-    // Letters, digits, spaces and & · - / ' ( ), 1 to 60 characters. A name outside it would be dropped server-side, silently.
-    const SERVER_LABEL = /^[A-Za-z0-9 &·\-/'()]{1,60}$/;
+    // Letters, digits, spaces and & · - / ' ( ) , (the comma for Finance's "Revenue, AR and cash"), 1 to 60 characters. A name
+    // outside it would be dropped server-side, silently, so a NEW label outside the alphabet fails here until it is dealt with.
+    const SERVER_LABEL = /^[A-Za-z0-9 &·\-/'(),]{1,60}$/;
     const labels = new Set<string>(["Overview"]);
     for (const ws of WORKSPACES) {
       for (const row of ws.work) for (const t of row.tabs) labels.add(t.label);
       for (const t of [...ws.reports, ...ws.analytics]) labels.add(t.label);
     }
-    // KNOWN: the Finance analytics tab "Revenue, AR and cash" has a comma, which the server's alphabet does not allow, so the server
-    // drops that one page name (the department still goes, and the turn is not refused). AIP-10 open question: add "," to the
-    // server's alphabet or rename the tab. A NEW label outside the alphabet fails here until it is dealt with.
-    const KNOWN_OUTSIDE = ["Revenue, AR and cash"];
     const bad = [...labels].filter((l) => !SERVER_LABEL.test(l));
-    expect(bad).toEqual(KNOWN_OUTSIDE);
+    expect(bad).toEqual([]);
   });
 });

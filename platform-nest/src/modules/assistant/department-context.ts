@@ -90,9 +90,10 @@ export function readRawContext(body: unknown): RawTurnContext {
 }
 
 const PAGE_MAX = 60;
-/** Letters, digits, spaces and `& · - / ' ( )`. ASCII on purpose: the registry's page names are, and a label that reaches a
- *  prompt gets the narrowest alphabet that fits. A newline or any other control character is outside it, so it is dropped. */
-const PAGE_RE = /^[A-Za-z0-9 &·\-/'()]+$/;
+/** Letters, digits, spaces and `& · - / ' ( ) ,`. ASCII on purpose: the registry's page names are, and a label that reaches a
+ *  prompt gets the narrowest alphabet that fits. The comma is for Finance's "Revenue, AR and cash". A newline, a colon or any
+ *  other control character is outside it, so it is dropped. */
+const PAGE_RE = /^[A-Za-z0-9 &·\-/'(),]+$/;
 
 /** A page label, or `null`. Trimmed, one line, at most 60 characters, only the alphabet above; anything else is DROPPED, not
  *  repaired (a label that needed repairing was not the registry's). */
