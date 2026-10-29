@@ -205,7 +205,7 @@ describe("report due: every engagement with a due day whose report of the month 
         { engagementId: "e2", clientName: "Beta", reportDueDay: 31, reportId: "r2" },
       ],
       toCheck: [],
-    });
+    }, "2026-10-31");
     expect(items).toEqual([
       { kind: "report_due", engagementId: "e1", clientName: "Alpha", title: "Monthly report 2026-09", since: "2026-10-01" },
       { kind: "report_due", reportId: "r2", engagementId: "e2", clientName: "Beta", title: "Monthly report 2026-09", since: "2026-10-01" },
@@ -213,12 +213,34 @@ describe("report due: every engagement with a due day whose report of the month 
     expect("reportId" in items[0]).toBe(false); // omitted, not null
   });
   it("covers the year turn: January asks for December of the year before", () => {
-    expect(reportAttention("2027-01", { due: [{ engagementId: "e", clientName: "A", reportDueDay: 1, reportId: null }], toCheck: [] })[0])
+    expect(reportAttention("2027-01", { due: [{ engagementId: "e", clientName: "A", reportDueDay: 1, reportId: null }], toCheck: [] }, "2027-01-15")[0])
       .toMatchObject({ title: "Monthly report 2026-12", since: "2027-01-01" });
   });
   it("a report in review is a report to check, with its own since", () => {
-    const [r] = reportAttention("2026-10", { due: [], toCheck: [{ reportId: "r1", engagementId: "e1", clientName: "Alpha", kind: "monthly", period: "2026-09", since: "2026-10-12T08:00:00.000Z" }] });
+    const [r] = reportAttention("2026-10", { due: [], toCheck: [{ reportId: "r1", engagementId: "e1", clientName: "Alpha", kind: "monthly", period: "2026-09", since: "2026-10-12T08:00:00.000Z" }] }, "2026-10-01");
     expect(r).toEqual({ kind: "report_to_check", reportId: "r1", engagementId: "e1", clientName: "Alpha", title: "Monthly report 2026-09", since: "2026-10-12T08:00:00.000Z" });
+  });
+});
+
+describe("report due is only due once the due day of the month has been reached (orchestrator ruling)", () => {
+  const due = (day: number) => ({ due: [{ engagementId: "e", clientName: "A", reportDueDay: day, reportId: null }], toCheck: [] });
+  it("not before the due day, due on it and after", () => {
+    expect(reportAttention("2026-10", due(10), "2026-10-09")).toEqual([]);
+    expect(reportAttention("2026-10", due(10), "2026-10-10")).toHaveLength(1);
+    expect(reportAttention("2026-10", due(10), "2026-10-28")).toHaveLength(1);
+  });
+  it("a day past the month's end means its last day", () => {
+    expect(reportAttention("2026-11", due(31), "2026-11-29")).toEqual([]);
+    expect(reportAttention("2026-11", due(31), "2026-11-30")).toHaveLength(1);
+    expect(reportAttention("2027-02", due(30), "2027-02-27")).toEqual([]);
+    expect(reportAttention("2027-02", due(30), "2027-02-28")).toHaveLength(1);
+  });
+  it("a past month always qualifies, a future month never does", () => {
+    expect(reportAttention("2026-09", due(31), "2026-10-02")).toHaveLength(1);
+    expect(reportAttention("2026-11", due(1), "2026-10-31")).toEqual([]);
+  });
+  it("since stays the first of the month however late it is", () => {
+    expect(reportAttention("2026-10", due(3), "2026-10-28")[0].since).toBe("2026-10-01");
   });
 });
 

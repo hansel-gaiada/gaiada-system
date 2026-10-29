@@ -208,16 +208,17 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
     return id;
   }
 
-  async function seedBoost(tenant: string, e: Eng, postId: string, status: string, simulated = false): Promise<void> {
+  /** `cycleId` is the boost's budget cycle (the month its `starts_on` falls in, §63.11): the month the dashboard lists it under; null = no cycle, no month. */
+  async function seedBoost(tenant: string, e: Eng, postId: string, status: string, simulated = false, cycleId: string | null = null): Promise<void> {
     const approved = ["approved", "running", "stopped", "completed"].includes(status);
     const started = ["running", "stopped", "completed"].includes(status);
     await withTenants([tenant], (c) => c.query(
       `INSERT INTO social_boosts (tenant_id, post_id, client_id, status, goal, audience, daily_budget_minor, days, currency, starts_on, requested_by, simulated,
-                                  approved_via, approved_by, approved_at, approval_channel, approval_note, started_at)
+                                  approved_via, approved_by, approved_at, approval_channel, approval_note, started_at, cycle_id)
        VALUES ($1, $2, $3, $4, 'profile_visits', 'automatic', 50000, 5, 'IDR', $5::date, $6, $7,
                CASE WHEN $8::boolean THEN 'recorded' END, CASE WHEN $8::boolean THEN $6::uuid END, CASE WHEN $8::boolean THEN now() END,
-               CASE WHEN $8::boolean THEN 'email' END, CASE WHEN $8::boolean THEN 'Mock recorded approval' END, CASE WHEN $9::boolean THEN now() END)`,
-      [tenant, postId, e.clientId, status, shift(today, 3), U.officer, simulated, approved, started],
+               CASE WHEN $8::boolean THEN 'email' END, CASE WHEN $8::boolean THEN 'Mock recorded approval' END, CASE WHEN $9::boolean THEN now() END, $10::uuid)`,
+      [tenant, postId, e.clientId, status, shift(today, 3), U.officer, simulated, approved, started, cycleId],
     ));
   }
 
@@ -334,14 +335,14 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
     });
     // A pipeline post needs a cycle (social_posts_pipeline_needs_cycle_ck): the step client's is LAST month's, so this month's table shows it with no cycle.
     E.step = await makeEngagement(A, "Mock Step Client", U.officerTwo, { cycle: { month: `${PREV}-01`, deadline: lastDay(PREV), readyBy: lastDay(PREV) } });
-    E.rDue = await makeEngagement(A, "Mock Report Due Client", null, { reportDueDay: 3 });
-    E.rDraft = await makeEngagement(A, "Mock Report Draft Client", null, { reportDueDay: 3 });
-    E.rDone = await makeEngagement(A, "Mock Report Delivered Client", null, { reportDueDay: 3 });
+    E.rDue = await makeEngagement(A, "Mock Report Due Client", null, { reportDueDay: 1 });
+    E.rDraft = await makeEngagement(A, "Mock Report Draft Client", null, { reportDueDay: 1 });
+    E.rDone = await makeEngagement(A, "Mock Report Delivered Client", null, { reportDueDay: 1 });
     E.rNoDay = await makeEngagement(A, "Mock Report NoDay Client", null);
-    E.rInternal = await makeEngagement(A, "Mock Report Internal Client", null, { reportDueDay: 3, internal: true });
-    E.rClosed = await makeEngagement(A, "Mock Report Closed Client", null, { reportDueDay: 3, status: "closed" });
+    E.rInternal = await makeEngagement(A, "Mock Report Internal Client", null, { reportDueDay: 1, internal: true });
+    E.rClosed = await makeEngagement(A, "Mock Report Closed Client", null, { reportDueDay: 1, status: "closed" });
     E.rReview = await makeEngagement(A, "Mock Report Review Client", null);
-    E.other = await makeEngagement(B, "Mock Other Client", null, { cycle: { month: monthStart(today), deadline: shift(today, -9), readyBy: shift(today, -10) }, reportDueDay: 3 });
+    E.other = await makeEngagement(B, "Mock Other Client", null, { cycle: { month: monthStart(today), deadline: shift(today, -9), readyBy: shift(today, -10) }, reportDueDay: 1 });
 
     // ── the late client ──
     P.l1 = await seed(A, E.late, "Mock l1 drafting", "drafting");
@@ -367,10 +368,10 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
     P.lb2 = await seed(A, E.late, "Mock boost approved", "live");
     P.lb3 = await seed(A, E.late, "Mock boost running", "live");
     P.lb4 = await seed(A, E.late, "Mock boost on a deleted post", "live", { deleted: true });
-    await seedBoost(A, E.late, P.lb1, "requested");
-    await seedBoost(A, E.late, P.lb2, "approved");
-    await seedBoost(A, E.late, P.lb3, "running");
-    await seedBoost(A, E.late, P.lb4, "requested");
+    await seedBoost(A, E.late, P.lb1, "requested", false, E.late.cycleId);
+    await seedBoost(A, E.late, P.lb2, "approved", false, E.late.cycleId);
+    await seedBoost(A, E.late, P.lb3, "running", false, E.late.cycleId);
+    await seedBoost(A, E.late, P.lb4, "requested", false, E.late.cycleId);
     // ── the calm client, the risk client ──
     P.cp = await seed(A, E.calm, "Mock calm proofread", "proofread");
     P.cc = await seed(A, E.calm, "Mock calm client", "client");
@@ -379,12 +380,17 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
     P.s1 = await seed(A, E.calm, "Mock simulated proofread", "proofread", { simulated: true });
     P.s2 = await seed(A, E.calm, "Mock simulated failure", "scheduled", { engine: "failed", scheduleVia: "publisher", variant: { status: "failed", simulated: true } });
     P.s3 = await seed(A, E.calm, "Mock simulated boosted", "live", { simulated: true });
-    await seedBoost(A, E.calm, P.s3, "requested", true);
+    await seedBoost(A, E.calm, P.s3, "requested", true, E.calm.cycleId);        // NEXT month's cycle: simulated
+    // a boost in NEXT month's cycle (listed under NEXT, not under this month) and one with no cycle at all (listed under no month)
+    P.lb5 = await seed(A, E.calm, "Mock boost next month", "live");
+    P.lb6 = await seed(A, E.calm, "Mock boost no cycle", "live");
+    await seedBoost(A, E.calm, P.lb5, "requested", false, E.calm.cycleId);
+    await seedBoost(A, E.calm, P.lb6, "requested");
     // ── another company's rows: never counted here ──
     const ob = await seed(B, E.other, "Mock other late", "proofread");
     await seed(B, E.other, "Mock other failed", null, { composer: true, engine: "failed" });
     const obl = await seed(B, E.other, "Mock other boost post", "live");
-    await seedBoost(B, E.other, obl, "requested");
+    await seedBoost(B, E.other, obl, "requested", false, E.other.cycleId);
     await seedReport(B, E.other, { period: PREV, status: "in_review" });
     expect(ob).toBeTruthy();
 
@@ -497,17 +503,37 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
     expect(a.needsAttention.find((i) => i.kind === "blocked")!.holder).toEqual({ role: "external", label: "Someone outside the team" });
   });
 
-  it("report due follows the requested month: next month asks for THIS month's report, which none of the engagements has", async () => {
-    const a = await read("platformAdmin", `?month=${NEXT}`);
-    const due = a.needsAttention.filter((i) => i.kind === "report_due");
-    expect(due.map((d) => d.engagementId).sort()).toEqual([E.rDue.id, E.rDraft.id, E.rDone.id].sort()); // delivered for PREV, nothing for M
+  it("report due: period M-1's report only, and only once the due day of M has been reached (a past month always, a future month never)", async () => {
+    // a past month: every engagement with a due day, for the report of the month before THAT, none of which exists
+    const past = await read("platformAdmin", `?month=${PREV}`);
+    const before = monthOf(shift(`${PREV}-01`, -1));
+    const due = past.needsAttention.filter((i) => i.kind === "report_due");
+    expect(due.map((d) => d.engagementId).sort()).toEqual([E.rDue.id, E.rDraft.id, E.rDone.id].sort()); // a draft for PREV is no report of `before`
     for (const d of due) {
-      expect(d).toMatchObject({ since: `${NEXT}-01`, title: `Monthly report ${M}` });
+      expect(d).toMatchObject({ since: `${PREV}-01`, title: `Monthly report ${before}` });
       expect("reportId" in d).toBe(false);
     }
     // an internal client, a closed engagement and an engagement with no due day are never due
     const names = new Set(due.map((d) => d.clientName));
     for (const n of ["Mock Report Internal Client", "Mock Report Closed Client", "Mock Report NoDay Client"]) expect(names.has(n)).toBe(false);
+    // a future month: nothing is due yet
+    const future = await read("platformAdmin", `?month=${NEXT}`);
+    expect(count(future, "report_due")).toBe(0);
+    // an older overdue report does not carry into later months: this month's list has only PREV's report (rDraft's draft)
+    const now = await read("platformAdmin");
+    expect(now.needsAttention.filter((i) => i.kind === "report_due").every((i) => i.title === `Monthly report ${PREV}`)).toBe(true);
+  });
+
+  it("boosts waiting for a month are the boosts of that month's cycles; the Pulse counts the whole company", async () => {
+    config.socialSimulationEnabled = false;
+    const thisMonth = await read("platformAdmin");
+    const nextMonth = await read("platformAdmin", `?month=${NEXT}`);
+    expect(thisMonth.needsAttention.filter((i) => i.kind === "boost_waiting").map((i) => i.postId).sort()).toEqual([P.lb1, P.lb2].sort());
+    expect(nextMonth.needsAttention.filter((i) => i.kind === "boost_waiting").map((i) => i.postId)).toEqual([P.lb5]);
+    config.socialSimulationEnabled = true;
+    const nextOn = await read("platformAdmin", `?month=${NEXT}`);
+    expect(nextOn.needsAttention.filter((i) => i.kind === "boost_waiting").map((i) => i.postId).sort()).toEqual([P.lb5, P.s3].sort());
+    config.socialSimulationEnabled = false;
   });
 
   it("the Pulse and the dashboard never disagree: late, failed posts and boosts waiting, with the simulator switch off and on", async () => {
@@ -515,17 +541,19 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
       config.socialSimulationEnabled = on;
       const o = await overview();
       const a = await read("platformAdmin");
+      const next = await read("platformAdmin", `?month=${NEXT}`);
       expect(o.simulatedIncluded).toBe(on);
       expect(count(a, "late"), `late (switch ${on})`).toBe(o.tiles.late);
       expect(count(a, "failed_post"), `failed (switch ${on})`).toBe(o.tiles.failedPosts);
-      expect(count(a, "boost_waiting"), `boosts (switch ${on})`).toBe(o.tiles.boostsWaiting);
+      // the Pulse counts every waiting boost of the company: the months' lists plus the one with no cycle (listed under no month)
+      expect(count(a, "boost_waiting") + count(next, "boost_waiting") + 1, `boosts (switch ${on})`).toBe(o.tiles.boostsWaiting);
     }
     config.socialSimulationEnabled = false;
     const off = await read("platformAdmin");
     expect([count(off, "late"), count(off, "failed_post"), count(off, "boost_waiting")]).toEqual([8, 3, 2]);
     config.socialSimulationEnabled = true;
     const on = await read("platformAdmin");
-    expect([count(on, "late"), count(on, "failed_post"), count(on, "boost_waiting")]).toEqual([8, 4, 3]); // the variant-simulated failure, the simulated boost
+    expect([count(on, "late"), count(on, "failed_post"), count(on, "boost_waiting")]).toEqual([8, 4, 2]); // the variant-simulated failure; the simulated boost is NEXT month's
     config.socialSimulationEnabled = false;
   });
 

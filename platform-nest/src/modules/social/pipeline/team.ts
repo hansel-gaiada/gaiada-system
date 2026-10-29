@@ -118,12 +118,23 @@ export const boostAttention = (rows: readonly BoostWaitingRow[]): AttentionItem[
 const KIND_LABEL: Record<string, string> = { monthly: "Monthly", campaign: "Campaign", adhoc: "Ad hoc" };
 
 /**
- * The reports' two kinds. Report due: `due` is every engagement with a due day whose monthly report of the month BEFORE `month` is not delivered
- * (the facts already say so, with or without a row); `since` is the first of `month`. Report to check: the reports in review.
+ * The reports' two kinds. Report due, as ruled by the orchestrator for `GET team?month=M` (the contract left it open; the UI and demo follow it):
+ *   - only period M-1's monthly report is looked at (the facts hold exactly that): an older overdue report does not carry into later months;
+ *   - it is due only once the engagement's `report_due_day` in M has been reached: the day is clamped to M's last day (§63.1: a day past the month's
+ *     end means its last day), and `today` (the company's report day) must be on or after it. A past M always qualifies, a future M never does;
+ *   - `since` is the first of M, and `reportId` is omitted when no row exists.
+ * Report to check: the reports in review.
  */
-export function reportAttention(month: string, facts: { due: readonly ReportDueRow[]; toCheck: readonly ReportToCheckRow[] }): AttentionItem[] {
+export function reportAttention(
+  month: string, facts: { due: readonly ReportDueRow[]; toCheck: readonly ReportToCheckRow[] }, today: string,
+): AttentionItem[] {
   const period = previousMonth(month);
-  const out: AttentionItem[] = facts.due.map((r) => ({
+  const last = lastDayOfMonth(month);
+  const reached = (day: number): boolean => {
+    const dueOn = `${month}-${String(Math.min(day, Number(last.slice(8, 10)))).padStart(2, "0")}`;
+    return today >= dueOn;
+  };
+  const out: AttentionItem[] = facts.due.filter((r) => reached(r.reportDueDay)).map((r) => ({
     kind: "report_due" as const, ...(r.reportId ? { reportId: r.reportId } : {}), engagementId: r.engagementId, clientName: r.clientName,
     title: `Monthly report ${period}`, since: `${month}-01`,
   }));
