@@ -573,14 +573,15 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
     // next month's table has the calm client's cycle (and not the late client's)
     const next = await read("platformAdmin", `?month=${NEXT}`);
     const calm = next.clients.find((c) => c.clientName === "Mock Calm Client")!;
-    expect(calm).toMatchObject({ target: null, counted: 2, approved: 0, live: 0, extra: 0, stories: 0 });
+    // cp and cc, and the two live boost posts (lb5, lb6)
+    expect(calm).toMatchObject({ target: null, counted: 4, approved: 2, live: 2, extra: 0, stories: 0 });
     expect(calm.health?.state).toBe("on_track");
     expect(next.clients.find((c) => c.clientName === "Mock Late Client")).toMatchObject({ counted: 0, health: null });
     expect(byName.get("Mock Step Client")).toMatchObject({ counted: 0, approved: 0, live: 0, health: null }); // no cycle this month
     expect(byName.get("Mock Report Due Client")).toMatchObject({ counted: 0, health: null });
     config.socialSimulationEnabled = true;
     const on = await read("platformAdmin", `?month=${NEXT}`);
-    expect(on.clients.find((c) => c.clientName === "Mock Calm Client")).toMatchObject({ counted: 5, approved: 2, live: 1 }); // + the three simulated posts
+    expect(on.clients.find((c) => c.clientName === "Mock Calm Client")).toMatchObject({ counted: 7, approved: 4, live: 3 }); // + the three simulated posts
     config.socialSimulationEnabled = false;
   });
 
