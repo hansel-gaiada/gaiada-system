@@ -1058,7 +1058,13 @@ export const ASSISTANT_ROW: WorkspaceRow = {
   key: "assistant",
   label: "AI Assistant",
   icon: "assistant",
-  tabs: [{ key: "assistant", label: "AI Assistant", href: "/assistant", icon: "assistant" }],
+  // AIP-13b (BFF §65): the second tab is the department's own assistant text, at `/departments/{dept}/assistant-guidance`. Offered to the
+  // department's head, a company admin and the owner (`unitCap`, the mirror of PERMISSION-CONTRACT §56); the shell drops it, as it drops any
+  // `{dept}` href with no id to fill, for a workspace with no org node. The row still LINKS to its first tab (the assistant drawer).
+  tabs: [
+    { key: "assistant", label: "AI Assistant", href: "/assistant", icon: "assistant" },
+    { key: "guidance", label: "Department guidance", href: deptPath("assistant-guidance"), icon: "assistant", gate: { kind: "unitCap", cap: "assistant.preamble.edit" } },
+  ],
 };
 
 /** Tools & connections (§4.1): the Connections page, combined with the tools and their pinning (DW-6c). */

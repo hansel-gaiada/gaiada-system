@@ -468,6 +468,13 @@ export const CAPABILITIES = [
   // (any person who may post to a unit may edit or withdraw its notices). The catalog bundles all four keys for `owner`, but the policy's
   // permission arm covers `read` only, so a pure owner is refused and the mirror leaves `owner` out (the parity register says why).
   "notices.post",
+
+  // ── AIP-13b (2026-10-29, a department's own assistant preamble, docs/FRONTEND-BFF-CONTRACT.md §65, PERMISSION-CONTRACT §56) — mirrors
+  // `resource_dept_assistant_preamble.yaml` `read` + `edit` + `manage`: company_admin by role, org_unit_lead over the unit or an enclosing
+  // one (`canInUnit`), platform_admin by wildcard, and the OWNER, who reaches every unit through the company tier's own action `manage`
+  // (the permission arm covers `manage` only, so the owner's reach is exactly company_admin's: any unit, never a bot). ONE capability
+  // because the screen offers read and edit to the same people (the server's two routes ask `manage`, else the per-unit action).
+  "assistant.preamble.edit",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -561,6 +568,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "reports.dept_kpi_target.appraisal_comment", "reports.dept_kpi_target.appraisal_assess",
     // DW-10a-2: company_admin posts, edits and withdraws every notice, the company-wide ones included.
     "notices.post",
+    // AIP-13b: company_admin reads and edits every unit's assistant preamble.
+    "assistant.preamble.edit",
   ],
   // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
   // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the
@@ -812,7 +821,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
                   // DW-4e-3: the head comments on their own unit's appraisal (the assessment is the GM's).
                   "reports.dept_kpi_target.appraisal_comment",
                   // DW-10a-2: the head posts, edits and withdraws notices of their own unit and the units below it (never company-wide).
-                  "notices.post"],
+                  "notices.post",
+                  // AIP-13b: the head edits the assistant preamble of their own unit and the units below it (never another unit's).
+                  "assistant.preamble.edit"],
   // IAM-02a-FIX / DR-2b — see the `Role` union's `agency_approver` comment for the full trail. Its
   // ENTIRE verified Cerbos reach is `agency_approval:approve` (via `module_approver`, module always
   // `"agency"`) — nothing else, not even `agency_approval:read` (that baseline rule names
@@ -925,6 +936,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // DW-10e: owner holds both keys in the bundle AND the policy's permission arm
     // (`perm_work_request_send_across`, `perm_work_request_read_across`) honours them.
     "work_request.send_across", "work_request.read_across",
+    // AIP-13b: owner holds `manage` (read, edit any unit) through the permission arm `perm_dept_assistant_preamble_manage`.
+    "assistant.preamble.edit",
   ],
 };
 

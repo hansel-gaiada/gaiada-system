@@ -948,4 +948,12 @@ export const CAPABILITY_MAP = {
     permissions: ["core.dept_notice.post", "core.dept_notice.edit", "core.dept_notice.withdraw"],
     semantics: "all",
   },
+
+  // ── AIP-13b · a department's own assistant preamble (contract §65, PERMISSION-CONTRACT §56) ────────
+  "assistant.preamble.edit": {
+    // Read and edit are offered together to the same people (a unit's head, a company admin, the owner). `manage` (the company tier's own
+    // action) is not listed: the head's bundle never holds it, and every holder of `read` + `edit` can reach the screen.
+    permissions: ["core.dept_assistant_preamble.read", "core.dept_assistant_preamble.edit"],
+    semantics: "all",
+  },
 } as const satisfies Record<Capability, CapabilityDef>;

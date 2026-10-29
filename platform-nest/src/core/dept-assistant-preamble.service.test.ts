@@ -64,7 +64,7 @@ describe("toPreambleView", () => {
   const row = (body: string, by: string | null = "u-1"): PreambleDbRow => ({ body, updated_at: new Date("2026-10-29T10:00:00.000Z"), updated_by: by, updated_by_name: by ? "Sia Head" : null });
 
   it("no row: the default is the effective text, and nothing says who or when", () => {
-    const v = toPreambleView("d-seo", seo, null);
+    const v = toPreambleView("d-seo", seo, null, false);
     expect(v).toEqual({
       unitNodeId: "d-seo",
       department: { name: "SEO", key: "seo" },
@@ -74,11 +74,18 @@ describe("toPreambleView", () => {
       updatedAt: null,
       updatedBy: null,
       preview: `${contextLine(seo, null)}\n\nDepartment guidance:\n${DEFAULT_DEPT_PREAMBLES.seo}`,
+      contextEnabled: false,
     });
   });
 
+  it("contextEnabled is the caller's answer, passed through whether or not there is a custom text", () => {
+    expect(toPreambleView("d-seo", seo, null, true).contextEnabled).toBe(true);
+    expect(toPreambleView("d-seo", seo, row("Quote the audit id."), true).contextEnabled).toBe(true);
+    expect(toPreambleView("d-seo", seo, row("Quote the audit id."), false).contextEnabled).toBe(false);
+  });
+
   it("a row: the custom text is effective, the default stays visible, and the editor and time are named", () => {
-    const v = toPreambleView("d-seo", seo, row("Quote the audit id."));
+    const v = toPreambleView("d-seo", seo, row("Quote the audit id."), false);
     expect(v.custom).toBe("Quote the audit id.");
     expect(v.defaultText).toBe(DEFAULT_DEPT_PREAMBLES.seo);
     expect(v.effective).toBe("Quote the audit id.");
@@ -88,7 +95,7 @@ describe("toPreambleView", () => {
   });
 
   it("an erased editor (updated_by NULL) keeps the text and names nobody", () => {
-    const v = toPreambleView("d-seo", seo, row("Quote the audit id.", null));
+    const v = toPreambleView("d-seo", seo, row("Quote the audit id.", null), false);
     expect(v.custom).toBe("Quote the audit id.");
     expect(v.updatedBy).toBeNull();
     expect(v.updatedAt).toBe("2026-10-29T10:00:00.000Z");
@@ -96,14 +103,14 @@ describe("toPreambleView", () => {
 
   it("a department with no registry default and no row: effective null, and the preview is the context line alone", () => {
     const ops = { nodeId: "d-ops", name: "Operations", key: "operations" };
-    const v = toPreambleView("d-ops", ops, null);
+    const v = toPreambleView("d-ops", ops, null, false);
     expect(v.defaultText).toBeNull();
     expect(v.effective).toBeNull();
     expect(v.preview).toBe("You are helping someone in the Operations department.");
   });
 
   it("a whitespace-only stored row counts as no custom text", () => {
-    const v = toPreambleView("d-seo", seo, row("  "));
+    const v = toPreambleView("d-seo", seo, row("  "), false);
     expect(v.custom).toBeNull();
     expect(v.effective).toBe(DEFAULT_DEPT_PREAMBLES.seo);
     expect(v.updatedAt).toBeNull();

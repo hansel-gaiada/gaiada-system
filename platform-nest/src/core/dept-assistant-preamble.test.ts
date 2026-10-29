@@ -16,6 +16,8 @@
 //              writes none.
 //   TENANTS    the same node id in two companies (seed ids repeat): the head of A's d-web neither reads nor writes B's d-web, company B's
 //              admin cannot reach A's, every row stays in its own tenant, and `resolvePreamble` never crosses.
+//   IN USE     both routes say whether the company switch `ASSISTANT_DEPT_CONTEXT` is on for THIS company (`contextEnabled`): false by default,
+//              true for a listed company and for `all`, and a PUT still stores the text while it is off.
 //   THE SEAM   after a PUT the assistant's `resolvePreamble` answers the row; after a reset the default again.
 //
 // Standard applied throughout: a 200 is not a pass. Every write claim is read back through `adminPool()` (bypassing RLS, so what is asserted
@@ -26,7 +28,7 @@
 // edit). It SKIPS without a database; a skip is not a pass.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
-import { config } from "../config";
+import { config, parseDeptContext } from "../config";
 import { buildApp } from "../main";
 import { withTenants } from "../db";
 import { resetModules } from "../modules/registry";
@@ -102,6 +104,7 @@ describe.skipIf(!TEST_URL)("AIP-13b department assistant preamble (HTTP, real Po
   beforeAll(async () => {
     await initTestDb();
     config.serviceToken = "svc-token";
+    config.assistant.deptContext = parseDeptContext(undefined); // the switch is OFF unless a test turns it on
     resetModules();
 
     A = await createCompany("Preamble Co A");
@@ -167,7 +170,9 @@ describe.skipIf(!TEST_URL)("AIP-13b department assistant preamble (HTTP, real Po
     await app.init();
   }, 180_000);
 
+  const deptContextBefore = config.assistant.deptContext;
   afterAll(async () => {
+    config.assistant.deptContext = deptContextBefore;
     await app?.close();
     await teardownTestDb();
   });
@@ -188,7 +193,30 @@ describe.skipIf(!TEST_URL)("AIP-13b department assistant preamble (HTTP, real Po
         updatedAt: null,
         updatedBy: null,
         preview: `${contextLine({ name: "Web Dev" }, null)}\n\nDepartment guidance:\n${web}`,
+        contextEnabled: false,
       });
+    });
+
+    it("contextEnabled follows the company switch, per company: off by default, on for a listed company only, on for `all`; a PUT answers it too and still stores the text while it is off", async () => {
+      await clean();
+      try {
+        expect((await get("d-web", admin)).json().contextEnabled).toBe(false);
+        const off = await put("d-web", admin, { body: "Stored while the switch is off." });
+        expect(off.statusCode, off.body).toBe(200);
+        expect(off.json()).toMatchObject({ custom: "Stored while the switch is off.", contextEnabled: false });
+        expect((await rowOf(A, "d-web")).body).toBe("Stored while the switch is off.");
+
+        config.assistant.deptContext = parseDeptContext(A);
+        expect((await get("d-web", admin)).json().contextEnabled).toBe(true);
+        expect((await put("d-web", admin, { body: "Now in use." })).json().contextEnabled).toBe(true);
+        // company B is not on the list: its admin's answer says off (the switch is per company)
+        expect((await get("d-web", bAdmin, B)).json().contextEnabled).toBe(false);
+
+        config.assistant.deptContext = parseDeptContext("all");
+        expect((await get("d-web", bAdmin, B)).json().contextEnabled).toBe(true);
+      } finally {
+        config.assistant.deptContext = parseDeptContext(undefined);
+      }
     });
 
     it("a department with NO registry default and no row: defaultText and effective are null, and the preview is the context line alone", async () => {

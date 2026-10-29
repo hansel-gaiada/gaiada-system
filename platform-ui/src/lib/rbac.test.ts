@@ -869,3 +869,51 @@ describe("notices.post (DW-10a-2)", () => {
     });
   });
 });
+
+// AIP-13b: `assistant.preamble.edit` mirrors resource_dept_assistant_preamble.yaml `read` + `edit` + `manage` (BFF section 65, PERMISSION-CONTRACT
+// section 56): company_admin by role, the OWNER through the company tier's own action `manage` (any unit), the head of the unit or an enclosing one
+// through canInUnit, platform_admin by wildcard. Nobody else holds anything: not a manager, a member, a viewer, the HR tier or a client.
+describe("assistant.preamble.edit (AIP-13b)", () => {
+  const CAP = "assistant.preamble.edit" as const;
+  const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId }]);
+  const lead = (unit: string, tenantIds: string[] = ["co-a"]) => me([
+    { role: "member", scopeType: "company", scopeId: "co-a" },
+    { role: "org_unit_lead", scopeType: "org_unit", scopeId: unit, tenantIds },
+  ]);
+  it("lets company_admin and platform_admin edit any unit, company-wide", () => {
+    expect(can(as("company_admin"), CAP, "co-a")).toBe(true);
+    expect(can(as("platform_admin", "global", null), CAP, "co-a")).toBe(true);
+  });
+  it("lets the owner edit any unit (the company tier's `manage`), in their own company only", () => {
+    expect(can(as("owner"), CAP, "co-a")).toBe(true);
+    expect(can(as("owner"), CAP, "co-b")).toBe(false);
+    expect(canInUnit(as("owner"), CAP, "co-a", ["d-seo", "root"])).toBe(true);
+  });
+  it("never lets manager, member, viewer, HR or a client edit", () => {
+    for (const role of ["manager", "member", "viewer", "hr_manager", "hr_staff", "client"]) {
+      expect(can(as(role), CAP, "co-a"), role).toBe(false);
+      expect(canInUnit(as(role), CAP, "co-a", ["d-web", "root"]), role).toBe(false);
+    }
+  });
+  it("reaches the head of the unit through canInUnit over the unit's own path, and never company-wide", () => {
+    const head = lead("d-web");
+    expect(can(head, CAP, "co-a")).toBe(false);
+    expect(canInUnit(head, CAP, "co-a", ["d-web", "root"])).toBe(true);
+  });
+  it("reaches the head of an enclosing unit (a parent) on a unit below it", () => {
+    expect(canInUnit(lead("d-web"), CAP, "co-a", ["d-web-fe", "d-web", "root"])).toBe(true);
+    expect(canInUnit(lead("root"), CAP, "co-a", ["d-seo", "root"])).toBe(true);
+  });
+  it("does not reach the head of a sibling, or of a unit only BELOW the one asked about", () => {
+    expect(canInUnit(lead("d-seo"), CAP, "co-a", ["d-web", "root"])).toBe(false);
+    expect(canInUnit(lead("d-web-fe"), CAP, "co-a", ["d-web", "root"])).toBe(false);
+  });
+  it("does not reach a head whose lead seat is in another company (node ids repeat across companies)", () => {
+    expect(canInUnit(lead("d-web", ["co-b"]), CAP, "co-a", ["d-web", "root"])).toBe(false);
+  });
+  it("is declared in the capability map with the two keys it mirrors", () => {
+    expect(CAPABILITY_MAP[CAP]).toEqual({
+      permissions: ["core.dept_assistant_preamble.read", "core.dept_assistant_preamble.edit"], semantics: "all",
+    });
+  });
+});

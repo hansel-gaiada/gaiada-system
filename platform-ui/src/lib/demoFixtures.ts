@@ -30,6 +30,7 @@ import { appraisalsDemo } from "./demoAppraisals";
 import { lmsDemo } from "./demoLms";
 import { deptKpisDemo } from "./demoDeptKpis";
 import { noticesDemo } from "./demoNotices";
+import { assistantGuidanceDemo } from "./demoAssistantGuidance";
 import { deptCalendarDemo } from "./demoDeptCalendar";
 import { deptAppraisalsDemo } from "./demoDeptAppraisals";
 import { financeDemo } from "./demoFinance";
@@ -2534,6 +2535,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // no later catch-all may answer a notices path with an empty list, which the page would read as "No current notices".
   const notices = noticesDemo(method, p, url.searchParams, body, userId);
   if (notices) return notices;
+
+  // AIP-13b — a department's assistant guidance (`/departments/:unitNodeId/assistant-preamble`, BFF §65). Stateful (lib/demoAssistantGuidance.ts),
+  // placed high so no later catch-all answers it with an empty body, which the page would read as "no text".
+  const guidance = assistantGuidanceDemo(method, p, body, userId);
+  if (guidance) return guidance;
 
   // DW-10c-3 — the department calendar (`/departments/:unitNodeId/calendar`, BFF §59.1). Answers in the server's order of checks (read gate,
   // window, unit narrowing, existence) and reads its events leg from the calendar-event store below (lib/demoCalendarEvents.ts). Placed

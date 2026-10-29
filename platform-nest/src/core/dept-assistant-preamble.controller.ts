@@ -28,7 +28,7 @@ import { check, type Resource } from "../rbac/cerbos";
 import type { Principal } from "../rbac/principal";
 import { authorize, writeActivity } from "./http";
 import { loadUnitAncestors } from "./org-unit-closure";
-import { resolveDepartment } from "../modules/assistant/department-context";
+import { deptContextEnabled, resolveDepartment } from "../modules/assistant/department-context";
 import * as svc from "./dept-assistant-preamble.service";
 
 const KIND = "dept_assistant_preamble";
@@ -101,7 +101,7 @@ export class DeptAssistantPreambleController {
         length: input.text === null ? 0 : Array.from(input.text).length,
       });
     }
-    return svc.toPreambleView(out.department.nodeId, out.department, out.row);
+    return svc.toPreambleView(out.department.nodeId, out.department, out.row, deptContextEnabled(tenantId));
   }
 
   /** The answer of GET: the department (404 when it is not an active one of this company) and its stored row. */
@@ -112,7 +112,7 @@ export class DeptAssistantPreambleController {
         return department ? { department, row: await svc.loadPreambleRow(c, tenantId, department.nodeId) } : null;
       });
       if (!out) throw svc.departmentNotFound();
-      return svc.toPreambleView(out.department.nodeId, out.department, out.row);
+      return svc.toPreambleView(out.department.nodeId, out.department, out.row, deptContextEnabled(tenantId));
     });
   }
 }

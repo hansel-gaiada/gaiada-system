@@ -84,10 +84,14 @@ export interface PreambleView {
   /** The department block of the prompt EXACTLY as the assistant reads it (`previewText`: the context line, then `Department guidance:` and
    *  the effective text), or `null` when there is nothing to say. */
   preview: string | null;
+  /** Whether the assistant uses department guidance in this company at all (the company switch `ASSISTANT_DEPT_CONTEXT`, `deptContextEnabled`).
+   *  False: the text can still be saved, the assistant just does not read it yet. */
+  contextEnabled: boolean;
 }
 
-/** The answer of GET and PUT. `row` is the stored row or `null` (no custom text: the default stands). */
-export function toPreambleView(unitNodeId: string, department: TurnDepartment, row: PreambleDbRow | null): PreambleView {
+/** The answer of GET and PUT. `row` is the stored row or `null` (no custom text: the default stands). `contextEnabled` is
+ *  `deptContextEnabled(tenantId)`, decided by the caller (this function stays pure and reads no config). */
+export function toPreambleView(unitNodeId: string, department: TurnDepartment, row: PreambleDbRow | null, contextEnabled: boolean): PreambleView {
   const custom = row && row.body.trim() ? capPreamble(row.body) : null;
   const defaultText = defaultPreamble(department.key);
   const effective = custom ?? defaultText;
@@ -100,6 +104,7 @@ export function toPreambleView(unitNodeId: string, department: TurnDepartment, r
     updatedAt: custom && row ? row.updated_at.toISOString() : null,
     updatedBy: custom && row && row.updated_by ? { id: row.updated_by, name: row.updated_by_name ?? "" } : null,
     preview: previewText(department, effective),
+    contextEnabled,
   };
 }
 

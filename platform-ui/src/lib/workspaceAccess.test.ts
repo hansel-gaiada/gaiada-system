@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
-import { ADMIN_ROWS, COMPANY_ROWS, GENERIC_WORKSPACE, WORKSPACES, sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
+import { ADMIN_ROWS, ASSISTANT_ROW, COMPANY_ROWS, GENERIC_WORKSPACE, WORKSPACES, sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
 import { approvalsGateInput, concreteRows, functionalConsoleFor, gateAllows, holdsDecideRight, homeArea, resolveMyWorkspaces } from "./workspaceAccess";
 import { areaFor, resolveArea } from "./areas";
 import { AGENCY, HOTEL, ROOT, agencyTree, lead, me, member, node, person } from "./workspaceFixtures";
@@ -151,6 +151,43 @@ describe("resolveMyWorkspaces: the switcher list (DW-D2, GM-01)", () => {
     const res = resolveMyWorkspaces({ me: me([member()]), tenantId: "co-a", root: null });
     expect(res.all.map((r) => r.workspace.key)).toEqual(["hr", "it", "finance"]);
     expect(res.home).toEqual({ kind: "company" });
+  });
+});
+
+// AIP-13b (BFF section 65): the AI Assistant row's second tab, "Department guidance", at /departments/{dept}/assistant-guidance. Offered through
+// `unitCap` to the unit's head (or an enclosing unit's), the company admin and the owner; never to anyone else; dropped with no department id.
+describe("the AI Assistant row's Department guidance tab (AIP-13b)", () => {
+  const assistantTabs = (m: Me, unitPath: string[], deptId: string | null) => {
+    const row = concreteRows([ASSISTANT_ROW], { ...ctx(m, "co-a", unitPath), deptId })[0];
+    return row.tabs.map((t) => `${t.label} ${t.href}`);
+  };
+  const AI = "AI Assistant /assistant";
+  const GUIDANCE = "Department guidance /departments/d-web/assistant-guidance";
+  const admin = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
+  const owner = me([{ role: "owner", scopeType: "company", scopeId: "co-a" }]);
+
+  it("is the second tab, after AI Assistant, and the row still opens its first tab", () => {
+    expect(ASSISTANT_ROW.tabs.map((t) => t.key)).toEqual(["assistant", "guidance"]);
+    expect(ASSISTANT_ROW.tabs[1].icon).toBe(ASSISTANT_ROW.icon);
+    expect(ASSISTANT_ROW.tabs[1].gate).toEqual({ kind: "unitCap", cap: "assistant.preamble.edit" });
+    expect(assistantTabs(admin, ["d-web", "root"], "d-web")).toEqual([AI, GUIDANCE]);
+  });
+  it("is offered to the company admin and the owner on any unit", () => {
+    expect(assistantTabs(admin, ["d-seo", "root"], "d-web")).toEqual([AI, GUIDANCE]);
+    expect(assistantTabs(owner, ["d-web", "root"], "d-web")).toEqual([AI, GUIDANCE]);
+  });
+  it("is offered to the head of the unit and of an enclosing one", () => {
+    expect(assistantTabs(me([member(), lead("d-web")]), ["d-web", "root"], "d-web")).toEqual([AI, GUIDANCE]);
+    expect(assistantTabs(me([member(), lead("d-web")]), ["d-web-fe", "d-web", "root"], "d-web")).toEqual([AI, GUIDANCE]);
+  });
+  it("is not offered to a member, a head of a sibling or of a unit below, or a manager", () => {
+    expect(assistantTabs(me([member()]), ["d-web", "root"], "d-web")).toEqual([AI]);
+    expect(assistantTabs(me([member(), lead("d-seo")]), ["d-web", "root"], "d-web")).toEqual([AI]);
+    expect(assistantTabs(me([member(), lead("d-web-fe")]), ["d-web", "root"], "d-web")).toEqual([AI]);
+    expect(assistantTabs(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), ["d-web", "root"], "d-web")).toEqual([AI]);
+  });
+  it("is dropped for a workspace with no department id, even for the company admin", () => {
+    expect(assistantTabs(admin, [], null)).toEqual([AI]);
   });
 });
 

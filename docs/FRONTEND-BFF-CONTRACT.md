@@ -13490,7 +13490,8 @@ capped at 1,000 characters and shown to the head exactly as the assistant will r
   "effective": "…" | null,                               // custom ?? defaultText: what the assistant uses
   "updatedAt": "2026-10-29T10:00:00.000Z" | null,       // when the custom text was last written; null without custom text
   "updatedBy": { "id": "<uuid>", "name": "…" } | null,   // the last editor; null without custom text, or after that person's erasure
-  "preview": "…" | null                                  // the department block of the prompt, EXACTLY as the assistant reads it
+  "preview": "…" | null,                                 // the department block of the prompt, EXACTLY as the assistant reads it
+  "contextEnabled": true | false                         // is department guidance used by the assistant in THIS company (the switch ASSISTANT_DEPT_CONTEXT, deptContextEnabled(tenantId))? false: the text can still be saved, the assistant just does not read it yet
 }
 ```
 
@@ -13498,6 +13499,9 @@ capped at 1,000 characters and shown to the head exactly as the assistant will r
 blank line, then `Department guidance:` and a newline and the effective text. With no effective text it is the context line alone. The same functions the prompt builder uses
 (`contextLine`, the guidance heading); `department-preamble.test.ts` pins the preview as a substring of the prompt `assembleContext` builds. The prompt also holds the page
 label when the turn carried one, which a preview does not.
+
+`contextEnabled` (added with the edit screen, `platform-ui` `/departments/{dept}/assistant-guidance`) is `deptContextEnabled(tenantId)`: false while the company is not on `ASSISTANT_DEPT_CONTEXT`.
+The screen then says the assistant does not use department guidance in this company yet; a PUT still stores the text.
 
 ### 65.2 `GET /api/:tenantId/departments/:unitNodeId/assistant-preamble`
 
