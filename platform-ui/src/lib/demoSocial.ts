@@ -5,6 +5,7 @@ import { evaluateClientReviewState, type ClientReviewState, type ClientReviewSta
 import { validateBrandBook, type BrandBook } from "./socialBrandBook";
 import { demoDesignQueue } from "./demoSocialDesignQueue";
 import { demoSocialMetrics } from "./demoSocialMetrics";
+import { demoTeamRoute } from "./demoSocialTeam";
 import {
   DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCalendar, demoCreatePost, demoCycleHealth, demoCycleTable, demoDeadlineRange,
   demoFeed, demoNeedsYou, demoOverview, demoPipelineRead, demoRealDate, demoWaiting, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement,
@@ -987,6 +988,8 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   { const summary = demoAccountsSummaryRoute(m, tail, userId); if (summary) return summary; }
   // ── SCP-4b: boosts and the monthly boost budget (BFF §63.11), in demoSocialBoosts.ts ─────────────────────────────
   { const boosts = demoBoostsRoute(m, tail, params, body, userId); if (boosts) return boosts; }
+  // ── SCP-5d: the Team dashboard (BFF §63.19), in demoSocialTeam.ts ──────────────────────────────────────────
+  if (tail === "team" && m === "GET") return demoTeamRoute(params, userId);
   // ── SCP-1k: the client calendar (BFF §63.10) ─────────────────────────────────────────────────────
   if (tail === "calendar" && m === "GET") return demoCalendar(params);
   // ── SCP-1m: create a post in a cycle (BFF §63.6.1), and SCP-1k's bulk actions (§63.6.7) ───────────

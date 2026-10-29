@@ -123,6 +123,7 @@ const ADMIN: AreaRule[] = [
 // A department's own pages carry its id from the URL; owned routes are generated from the registry.
 const WORKSPACE: AreaRule[] = [
   rule("/departments/[deptId]", "workspace", true),
+  rule("/departments/[deptId]/dashboard", "workspace", false, "SCP-5d: the Social Media Team dashboard (the four approvers' month: needs attention, clients, workload, waits); its own entry so the page sits in one area, the department's own"),
   rule("/departments/[deptId]/settings", "workspace", false, "SCP-1c: the Social Media Settings page (the HoD's buffer and deadline table); its own entry so the page sits in one area, the department's own"),
   rule("/departments/[deptId]/messages", "workspace", false, "SCP-1j: the Social Media Messages page (who holds each of the officer's posts, and Follow up); its own entry so the page sits in one area, the department's own"),
   rule("/departments/[deptId]/profile", "workspace", false, "SCP-1k: the Social Media Profile switcher (the caller's clients, or every client for a Social approver); its own entry so the page sits in one area, the department's own"),
