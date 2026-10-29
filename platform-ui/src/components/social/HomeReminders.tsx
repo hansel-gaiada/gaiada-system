@@ -9,7 +9,8 @@ import { formatDate } from "@/lib/format";
 import type { NoticeList } from "@/lib/notices";
 import type { ReadResult } from "@/lib/readResult";
 import type { ReportDue } from "@/lib/socialHome";
-import { checkinDue, pinnedNoticeReminder, reportDueSub, reportReminders } from "@/lib/socialHomeReminders";
+import { checkinDue, pinnedNoticeReminder, reportDueSub, reportReminders, type MonthReports } from "@/lib/socialHomeReminders";
+import { REPORTS_LIST_PATH, dueReportPeriod, reportHref } from "@/lib/socialReports";
 import { HomeCheckinReminder } from "./HomeCheckinReminder";
 import "./social-home.css";
 
@@ -32,7 +33,7 @@ const PinGlyph = (
   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 17v5M8 3h8l-1 7 3 3H6l3-3z" /></svg>
 );
 
-export function HomeReminders({ tenantId, deptId, checkin, submitCheckin, notices, reports, reportsFailure, now, profile }: {
+export function HomeReminders({ tenantId, deptId, checkin, submitCheckin, notices, reports, reportsFailure, monthReports = null, todayIso, now }: {
   tenantId: string;
   deptId: string;
   /** `getCheckinCardData`'s answer: null when ANY check-in read failed. */
@@ -43,6 +44,10 @@ export function HomeReminders({ tenantId, deptId, checkin, submitCheckin, notice
   reports: ReportDue[] | null;
   /** The allocation read's failure, already worded (the Home's `Refused`); null when it succeeded. */
   reportsFailure: ReactNode;
+  /** SCP-5a: the due month's reports (`GET reports?period=`); null when that read did not succeed, which keeps every card. */
+  monthReports?: MonthReports | null;
+  /** The display zone's today, for the month a due report is for. */
+  todayIso?: string;
   now: number;
   profile: (engagementId: string) => string;
 }) {
@@ -61,12 +66,14 @@ export function HomeReminders({ tenantId, deptId, checkin, submitCheckin, notice
   }
 
   if (reportsFailure) items.push(<li key="reports" className="sh-rem__note">{reportsFailure}</li>);
-  // "Open" for now; SCP-5a adds Write / Check, which need the report's state.
-  const { cards, more } = reportReminders(reports ?? []);
+  // SCP-5a: a card whose month's report is sent is dropped. A card opens that report when it exists, and the list (to draft it) when it does not.
+  const { cards, more } = reportReminders(reports ?? [], monthReports);
   for (const r of cards) {
+    const href = r.reportId ? reportHref(deptId, r.reportId) : `${REPORTS_LIST_PATH(deptId)}${todayIso ? `?period=${dueReportPeriod(todayIso)}` : ""}`;
+    const label = r.reportId ? "Open" : "Draft";
     items.push(
       <Card key={`report:${r.engagementId}`} kind="report" icon={r.clientName.charAt(0).toUpperCase()} title={`${r.clientName} monthly report`} sub={reportDueSub(r, formatDate)}
-        action={<Link href={profile(r.engagementId)} className="lux-btn lux-btn--solid lux-btn--sm sh-rem__btn" aria-label={`Open ${r.clientName} monthly report`}>Open</Link>} />,
+        action={<Link href={href} className="lux-btn lux-btn--solid lux-btn--sm sh-rem__btn" aria-label={`${label} ${r.clientName} monthly report`}>{label}</Link>} />,
     );
   }
 
