@@ -193,16 +193,19 @@ describe("GET needs-you", () => {
     const officer = needs("u-social");
     expect(officer.partial).toEqual([]);
     const kinds = new Set((officer.items as Body[]).map((i) => i.kind));
-    expect([...kinds].every((k) => ["draft_to_send", "fix_asked", "ready_to_schedule", "metrics_missing"].includes(k as string))).toBe(true);
+    // SCP-5a: the monthly report's items ride beside the posts' (report_due for the officer; the HoD and GM seats get report_check and report_send)
+    expect([...kinds].every((k) => ["draft_to_send", "fix_asked", "ready_to_schedule", "metrics_missing", "report_due"].includes(k as string))).toBe(true);
     for (const i of officer.items as Body[]) {
       expect(i.id).toMatch(/^social:co-demo:[^:]+:[a-z_]+$/);
-      expect(i.href).toMatch(/^\/departments\/[^/]+\/posts\/[^/]+$/);
+      expect(i.href).toMatch(String(i.kind).startsWith("report_") ? /^\/departments\/[^/]+\/social-reports(\/[^/]+)?$/ : /^\/departments\/[^/]+\/posts\/[^/]+$/);
     }
     const since = (officer.items as Body[]).map((i) => i.since);
     expect(since).toEqual([...since].sort());
     expect((needs("u-copy").items as Body[]).every((i) => i.kind === "proofread" && i.role === "copywriter")).toBe(true);
     expect((needs("u-copy").items as Body[]).length).toBe(PIPE_POSTS.filter((p) => holderOf(p) === "copywriter").length);
-    expect(new Set((needs("u-pm").items as Body[]).map((i) => i.kind))).toEqual(new Set(["hod_approval", "final_check"].filter((k) => (needs("u-pm").items as Body[]).some((i) => i.kind === k))));
+    const pmPosts = (needs("u-pm").items as Body[]).filter((i) => !String(i.kind).startsWith("report_"));
+    expect(new Set(pmPosts.map((i) => i.kind))).toEqual(new Set(["hod_approval", "final_check"].filter((k) => pmPosts.some((i) => i.kind === k))));
+    expect((needs("u-pm").items as Body[]).filter((i) => String(i.kind).startsWith("report_")).map((i) => i.kind).sort()).toEqual(["report_check", "report_send"]);
     expect((needs("u-creative").items as Body[]).every((i) => i.role === "designer")).toBe(true);
   });
 

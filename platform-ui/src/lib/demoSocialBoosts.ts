@@ -23,7 +23,7 @@ import "server-only";
 // pending). "A day in the warehouse" is the live boost candidate with no boost.
 import { isDemoPortalClient } from "./demoPortalClients";
 import {
-  DEMO_PEOPLE, PIPE_ENGAGEMENTS, PIPE_POSTS, SEAT_APPROVERS, allocStore, cyclesStore, demoMonthShift, demoShift, isClientContact, isDemoSocialApprover, setDemoBoostReader, who,
+  DEMO_PEOPLE, PIPE_ENGAGEMENTS, PIPE_POSTS, SEAT_APPROVERS, allocStore, cyclesStore, demoMonthShift, demoShift, isClientContact, isDemoSocialApprover, setDemoBoostReader, setDemoBoostsWaitingReader, who,
   type DemoResult, type PipePost,
 } from "./demoSocialPipeline";
 import { DEMO_PORTAL_CLIENT_ID, isPortalVisible } from "./demoSocialPortal";
@@ -571,6 +571,9 @@ const demoStore: BoostStore = ((globalThis as Record<symbol, unknown>)[KEY] ??= 
 export const demoBoosts = boostApi(demoStore);
 // The post read's `boost` (BFF §63.6.2) comes from this store: the pipeline twin asks for it by post id.
 setDemoBoostReader((postId) => demoBoosts.boostOfPost(postId));
+// The Overview's Boosts waiting tile (BFF §63.7) is this store's own count, never a fixed number: boosts `requested`, plus `approved` with no start, on posts not archived (simulated ones
+// count, as the demo's simulator is always on).
+setDemoBoostsWaitingReader(() => demoBoosts.store.boosts.filter((b) => (b.status === "requested" || (b.status === "approved" && b.startedAt === null)) && !postById(b.postId)?.archivedAt).length);
 
 /** The staff routes of 63.11 by `tail`; null when `tail` is none of them. */
 export const demoBoostsRoute = demoBoosts.staff;
