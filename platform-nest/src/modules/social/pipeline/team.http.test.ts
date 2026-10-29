@@ -332,7 +332,8 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
     E.risk = await makeEngagement(A, "Mock Risk Client", U.officerTwo, {
       cycle: { month: monthStart(shift(today, 4)), deadline: shift(today, 4), readyBy: shift(today, 3) }, estimates: { hod: 5, design: 5, final: 5, client: 5, schedule: 5 },
     });
-    E.step = await makeEngagement(A, "Mock Step Client", U.officerTwo);
+    // A pipeline post needs a cycle (social_posts_pipeline_needs_cycle_ck): the step client's is LAST month's, so this month's table shows it with no cycle.
+    E.step = await makeEngagement(A, "Mock Step Client", U.officerTwo, { cycle: { month: `${PREV}-01`, deadline: lastDay(PREV), readyBy: lastDay(PREV) } });
     E.rDue = await makeEngagement(A, "Mock Report Due Client", null, { reportDueDay: 3 });
     E.rDraft = await makeEngagement(A, "Mock Report Draft Client", null, { reportDueDay: 3 });
     E.rDone = await makeEngagement(A, "Mock Report Delivered Client", null, { reportDueDay: 3 });
