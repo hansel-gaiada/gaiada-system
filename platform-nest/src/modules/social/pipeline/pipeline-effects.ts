@@ -515,14 +515,17 @@ async function filePublishApprovals(run: EffectRun): Promise<void> {
 /** Take the post off its schedule: undecided publish approvals withdrawn (`cancelled`: nobody refused them), the variants
  *  back to draft without an approval (so a decided-but-unexecuted grant now refuses `variant_not_approved` at the
  *  precondition), and a queued dispatch only when the service already cancelled it at the publisher. A variant
- *  mid-publish, or queued and not cancelled, is 409 `dispatch_in_flight`. */
+ *  mid-publish, or queued and not cancelled, is 409 `dispatch_in_flight`. The reset drops the dispatch's result, so it
+ *  drops the simulator's mark of that result too: a `[simulate-fail]` variant unscheduled and then posted by hand must not
+ *  make the hand-made go-live read `simulated` (found on the SCP-3 live walk, 2026-10-29; the purge refuses that shape,
+ *  `hand_schedule_marked_simulated`). Clearing the mark is not a simulated write, so it runs with the switch off too. */
 async function unscheduleVariants(run: EffectRun): Promise<void> {
   const variants = await loadVariants(run.c, run.tenantId, run.postId, true);
   const inFlight = variants.filter((v) => v.status === "publishing" || (v.status === "queued" && !run.out.cancelledAtPublisher.has(v.id)));
   if (inFlight.length) throw new ScpRouteError(409, "dispatch_in_flight");
   await withdrawApprovals(run);
   await run.c.query(
-    `UPDATE social_post_variants SET status = 'draft', approval_id = NULL, provider_post_id = NULL, updated_at = now()
+    `UPDATE social_post_variants SET status = 'draft', approval_id = NULL, provider_post_id = NULL, simulated = false, updated_at = now()
       WHERE tenant_id = $1 AND post_id = $2 AND deleted_at IS NULL AND status IN ('approved','queued','failed','cancelled')`,
     [run.tenantId, run.postId],
   );
@@ -539,10 +542,18 @@ async function withdrawApprovals(run: Pick<EffectRun, "c" | "tenantId" | "postId
 }
 
 /** Posted by hand: each variant becomes a native-import bookkeeping row (`native_import`, `published`, no approval, no
- *  provider id), 0105's law for "posted by hand" (`svar_native_import_is_bookkeeping`). */
+ *  provider id), 0105's law for "posted by hand" (`svar_native_import_is_bookkeeping`). A variant keeps the simulator's
+ *  mark only when the simulator had PUBLISHED it; one it failed (`[simulate-fail]`, the officer marking the failed post
+ *  live straight from its schedule) is the person's record now, so its mark is cleared first, while its status still
+ *  says what the simulator did. */
 async function variantsPostedByHand(run: EffectRun): Promise<void> {
   const url = String(run.params.url);
   const at = typeof run.params.at === "string" ? run.params.at : new Date().toISOString();
+  await run.c.query(
+    `UPDATE social_post_variants SET simulated = false, updated_at = now()
+      WHERE tenant_id = $1 AND post_id = $2 AND deleted_at IS NULL AND simulated AND status <> 'published'`,
+    [run.tenantId, run.postId],
+  );
   await run.c.query(
     `UPDATE social_post_variants
         SET native_import = true, status = 'published', approval_id = NULL, provider_post_id = NULL,
@@ -568,8 +579,8 @@ async function variantsMustBePublished(run: EffectRun): Promise<void> {
 
 /** `social_posts.simulated` (BFF §63.1), derived on the way live: true when any live variant was served by the simulator.
  *  A post is never marked simulated by anything else, and an officer's hand-made `mark_live` of a post none of whose
- *  variants the simulator served writes false (what it already was). Runs after `variants_become_native_import_published`
- *  in the officer's path, which leaves a variant's own mark alone. */
+ *  variants the simulator published writes false. Runs after `variants_become_native_import_published` in the officer's
+ *  path, which keeps a variant's own mark only where the simulator had published it. */
 async function setPostSimulatedFromVariants(run: EffectRun): Promise<void> {
   await run.c.query(
     `UPDATE social_posts SET simulated = EXISTS (

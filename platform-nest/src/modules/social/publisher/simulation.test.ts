@@ -557,6 +557,9 @@ const statementsAt = (src: string, re: RegExp): string[] =>
  *  the column)? A real writer may READ the mark in its WHERE (`simulated = false`, the fence); that is not a write. */
 const writesAccountMark = (stmt: string): boolean =>
   /\bsimulated\s*=(?!\s*false\b)/.test(stmt) || /INSERT\s+INTO\s+social_accounts\s*\([^)]*\bsimulated\b/.test(stmt);
+/** SCP-3b (2026-10-29) — the same test for a variant's mark: clearing it (`simulated = false`) is not a write of it. */
+const writesVariantMark = (stmt: string): boolean =>
+  /\bsimulated\s*=(?!\s*false\b)/.test(stmt) || /INSERT\s+INTO\s+social_post_variants\s*\([^)]*\bsimulated\b/.test(stmt);
 /** Source without its comments, for "who CALLS this" inventories (a comment that names a function is not a call). */
 const codeOnly = (src: string): string => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 
@@ -601,12 +604,13 @@ describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () 
 
   it("the ONLY statement that writes a variant's `simulated` mark is dispatch.ts's stamp; the ONLY account-mark writers are SCP-Sb's seed and its prepare script", () => {
     const variantMarkWriters: string[] = [];
+    const variantMarkClearers: string[] = [];
     const accountMarkWriters: string[] = [];
     for (const f of files) {
       const src = readFileSync(f, "utf8");
       for (const lit of sqlLiterals(src)) {
         if (!/\bsimulated\b/.test(lit)) continue;
-        if (/\b(INSERT\s+INTO|UPDATE)\s+social_post_variants\b/.test(lit)) variantMarkWriters.push(rel(f));
+        if (/\b(INSERT\s+INTO|UPDATE)\s+social_post_variants\b/.test(lit)) (writesVariantMark(lit) ? variantMarkWriters : variantMarkClearers).push(rel(f));
       }
       // SCP-Sa2: real writers now READ the mark in their WHERE (the fence), so an account-mark WRITER is a statement that
       // sets it or inserts it, not one that merely names it.
@@ -615,6 +619,13 @@ describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () 
       }
     }
     expect(variantMarkWriters).toEqual(["modules/social/dispatch.ts"]);
+    // SCP-3b (2026-10-29): the mark is CLEARED where the result it records is thrown away, so a post posted by hand after a
+    // `[simulate-fail]` is not `simulated`: the unschedule reset and the officer's hand-post (a variant the simulator did not
+    // publish). Nothing else clears it; a third clearer fails here until it is looked at.
+    expect(variantMarkClearers).toEqual(["modules/social/pipeline/pipeline-effects.ts", "modules/social/pipeline/pipeline-effects.ts"]);
+    const effects = sqlLiterals(readFileSync(join(SRC, "modules", "social", "pipeline", "pipeline-effects.ts"), "utf8")).filter((l) => /\bsimulated\b/.test(l) && /UPDATE\s+social_post_variants\b/.test(l));
+    expect(effects[0]).toMatch(/SET status = 'draft', approval_id = NULL, provider_post_id = NULL, simulated = false, updated_at = now\(\)/);
+    expect(effects[1]).toMatch(/SET simulated = false, updated_at = now\(\)\s+WHERE tenant_id = \$1 AND post_id = \$2 AND deleted_at IS NULL AND simulated AND status <> 'published'/);
     // SCP-Sb's seed is the ONE writer of an account's mark: it calls `assertSimulatedWriteAllowed` before it writes, and its
     // controller calls it again before the body is read. A second writer fails here until it is fenced the same way.
     expect([...new Set(accountMarkWriters)].sort()).toEqual([SIMULATED_ACCOUNT_WRITER, SIMULATED_PREPARE_SCRIPT]);

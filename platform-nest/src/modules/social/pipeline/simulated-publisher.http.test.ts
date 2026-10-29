@@ -15,6 +15,8 @@
 //       `not_scheduled_by_publisher`; it never mints or decides an approval (the approval rows are the same before and after);
 //   (4) the failure keyword: `[simulate-fail]` -> the variant `failed`, `social.post.failed` emitted, the post STAYS `scheduled` with
 //       engine status `failed`, the activity row written once, the page's read says so, and an approver may unschedule it;
+//       the failed variant's mark goes with the dispatch it records, so the post then posted by hand (after the unschedule, or
+//       marked live straight from the failed schedule) is not `simulated`; a variant the simulator PUBLISHED keeps its mark;
 //   (5) the switch OFF: the due job does nothing, a dispatch refuses `simulation_disabled` (the variant is not marked simulated),
 //       a queued simulated variant stays queued and nothing goes live;
 //   (6) a Composer post and a post scheduled by hand are untouched by all of it.
@@ -464,6 +466,40 @@ describe.skipIf(!TEST_URL)("SCP-Sc · the simulated publisher on the real dispat
     const off = await ok(await act(U.gm, postId, "unschedule"), "unschedule");
     expect(off.post.pipelineStatus).toBe("approved");
     expect(await row(postId)).toMatchObject({ pipeline_status: "approved", status: "approved", schedule_via: null });
+  });
+
+  // The SCP-3 live walk (2026-10-29) left a post live BY HAND with `simulated = true`: the failed variant's mark outlived the
+  // reset, and the purge refuses that shape (`hand_schedule_marked_simulated`).
+  it("[simulate-fail], unscheduled, then posted by hand: the reset drops the failed variant's mark and the hand-made go-live is not simulated", async () => {
+    const { eng, postId } = await scheduledAndDispatched("Fresh pastries every morning. [simulate-fail]");
+    expect((await variantsOf(postId))[0]).toMatchObject({ status: "failed", simulated: true });
+    await ok(await act(U.gm, postId, "unschedule"), "unschedule");
+    expect((await variantsOf(postId))[0]).toMatchObject({ status: "draft", simulated: false, provider_post_id: null, approval_id: null });
+
+    await ok(await act(eng.officer, postId, "schedule"), "schedule");
+    await ok(await act(eng.officer, postId, "mark_live", { url: "https://example.invalid/mock-bakery/by-hand" }), "mark_live");
+    expect(await row(postId)).toMatchObject({ pipeline_status: "live", schedule_via: "manual", simulated: false, live_url: "https://example.invalid/mock-bakery/by-hand" });
+    expect((await variantsOf(postId))[0]).toMatchObject({ status: "published", simulated: false });
+    expect((await read(U.officer, postId)).json()).toMatchObject({ pipelineStatus: "live", simulated: false });
+  });
+
+  it("[simulate-fail], then the officer marks it live by hand straight from the failed schedule: the failed variant's mark goes", async () => {
+    const { eng, postId } = await scheduledAndDispatched("Fresh pastries every morning. [simulate-fail]");
+    await ok(await act(eng.officer, postId, "mark_live", { url: "https://example.invalid/mock-bakery/by-hand" }), "mark_live");
+    expect(await row(postId)).toMatchObject({ pipeline_status: "live", simulated: false });
+    expect((await variantsOf(postId))[0]).toMatchObject({ status: "published", simulated: false });
+  });
+
+  it("a variant the simulator PUBLISHED keeps its mark when the officer marks the post live by hand", async () => {
+    const { eng, postId } = await scheduledAndDispatched();
+    // Set by hand, as this case says: the simulator has published the variant and the post is not settled yet (the reconcile
+    // settles it at once, so the window cannot be reached through the routes with one variant).
+    await adminPool().query(
+      `UPDATE social_post_variants SET status = 'published', published_url = 'https://simulated.invalid/instagram/' || gen_random_uuid(), published_at = now()
+        WHERE post_id = $1`, [postId]);
+    await ok(await act(eng.officer, postId, "mark_live", { url: "https://example.invalid/mock-bakery/by-hand" }), "mark_live");
+    expect(await row(postId)).toMatchObject({ pipeline_status: "live", simulated: true });
+    expect((await variantsOf(postId))[0]).toMatchObject({ status: "published", simulated: true });
   });
 
   // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
