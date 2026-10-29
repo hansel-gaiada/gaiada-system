@@ -12,5 +12,5 @@ import "@/components/overview/overview.css";
 export async function TeamDashboardTiles({ me, tenantId, deptId }: { me: Me; tenantId: string; deptId: string }) {
   const models = await pulseModels({ me, tenantId, deptId, pulse: builtPulseTiles({ workspaceKey: "social-media" }) });
   if (models.length === 0) return null;
-  return <div data-section="pipeline-tiles"><PulseBlock tiles={models} title="Pipeline" /></div>;
+  return <div data-section="pipeline-tiles"><PulseBlock tiles={models} title="Pipeline now" /></div>;
 }

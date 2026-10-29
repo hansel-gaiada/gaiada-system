@@ -20,7 +20,7 @@ vi.mock("@/lib/reports-data", async () => {
   return { ...actual, getReportOverview: vi.fn() };
 });
 // SCP-5d: the Social Media block's reads. The page is shared by every department, so these are only what the block needs to decide whether to draw.
-vi.mock("@/lib/departments", () => ({ getDepartment: vi.fn() }));
+vi.mock("@/lib/departments", () => ({ getDepartmentNode: vi.fn() }));
 vi.mock("@/lib/companyContext", () => ({ activeCompany: vi.fn(() => ({ id: "co-1", vertical: "agency" })) }));
 vi.mock("@/lib/socialTeam-data", () => ({ getTeamDashboard: vi.fn() }));
 // The period bar is a client component wired to the router; it is not what is under test.
@@ -28,7 +28,7 @@ vi.mock("@/components/reports/ReportPeriodBar", () => ({ ReportPeriodBar: () => 
 
 import { getMe, PlatformError } from "@/lib/platform";
 import { getReportOverview } from "@/lib/reports-data";
-import { getDepartment } from "@/lib/departments";
+import { getDepartmentNode } from "@/lib/departments";
 import { getTeamDashboard } from "@/lib/socialTeam-data";
 import { asTeamDashboard } from "@/lib/socialTeam";
 import TeamReportPage from "./page";
@@ -46,7 +46,7 @@ const mount = async (sp: { unit?: string; periodKind?: string; start?: string; e
   return render(await TeamReportPage({ searchParams: Promise.resolve(sp) }));
 };
 
-const dept = vi.mocked(getDepartment);
+const dept = vi.mocked(getDepartmentNode);
 const teamRead = vi.mocked(getTeamDashboard);
 const dashboardOf = (n: number) => asTeamDashboard({
   month: "2026-10", needsAttention: Array.from({ length: n }, (_, i) => ({ kind: i === 0 ? "late" : "blocked", postId: `p-${i}`, engagementId: "e-1", clientName: "Northwind Traders", since: "2026-10-05" })),

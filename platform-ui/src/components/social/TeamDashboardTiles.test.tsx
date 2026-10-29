@@ -38,7 +38,7 @@ describe("TeamDashboardTiles", () => {
     // Boosts waiting is a real number now (SCP-4d), and the unanswered-inbox placeholder (a ticket) is not drawn.
     expect(tile("boosts-waiting")).toHaveTextContent("Boosts waiting4");
     expect(screen.queryByText(/Unanswered inbox/)).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Pipeline" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Pipeline now" })).toBeInTheDocument();
   });
 
   it("opens the same pages the Overview's tiles open", async () => {
