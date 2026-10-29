@@ -155,9 +155,15 @@ export async function deleteThreadAction(threadId: string): Promise<ActionResult
 // added to the body when the composer's tools-mode affordance is actually engaged, never sent as
 // an explicit `mode:'chat'` for the default case, so there is exactly one wire shape for "plain
 // chat" both before and after this ticket.
+//
+// AIP-10 — `context` is new and OPTIONAL too: the department (an org node id) and the page the message is sent from, from
+// `originContext` in `lib/assistantOrigin.ts`. It is added to the body only when there IS a department, so a send from a page with
+// none (and every send before this ticket) has the same body as before. The server treats it as a hint: platform-nest reads
+// it only for a company whose `ASSISTANT_DEPT_CONTEXT` flag is on, resolves the department against its own rows and cleans the page.
 export interface SendMessageOpts {
   mode?: "chat" | "tools";
   agent?: string;
+  context?: { departmentId: string; page?: string | null } | null;
 }
 
 export async function sendMessageAction(threadId: string, content: string, opts: SendMessageOpts = {}): Promise<ActionResult<SendMessageResult>> {
@@ -168,6 +174,9 @@ export async function sendMessageAction(threadId: string, content: string, opts:
     if (opts.mode === "tools") {
       body.mode = "tools";
       if (opts.agent) body.agent = opts.agent;
+    }
+    if (opts.context?.departmentId) {
+      body.context = opts.context.page ? { departmentId: opts.context.departmentId, page: opts.context.page } : { departmentId: opts.context.departmentId };
     }
     const r = await platformFetch<SendMessageResult>(`/api/${c.tenant}/assistant/threads/${threadId}/messages`, c.userId, {
       method: "POST",

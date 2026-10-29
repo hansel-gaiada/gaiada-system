@@ -135,6 +135,9 @@ export interface KnowledgeStoreHit {
   confidence: number;
   score: number;
   audience: string;
+  /** AIP-11/12: the org node id of the department that owns the chunk's record, or `null` (company-wide, or a store that does not
+   *  report it yet). A RANKING fact only: it is never read for access (plan §3.3). */
+  departmentId: string | null;
 }
 
 /** The knowledge service could not answer: not configured, unreachable, timed out, non-2xx or an unreadable body. The staff
@@ -146,10 +149,16 @@ export class KnowledgeUnavailableError extends Error {
   }
 }
 
+/** AIP-12: what the caller may add to a strict search. `department` asks the store to rank that department's internal chunks of
+ *  that company first (a score boost inside the store, after its pre-filter); it narrows nothing and widens nothing. */
+export interface StrictSearchOptions {
+  department?: { tenantId: string; nodeId: string };
+}
+
 /** DW-8i. The same call as `queryPropertyKnowledge` (the caller's own OBO envelope, so the store's tenant pre-filter is the
  *  caller's own tenant set), but it RETURNS the store's hits whole, tier and tenant included, and THROWS `KnowledgeUnavailableError`
  *  on every failure instead of folding it into `[]`. The query text is sent to the service only; it is not logged here. */
-export async function searchKnowledgeStrict(userId: string, query: string, topK: number): Promise<KnowledgeStoreHit[]> {
+export async function searchKnowledgeStrict(userId: string, query: string, topK: number, opts?: StrictSearchOptions): Promise<KnowledgeStoreHit[]> {
   const svc = config.services.knowledge;
   if (!svc.url) throw new KnowledgeUnavailableError("not configured");
   if (!userId) throw new KnowledgeUnavailableError("no caller");
@@ -166,7 +175,8 @@ export async function searchKnowledgeStrict(userId: string, query: string, topK:
         "x-obo-provider": "platform",
         "x-obo-external-id": userId,
       },
-      body: JSON.stringify({ query, scope: "", topK, publicOnly: false }),
+      // `department` rides only when given, so the body without it is byte for byte what it was before AIP-12.
+      body: JSON.stringify({ query, scope: "", topK, publicOnly: false, ...(opts?.department ? { department: opts.department } : {}) }),
     });
     if (!res.ok) throw new KnowledgeUnavailableError(`HTTP ${res.status}`);
     const json = (await res.json()) as { hits?: unknown };
@@ -184,6 +194,7 @@ export async function searchKnowledgeStrict(userId: string, query: string, topK:
         confidence: typeof h.confidence === "number" ? h.confidence : 0,
         score: typeof h.score === "number" ? h.score : 0,
         audience: h.audience,
+        departmentId: typeof h.departmentId === "string" ? h.departmentId : null,
       });
     }
     return out;

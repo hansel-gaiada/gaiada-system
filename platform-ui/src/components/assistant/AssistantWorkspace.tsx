@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistantMessage, AssistantThread, PinnedPageContext } from "@/lib/assistant";
 import { isPendingMessage, hasPendingProposalDecision, deriveThreadTitle } from "@/lib/assistant";
 import { assistantFullPageHref, pageContextPrefix } from "@/lib/assistantContext";
-import { originLabel as originChipLabel, type AssistantOrigin } from "@/lib/assistantOrigin";
+import { originContext, originLabel as originChipLabel, type AssistantOrigin } from "@/lib/assistantOrigin";
 import {
   createThreadAction, deleteThreadAction, refreshThreadAction, refreshThreadsAction,
   renameThreadAction, sendMessageAction, setThreadPinnedAction, setThreadStatusAction, stopStreamAction,
@@ -370,7 +370,9 @@ export function AssistantWorkspace({
     setMessages((prev) => [...prev, optimisticUser]);
     // T4 (ASST-23, §7.4) — the tools-mode affordance: `opts` came straight from the Composer's own
     // toggle/agent select, unchanged all the way down to `sendMessageAction`'s body-shaping.
-    const r = await sendMessageAction(activeThreadId, outgoing, opts);
+    // AIP-10 — and the department and page this chat was opened from (drawer and full page alike), when there is a department.
+    const ctx = originContext(origin);
+    const r = await sendMessageAction(activeThreadId, outgoing, ctx ? { ...opts, context: ctx } : opts);
     setSending(false);
     if (!r.ok) {
       setMessages((prev) => prev.filter((m) => m.id !== optimisticUser.id));

@@ -43,6 +43,7 @@ const BY_ID: Record<string, AssistantThread> = { t1: T1, t2: T2, "old-1": OLD };
 const WEB_DEV: AssistantOrigin = {
   path: "/departments/d-web/board",
   department: "Web Dev",
+  departmentId: "d-web",
   page: "Board",
   prompts: [
     { label: "Summarise this week's requests", prompt: "Summarise this week's requests to the Web Dev team." },
@@ -134,9 +135,50 @@ describe("where you are: the department chip and its prompts", () => {
   });
 
   it("an origin that belongs to no department keeps today's suggestions and shows no department", async () => {
-    renderPage({ origin: { path: "/projects/p-web-1", department: null, page: null, prompts: null } });
+    renderPage({ origin: { path: "/projects/p-web-1", department: null, departmentId: null, page: null, prompts: null } });
     expect(await screen.findByRole("button", { name: "Ask about your projects" })).toBeInTheDocument();
     expect(screen.queryByText("Opened from")).not.toBeInTheDocument();
+  });
+});
+
+// AIP-10 — the department and page a message is sent from go with it, in the drawer and on the full page; the chip text does not change.
+describe("a message carries the department it was sent from", () => {
+  async function sendHello(props: Partial<ComponentProps<typeof AssistantWorkspace>>) {
+    vi.mocked(actions.sendMessageAction).mockResolvedValue({ ok: false, error: "stop here", status: 500 } as never);
+    renderPage(props);
+    const box = await screen.findByLabelText("Message the assistant");
+    await waitFor(() => expect(box).not.toBeDisabled());
+    fireEvent.change(box, { target: { value: "hello" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(actions.sendMessageAction).toHaveBeenCalledTimes(1));
+    return vi.mocked(actions.sendMessageAction).mock.calls[0];
+  }
+
+  it("full page: the call includes context { departmentId, page } beside the mode", async () => {
+    const [thread, text, opts] = await sendHello({ origin: WEB_DEV });
+    expect(thread).toBe("t1");
+    expect(text).toBe("hello");
+    expect(opts).toEqual({ mode: "chat", context: { departmentId: "d-web", page: "Board" } });
+  });
+
+  it("drawer: the same", async () => {
+    const [, , opts] = await sendHello({ variant: "drawer", origin: WEB_DEV });
+    expect(opts).toEqual({ mode: "chat", context: { departmentId: "d-web", page: "Board" } });
+  });
+
+  it("an origin with no department, and no origin at all, send no context (the call is today's)", async () => {
+    const [, , none] = await sendHello({ origin: null });
+    expect(none).toEqual({ mode: "chat" });
+    vi.clearAllMocks();
+    vi.mocked(actions.refreshThreadAction).mockImplementation(async (id: string) => ({ ok: true, thread: BY_ID[id], messages: [], hasMoreMessages: false }));
+    vi.mocked(actions.refreshThreadsAction).mockResolvedValue({ ok: true, items: [], total: 0 });
+    vi.mocked(actions.refreshCapabilitiesAction).mockResolvedValue({ ok: true, tools: [], hubConfigured: true, toolAgents: [] });
+  });
+
+  it("the chip text is unchanged: department and page, no id", async () => {
+    renderPage({ origin: WEB_DEV });
+    expect(await screen.findByText("Web Dev · Board")).toBeInTheDocument();
+    expect(screen.queryByText(/d-web/)).not.toBeInTheDocument();
   });
 });
 

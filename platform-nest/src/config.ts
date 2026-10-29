@@ -290,6 +290,29 @@ export function readScheduleSupersedeGraceMs(raw: string | undefined): number {
   return n;
 }
 
+/** The state `ASSISTANT_DEPT_CONTEXT` parses to (AIP-D3): `all` for every company, else the listed company ids. */
+export interface DeptContextSetting {
+  all: boolean;
+  /** Lower-cased company uuids. Empty with `all: false` means off everywhere. */
+  companies: string[];
+}
+
+const DEPT_CONTEXT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * AIP-D3: `ASSISTANT_DEPT_CONTEXT`. Unset or empty (the compose `${VAR:-}` case) is OFF for every company. `all` is on for
+ * every company. Anything else is read as a comma-separated list of company ids: trimmed, lower-cased, and an entry that is not
+ * a uuid is dropped (a typo turns that company off rather than the whole flag on). It never throws: a wrong value must leave the
+ * assistant exactly as it was.
+ */
+export function parseDeptContext(raw: string | undefined): DeptContextSetting {
+  const v = (raw ?? "").trim().toLowerCase();
+  if (v === "") return { all: false, companies: [] };
+  if (v === "all") return { all: true, companies: [] };
+  const companies = [...new Set(v.split(",").map((x) => x.trim()).filter((x) => DEPT_CONTEXT_UUID_RE.test(x)))];
+  return { all: false, companies };
+}
+
 const configBase = {
   port: Number(process.env.PLATFORM_PORT ?? 3004),
   host: process.env.HOST ?? "0.0.0.0",
@@ -897,6 +920,12 @@ const configBase = {
     // one) — `assembleContext` skips the call entirely rather than asking for zero and getting an
     // empty array back, so this is a real "off" switch, not just a very small "on".
     knowledgeTopK: Number(process.env.ASSISTANT_KNOWLEDGE_TOPK ?? 4),
+    // AIP-D3 / AIP-10, 12, 13 — the department of a turn. ONE flag per company (see
+    // modules/assistant/department-context.ts `deptContextEnabled`): empty = off for every company (the default),
+    // `all` = on for every company, else a comma-separated list of company ids. Parsed once here: lower-cased,
+    // trimmed, anything that is not a uuid dropped. Off means the prompt and the knowledge call are byte for byte
+    // what they were before Phase 3.
+    deptContext: parseDeptContext(process.env.ASSISTANT_DEPT_CONTEXT),
   },
   /**
    * BROWSER-reachable n8n editor origin — deliberately NOT `services.automation.url`.

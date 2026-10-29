@@ -2,8 +2,14 @@
 //
 // Pure and client-safe, like `areas.ts` (which it reads) and `assistantContext.ts` (which carries the
 // origin path in the drawer link as `?from=`). The server routes (`app/(app)/assistant/page.tsx` and
-// the `@drawer` mount) resolve it once and hand the client plain data: a label for the chip and the
-// department's starter prompts. Nothing here reaches the model: the chip and the prompts are for the person.
+// the `@drawer` mount) resolve it once and hand the client plain data: a label for the chip, the
+// department's starter prompts and, since AIP-10, the department's id.
+//
+// What reaches the model (AIP-10): the chip text and the prompts are still for the person alone, but the department's id and
+// the page's name go with each message as `context: { departmentId, page }` (`originContext`). They are a hint, not an
+// authority: the server reads the department's name from its own org rows, drops a page label that is not a plain label, and
+// adds the context to the prompt only for a company whose `ASSISTANT_DEPT_CONTEXT` flag is on (platform-nest
+// `assistant/department-context.ts`). The browser sends no preamble and no rule.
 import { areaFor } from "@/lib/areas";
 import { workspaceBySlug, type Workspace } from "@/lib/workspaces";
 import { safeFromPath } from "@/lib/assistantContext";
@@ -14,6 +20,10 @@ export interface AssistantOrigin {
   path: string;
   /** The workspace label ("Web Dev"), or `null` when the origin page belongs to no department. */
   department: string | null;
+  /** AIP-10: the department's org node id (the one the page's `/departments/{id}` area, or the matching workspace ref, carries),
+   *  or `null` when the origin has no department (a record page, a department the company does not have) or the
+   *  workspace has no org node to take an id from. Sent to the server with each message; never shown. */
+  departmentId: string | null;
   /** The page's own name within that workspace ("Board"), when the registry has one for the path. */
   page: string | null;
   /** The department's starter prompts; `null` leaves today's generic suggestions. */
@@ -73,10 +83,11 @@ export function resolveAssistantOrigin(from: string | null | undefined, refs: re
       deptId = refs.find((r) => r.workspace.key === area.slug)?.deptId ?? null;
     }
   }
-  if (!ws) return { path, department: null, page: null, prompts: null };
+  if (!ws) return { path, department: null, departmentId: null, page: null, prompts: null };
   return {
     path,
     department: ws.label,
+    departmentId: deptId,
     page: pageNameOf(ws, deptId, path),
     prompts: ws.assistantPrompts,
   };
@@ -86,4 +97,11 @@ export function resolveAssistantOrigin(from: string | null | undefined, refs: re
 export function originLabel(origin: Pick<AssistantOrigin, "department" | "page">): string | null {
   if (!origin.department) return null;
   return origin.page ? `${origin.department} · ${origin.page}` : origin.department;
+}
+
+/** AIP-10: the `context` a message sent from this origin carries, or `null` when the origin has no department (the body is then
+ *  exactly what it was before). `page` is the registry's name for the page, which the server accepts only as a plain label. */
+export function originContext(origin: Pick<AssistantOrigin, "departmentId" | "page"> | null | undefined): { departmentId: string; page?: string } | null {
+  if (!origin?.departmentId) return null;
+  return origin.page ? { departmentId: origin.departmentId, page: origin.page } : { departmentId: origin.departmentId };
 }

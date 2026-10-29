@@ -626,6 +626,9 @@ services:
       # MEETING_VIDEO_MAX_BYTES comments above already caught twice on this box.
       ASSISTANT_STREAM_IDLE_TIMEOUT_MS: ${ASSISTANT_STREAM_IDLE_TIMEOUT_MS:-60000}
       ASSISTANT_CONTEXT_CHAR_BUDGET: ${ASSISTANT_CONTEXT_CHAR_BUDGET:-12000}
+      # AIP-D3 (AIP-10/12/13) — the department of a turn, one flag per company: empty = off (the default), `all`,
+      # or a comma-separated list of company ids. Off keeps the prompt and the knowledge call exactly as before.
+      ASSISTANT_DEPT_CONTEXT: ${ASSISTANT_DEPT_CONTEXT:-}
       BOT_URL: http://bot:3001
       # Same shared secret the bot service reads (see its ADMIN_TOKEN below). The two read
       # DIFFERENT .env names, so a deployment that sets only ADMIN_TOKEN left this empty and

@@ -1,5 +1,7 @@
 // ASST-06 — context assembly + compaction v1.
 // ASST-19 — user-memory injection, quarantined to CONFIRMED rows only (see below).
+// AIP-10/12/13 — the department of a turn: a context line and the department's preamble after the generic preamble, and a
+// department hint on the knowledge call (see the DW-D26 note below; the hint ranks, the filter still decides).
 //
 // Ticket: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md ("### ASST-06", "### ASST-19").
 // Design: docs/blueprints/assistant-foundation.md §4.1 ("thread memory" — resuming an old session
@@ -38,8 +40,9 @@ import { recordGatewayCall, outcomeForGatewayStatus, readGatewayUsage, type AiCa
 import { gatewayTaskField } from "../ai-usage/routing";
 import { refreshThreadCost } from "./thread-cost";
 import { searchKnowledgeStrict, type KnowledgeHit, type KnowledgeStoreHit } from "../search/knowledge-client";
-import { collapseHits, filterReadableHits, searchTopK } from "../knowledge/search-filter";
+import { collapseHits, filterReadableHits, searchTopK, type StoreHit } from "../knowledge/search-filter";
 import { assemblePrincipal, type Principal } from "../../rbac/principal";
+import { contextLine, resolvePreamble, type TurnContext, type TurnDepartment } from "./department-context";
 
 /** The assistant's fixed system preamble. Deliberately generic in Phase 1 — no per-department
  *  persona (blueprint D-B: "one Hermes front door", personas deferred), no tool-capability list
@@ -215,12 +218,27 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
 // nor cited. Reports, people and org are withheld for everyone (§46.2). Any failure on this path (no
 // tenant, owner unresolvable, knowledge service down, Cerbos down) leaves the turn with NO knowledge:
 // grounding is additive, so it never fails the turn, and it NEVER falls back to the unfiltered chunks.
+//
+// ── AIP-12 (plan §3.3, §6.2 item 5): A DEPARTMENT RANKS, IT NEVER ADMITS ───────────────────────────────────────────
+// When the turn carries a department (flag on, row resolved: department-context.ts), the store is asked to rank that
+// department's internal chunks of THIS company first: a score boost inside its SQL, after its own pre-filter, so the boosted
+// candidates are a re-ordering of what the store could already return, never more of it. Nothing below changes for it:
+// `collapseHits` still keeps only this company's internal tier (so another company's chunk with the SAME node id is dropped
+// there), `filterReadableHits` still runs on the boosted candidates as the thread owner, and the final sort by score is the
+// boosted score. A department record the owner cannot open is dropped by the filter however high the boost put it, and the
+// public tier is untouched. The `departmentId` on a hit is read by nothing here: ranking is the store's, access is the filter's.
 export type ContextCitation = KnowledgeHit;
 
 /** The candidate source, injectable for tests (default: the live `searchKnowledgeStrict`). It returns the
  *  store's hits WHOLE (tenant and tier included, which the filter keys on) and throws when the service
  *  cannot answer. Its output is only ever a candidate list: see the DW-D26 note above. */
-export type KnowledgeQueryFn = (userId: string, query: string, topK: number) => Promise<KnowledgeStoreHit[]>;
+export type KnowledgeQueryFn = (
+  userId: string,
+  query: string,
+  topK: number,
+  /** AIP-12: rank this department first. Absent (and the call then has exactly three arguments) whenever the turn has no department. */
+  opts?: { department?: { tenantId: string; nodeId: string } },
+) => Promise<KnowledgeStoreHit[]>;
 
 /** The per-record read filter, injectable for tests (default: DW-8i's `filterReadableHits`). */
 export type KnowledgeFilterFn = typeof filterReadableHits;
@@ -249,19 +267,22 @@ async function retrieveReadableKnowledge(
   tenantId: string | undefined,
   query: string,
   topK: number,
-  opts?: { queryKnowledge?: KnowledgeQueryFn; filterKnowledge?: KnowledgeFilterFn; principal?: Principal },
+  opts?: { queryKnowledge?: KnowledgeQueryFn; filterKnowledge?: KnowledgeFilterFn; principal?: Principal; department?: TurnDepartment | null },
 ): Promise<ContextCitation[]> {
   if (!tenantId || !ownerUserId) return [];
   const queryFn = opts?.queryKnowledge ?? searchKnowledgeStrict;
   const filterFn = opts?.filterKnowledge ?? filterReadableHits;
-  const hits = await queryFn(ownerUserId, query, searchTopK(topK));
+  // AIP-12: the department hint goes only when there IS a department; without one the call is exactly the three-argument call it was.
+  const hits = opts?.department
+    ? await queryFn(ownerUserId, query, searchTopK(topK), { department: { tenantId, nodeId: opts.department.nodeId } })
+    : await queryFn(ownerUserId, query, searchTopK(topK));
   // The public tier is the published corpus (the website): anyone may read it, so it needs no record check and stays in
   // the grounding as before DW-D26 ("the public tier is unchanged"). Its refs resolve to no ERP page, so they render as
   // plain chips (citations.ts).
   const seen = new Set<string>();
   const publicHits = hits.filter((h) => h?.audience === "public" && !seen.has(h.sourceRef) && !!seen.add(h.sourceRef));
   const candidates = collapseHits(hits, tenantId);
-  let internal: KnowledgeStoreHit[] = [];
+  let internal: StoreHit[] = [];
   if (candidates.length > 0) {
     const principal =
       opts?.principal && opts.principal.userId === ownerUserId ? opts.principal : await assemblePrincipal(ownerUserId, "low");
@@ -299,6 +320,10 @@ export async function assembleContext(
     /** ASST-18 — how many chunks to ask for. Default `config.assistant.knowledgeTopK`; `0` (or a
      *  negative override) skips retrieval entirely rather than asking for none. */
     knowledgeTopK?: number;
+    /** AIP-10/12/13 — the department and page this turn was sent from, as the server resolved and stored them on the placeholder
+     *  row (`readTurnContext`). Only ever passed when the company's flag is on; absent or null leaves the prompt and the
+     *  knowledge call exactly as they were. */
+    turnContext?: TurnContext | null;
   },
 ): Promise<AssembledContext> {
   const budget = opts?.charBudget ?? config.assistant.contextCharBudget;
@@ -350,13 +375,32 @@ export async function assembleContext(
   const lastUserMessage = [...kept].reverse().find((m) => m.role === "user" && m.content);
   if (lastUserMessage?.content && knowledgeTopK > 0) {
     try {
-      citations = await retrieveReadableKnowledge(thread.ownerUserId, opts?.tenantId, lastUserMessage.content, knowledgeTopK, opts);
+      citations = await retrieveReadableKnowledge(thread.ownerUserId, opts?.tenantId, lastUserMessage.content, knowledgeTopK, {
+        ...opts,
+        department: opts?.turnContext?.department ?? null,
+      });
     } catch {
       citations = []; // grounding is additive — see this section's header; never fails the turn, never unfiltered.
     }
   }
 
   const sections = [SYSTEM_PREAMBLE];
+  // AIP-10/13: where the person is, then (when the department has one) its preamble. A label and a paragraph, no data: what may
+  // be cited is decided above, by the read filter.
+  const tc = opts?.turnContext;
+  if (tc) {
+    const line = contextLine(tc.department, tc.page);
+    if (line) sections.push(line);
+    if (tc.department && opts?.tenantId) {
+      let preamble: string | null = null;
+      try {
+        preamble = await resolvePreamble(opts.tenantId, tc.department.nodeId, tc.department.key);
+      } catch {
+        preamble = null; // a preamble is additive (like grounding): never fails the turn
+      }
+      if (preamble) sections.push(`Department guidance:\n${preamble}`);
+    }
+  }
   if (memoryBlock) sections.push(`Known facts and preferences about this user (confirmed):\n${memoryBlock}`);
   if (summary) sections.push(`Summary of the earlier conversation:\n${summary}`);
   const transcript = renderTranscript(kept);

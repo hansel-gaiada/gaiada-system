@@ -2910,6 +2910,21 @@ user uuid. Do not add a second envelope spelling.
   CLIENT CONVENIENCE ONLY: the stream route reads the mode off the ROW, never off its own query
   string** — an `EventSource` URL is client-controlled, so reading `?mode=` there would let a client
   flip a turn the server never accepted as a tool turn.
+- ✅ **`POST /api/:t/assistant/threads/:id/messages` and `POST /api/:t/assistant/ask` gain one more OPTIONAL field (AIP-10,
+  AIP-12, AIP-13; docs/plans/2026-10-27-ai-plan.md section 6.2):** `context?: { departmentId?: string; page?: string }`, the
+  department and page the message was sent from. **The server does not trust either**, and a wrong type is ignored, never a
+  400. Nothing happens unless the company's flag is on (`ASSISTANT_DEPT_CONTEXT`: empty = off for every company, the
+  default; `all`; or a comma-separated list of company ids), and then: `departmentId` must be an active department of THIS
+  company (an `org_units` row, else a department node of its org tree) or it means no department; the name and workspace key
+  come from that row. `page` is kept only when it is one line of at most 60 characters of letters, digits, spaces and
+  `&·-/'()`. The result is written on the placeholder row's `parts` as `{type:'turn_context', department:{nodeId,name,key}|null,
+  page:string|null}` (written only when there is a department or a page), and the stream reads it from the ROW, never from the
+  query string, and re-checks the flag. It is a per-turn fact: the finished reply rewrites `parts`, and nothing is stored on the
+  thread. The prompt then carries "You are helping someone in the SEO department, on the Rankings page." and the department's
+  preamble (a server-side default per workspace key until AIP-13b), and knowledge retrieval is asked to rank that department's
+  documents first. **It ranks and never admits:** DW-D26's per-record read filter still decides what may be cited, as the
+  chatting user. With the flag off the prompt and the knowledge call are exactly what they were. The UI sends it from the
+  drawer and the full page when the origin has a department (`resolveAssistantOrigin` now also returns `departmentId`).
 - ✅ **`GET .../stream`** emits three ADDITIVE, **non-terminal** frames on the tool path (a turn
   still ends with exactly one `done` or one `error`, so stream-end-without-`done` remains an ERROR,
   unchanged):

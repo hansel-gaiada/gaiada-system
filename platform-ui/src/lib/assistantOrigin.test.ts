@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { originLabel, resolveAssistantOrigin } from "./assistantOrigin";
+import { originContext, originLabel, resolveAssistantOrigin } from "./assistantOrigin";
 import { resolveMyWorkspaces } from "./workspaceAccess";
-import { GENERIC_WORKSPACE, workspaceBySlug, workspaceFor } from "./workspaces";
+import { GENERIC_WORKSPACE, WORKSPACES, workspaceBySlug, workspaceFor } from "./workspaces";
 import { agencyTree, me, member } from "./workspaceFixtures";
 
 // DW-2h — the department the assistant was opened from. The refs are the real `resolveMyWorkspaces(...).all`,
@@ -15,6 +15,7 @@ describe("resolveAssistantOrigin", () => {
     const o = resolveAssistantOrigin("/departments/d-web/board", refs)!;
     expect(o.path).toBe("/departments/d-web/board");
     expect(o.department).toBe("Web Dev");
+    expect(o.departmentId).toBe("d-web");
     expect(o.page).toBe(boardLabel);
     expect(originLabel(o)).toBe(`Web Dev · ${boardLabel}`);
     expect(o.prompts).toEqual(webDev.assistantPrompts);
@@ -30,12 +31,16 @@ describe("resolveAssistantOrigin", () => {
     expect(o!.department).toBe("Web Dev");
     expect(o!.page).toBe("Pipeline");
     expect(o!.prompts).toEqual(webDev.assistantPrompts);
+    expect(o!.departmentId).toBeNull(); // no ref to take an id from
+    // with the company's department list it takes the matching ref's id
+    expect(resolveAssistantOrigin("/pipeline", refs)!.departmentId).toBe("d-web");
   });
 
   it("names a department with no bespoke workspace by its own name (the generic workspace carries it)", () => {
     const generic = workspaceFor("agency", "Brand Studio");
     const o = resolveAssistantOrigin("/departments/d-x", [{ deptId: "d-x", workspace: generic }])!;
     expect(o.department).toBe("Brand Studio");
+    expect(o.departmentId).toBe("d-x");
     expect(o.prompts).toEqual(GENERIC_WORKSPACE.assistantPrompts);
   });
 
@@ -49,6 +54,7 @@ describe("resolveAssistantOrigin", () => {
       const o = resolveAssistantOrigin(path, refs)!;
       expect(o.path).toBe(path);
       expect(o.department).toBeNull();
+      expect(o.departmentId).toBeNull();
       expect(o.page).toBeNull();
       expect(o.prompts).toBeNull();
       expect(originLabel(o)).toBeNull();
@@ -57,6 +63,7 @@ describe("resolveAssistantOrigin", () => {
 
   it("shows no department for a department the person's company does not have", () => {
     expect(resolveAssistantOrigin("/departments/d-gone/board", refs)!.department).toBeNull();
+    expect(resolveAssistantOrigin("/departments/d-gone/board", refs)!.departmentId).toBeNull();
   });
 
   it("is null without an origin, and for a path it will not send anyone back to", () => {
@@ -70,5 +77,37 @@ describe("resolveAssistantOrigin", () => {
 describe("originLabel", () => {
   it("is the department alone when the page has no registry name", () => {
     expect(originLabel({ department: "SEO", page: null })).toBe("SEO");
+  });
+});
+
+// AIP-10 — what a message sent from this origin carries to the server.
+describe("originContext", () => {
+  it("is the department id and the page name", () => {
+    expect(originContext(resolveAssistantOrigin("/departments/d-web/board", refs))).toEqual({ departmentId: "d-web", page: boardLabel });
+  });
+  it("is the department id alone when the page has no registry name", () => {
+    expect(originContext({ departmentId: "d-web", page: null })).toEqual({ departmentId: "d-web" });
+  });
+  it("is null (the body is today's) with no origin, or an origin with no department", () => {
+    expect(originContext(null)).toBeNull();
+    expect(originContext(undefined)).toBeNull();
+    expect(originContext(resolveAssistantOrigin("/projects/p-web-1", refs))).toBeNull();
+    expect(originContext(resolveAssistantOrigin("/departments/d-gone/board", refs))).toBeNull(); // a department the company does not have
+    expect(originContext(resolveAssistantOrigin("/pipeline", []))).toBeNull(); // a workspace page with no department list to take an id from
+  });
+  it("every page name the registry can produce is a label the server accepts (platform-nest `sanitizePage`)", () => {
+    // Letters, digits, spaces and & · - / ' ( ), 1 to 60 characters. A name outside it would be dropped server-side, silently.
+    const SERVER_LABEL = /^[A-Za-z0-9 &·\-/'()]{1,60}$/;
+    const labels = new Set<string>(["Overview"]);
+    for (const ws of WORKSPACES) {
+      for (const row of ws.work) for (const t of row.tabs) labels.add(t.label);
+      for (const t of [...ws.reports, ...ws.analytics]) labels.add(t.label);
+    }
+    // KNOWN: the Finance analytics tab "Revenue, AR and cash" has a comma, which the server's alphabet does not allow, so the server
+    // drops that one page name (the department still goes, and the turn is not refused). AIP-10 open question: add "," to the
+    // server's alphabet or rename the tab. A NEW label outside the alphabet fails here until it is dealt with.
+    const KNOWN_OUTSIDE = ["Revenue, AR and cash"];
+    const bad = [...labels].filter((l) => !SERVER_LABEL.test(l));
+    expect(bad).toEqual(KNOWN_OUTSIDE);
   });
 });

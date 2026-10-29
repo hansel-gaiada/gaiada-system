@@ -56,6 +56,7 @@ import { confirmWriteIntent, dismissWriteIntent, reapExpiredIntents, storableInt
 import { notifyApprovalFiled } from "../../core/approval-filing";
 import { deriveServerThreadTitle } from "./thread-title";
 import { lockAssistantThread } from "./thread-lock";
+import { deptContextEnabled, readRawContext, readTurnContext, resolveTurnContext, type TurnContext } from "./department-context";
 
 // ── ASST-06 — the send->stream engine ────────────────────────────────────────────────────────────
 //
@@ -592,7 +593,7 @@ export class AssistantController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-    @Body() body: { content?: string; mode?: string; agent?: string },
+    @Body() body: { content?: string; mode?: string; agent?: string; context?: unknown },
   ) {
     const thread = await withTenants([tenantId], (c) => fetchThread(c, id), { modules: ["assistant"] });
     if (!thread) throw new NotFoundException("thread not found");
@@ -617,7 +618,10 @@ export class AssistantController {
     if (toolMode && !ASSISTANT_AGENT_TOOLS[agent]) {
       throw new BadRequestException(`agent must be one of ${Object.keys(ASSISTANT_AGENT_TOOLS).join(",")}`);
     }
-    const placeholderParts = toolMode ? JSON.stringify([turnModePart(agent)]) : "[]";
+    // AIP-10: the department and page this message was sent from. A hint for the prompt, never an authority: it is read only
+    // while the company's flag is on, `departmentId` must resolve to an active org unit of THIS company, and a wrong type is
+    // ignored rather than refused (department-context.ts). Resolved inside the transaction below, written next to `turn_mode`.
+    const rawContext = readRawContext(body);
 
     const assistantMessageId = await withTenants(
       [tenantId],
@@ -667,6 +671,10 @@ export class AssistantController {
         }
         // The placeholder — see file header. Reserves seq userSeq+1 for the reply BEFORE the
         // upstream call even starts, so no later sender can ever land a message between the two.
+        // `parts` is `[]` unless this is a tool turn and/or the turn carries a department or page (flag on): the row of a plain
+        // turn is byte for byte what it was before AIP-10.
+        const turnContext = await resolveTurnContext(c, tenantId, rawContext);
+        const placeholderParts = JSON.stringify([...(toolMode ? [turnModePart(agent)] : []), ...(turnContext ? [turnContext] : [])]);
         const assistantId = newId();
         await c.query(
           `INSERT INTO assistant_messages (id, tenant_id, thread_id, seq, role, content, parts, origin_site)
@@ -747,9 +755,12 @@ export class AssistantController {
         throw new NotFoundException("no pending generation for this messageId (already completed, stopped, or unknown)");
       }
 
+      // AIP-10/12/13: the turn's department and page, read from the ROW (never the query string) and only while the company's
+      // flag is on, so a flag switched off between send and stream also gives the context-free prompt.
+      const turnContext: TurnContext | null = deptContextEnabled(tenantId) ? readTurnContext(placeholder.parts) : null;
       const assembled = await withTenants(
         [tenantId],
-        (c) => assembleContext(c, id, thread, placeholder!.seq, { tenantId, principal: req.principal }),
+        (c) => assembleContext(c, id, thread, placeholder!.seq, { tenantId, principal: req.principal, turnContext }),
         { modules: ["assistant"] },
       );
       prompt = assembled.prompt;
@@ -1427,13 +1438,14 @@ export class AssistantController {
   async ask(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { question?: string; threadId?: string; title?: string },
+    @Body() body: { question?: string; threadId?: string; title?: string; context?: unknown },
   ) {
     const ownerId = req.principal.userId;
     if (!ownerId) throw new BadRequestException("an authenticated user is required");
 
     const question = typeof body?.question === "string" ? body.question.trim() : "";
     if (!question) throw new BadRequestException("question is required");
+    const rawContext = readRawContext(body);
     if (question.length > MAX_MESSAGE_CONTENT_LENGTH) {
       throw new BadRequestException(`question exceeds max length (${MAX_MESSAGE_CONTENT_LENGTH})`);
     }
@@ -1490,12 +1502,15 @@ export class AssistantController {
           [newId(), tenantId, threadId, userSeq, question, config.originSite],
         );
         const asstId = newId();
+        // AIP-10: the same optional context the send route takes, resolved the same way (flag, active unit of THIS company).
+        // Written to the placeholder for the record of the turn; `ask` hands the resolved value straight to `assembleContext`.
+        const turnContext = await resolveTurnContext(c, tenantId, rawContext);
         await c.query(
           `INSERT INTO assistant_messages (id, tenant_id, thread_id, seq, role, content, parts, origin_site)
-           VALUES ($1, $2, $3, $4, 'assistant', NULL, '[]'::jsonb, $5)`,
-          [asstId, tenantId, threadId, userSeq + 1, config.originSite],
+           VALUES ($1, $2, $3, $4, 'assistant', NULL, $5::jsonb, $6)`,
+          [asstId, tenantId, threadId, userSeq + 1, JSON.stringify(turnContext ? [turnContext] : []), config.originSite],
         );
-        return { messageId: asstId, seq: userSeq + 1 };
+        return { messageId: asstId, seq: userSeq + 1, turnContext };
       },
       { modules: ["assistant"] },
     );
@@ -1510,7 +1525,7 @@ export class AssistantController {
     try {
       const assembled = await withTenants(
         [tenantId],
-        (c) => assembleContext(c, threadId, thread, turn.seq, { tenantId, principal: req.principal }),
+        (c) => assembleContext(c, threadId, thread, turn.seq, { tenantId, principal: req.principal, turnContext: turn.turnContext }),
         { modules: ["assistant"] },
       );
       citations = assembled.citations;
