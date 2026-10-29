@@ -12152,7 +12152,7 @@ Mailed invite → no token in the response → the sender mints → the link acc
 
 **What it builds on (SCP-D2).** Posts stay `social_posts`, per-network content stays `social_post_variants`, client approval stays `social_post_client_reviews`, publishing stays the D14 gate (§19, SMM-09/10/40), and reports stay `social_reports` (SMM-23, §19), published through client reports (PV7-04a, §55). Comments, activity, notifications, "Needs you", work requests (§32, DW-D14), PM tasks and the Asset Library (§35) are shared, not rebuilt (SCP-D4). No PM task is made per post.
 
-**What this contract does not cover:** SCP-5b, 5c and 5e to 5h, and SCP-6 (63.20); the skin (SCP-K, UI only); the simulator's containment (SCP-Sa, its own Opus ticket; 63.10 names only the seams it uses).
+**What this contract does not cover:** SCP-5b, 5c and 5e to 5h, and SCP-6b and 6c (63.20; SCP-6a is 63.23); the skin (SCP-K, UI only); the simulator's containment (SCP-Sa, its own Opus ticket; 63.10 names only the seams it uses).
 
 ### 63.0 Conventions
 
@@ -13232,6 +13232,162 @@ The weekly report (5b: the `weekly` kind on `social_reports`), ideas for next mo
 | SCP-Q20 | A client's monthly report is approved (the HoD check) and sent only by the four; the officer writes and submits it | 63.18; PERMISSION §53.7 |
 
 **No question is open.** Ruled on 2026-10-26, after this contract's review: SCP-Q21, the four approvers decide a pipeline post's publish approval directly (63.10); SCP-Q22, the writer of a monthly report may also approve it, so reports have no maker/checker rule (63.18); SCP-Q23, ticket SCP-1q closes self-promotion into a lead seat before SCP's approvals go live (PERMISSION §53.4).
+
+### 63.23 The one-off sheet import (SCP-6a; plan §8 SCP-6, SCP-D10) — `platform-nest/src/modules/social/pipeline/sheet-import.ts` (pure), `sheet-parse.ts`, `sheet-import.controller.ts` (new); `src/core/upload-body-limits.ts`; page `{D}/settings/import` — **STATUS: CONTRACTED 2026-10-29. Built and proved on a mock sheet while SCP-D1 holds; used on the real sheet when the owner allows real data (SCP-6b).**
+
+**What it is.** The Social Media team's sheet holds two things the ERP needs once, when the team moves over: the **allocation** (one row per client: the officer, posts per month, creative source, batch, report format and due day, platforms, formats, default post time) and **next month's plan** (one row per post). The import reads a sheet the team uploads (`.xlsx` or `.csv`) or pastes (rows copied from Google Sheets or Excel arrive as tab-separated text). The person says which column is which and picks the names the server could not match. Every row's outcome is shown, and only then does anything get written.
+
+**Who.** The four approvers only. Every route here is `social_engagement` · `plan` (PERMISSION §53.6), decided first through `authorizePlan`, with 403 `not_a_social_approver` before the body is read (63.0). There is no new Cerbos kind or action, and no migration. Each imported post is still the machine's `create` (63.6.1); the four hold `approve` on any would-be post, so its extra check passes for them.
+
+**Routes** (base path 63.0):
+
+| Route | Does |
+|---|---|
+| `POST import/parse` | Reads a file or pasted text into tabs of text cells. Writes nothing. |
+| `POST import/allocation` | Allocation rows. `dryRun: true` previews; `dryRun: false` writes. |
+| `POST import/plan` | One month's posts. The same two modes. |
+
+#### 63.23.1 `POST import/parse`
+
+Takes `{filename, contentBase64}` (an `.xlsx` or `.csv`, at most 2 MiB decoded) or `{text}` (pasted, at most 2 MiB as UTF-8). Answers `{tabs: [{name, rows: string[][]}]}`.
+- **xlsx:** one tab per visible worksheet, in workbook order, read with `exceljs` (already a dependency). Every cell becomes text:
+  - a date cell becomes `YYYY-MM-DD`, with ` HH:MM` when it has a time part (exceljs hands dates over as UTC wall time);
+  - a number becomes its plain string, with no thousands separator;
+  - a formula becomes its cached result, rich text its plain text, a hyperlink its text, an empty cell `""`.
+  - Trailing empty rows and columns are trimmed.
+- **csv:** one tab named after the file without its extension. RFC 4180 quoting, using the keyword import's tokenizer (`search/keyword-import.ts`), moved to a shared module, not copied. A BOM is dropped. The separator is `,` or `;`, whichever the first line holds more of.
+- **text:** one tab named `Pasted`. Tab-separated when the first line holds a tab, else the csv rule. A quoted cell keeps its newlines, which is what Google Sheets puts on the clipboard.
+- **Limits:** at most 20 tabs, 2,000 rows and 60 columns per tab, and 5,000 characters per cell.
+- **Refusals:**
+  - 400 `sheet_too_large` with `field` (`tabs`, `rows`, `columns` or `cell`) when a limit is passed;
+  - 400 `invalid_field` with `field: "contentBase64"` when it is not base64 or is over 2 MiB, `field: "filename"` for any other extension, `field: "text"` when it is over 2 MiB, and `field: "body"` when neither or both are given;
+  - 400 `unreadable_sheet` when exceljs cannot open the file.
+- **Body limit.** The route is added to `upload-body-limits.ts`, so 2 MiB of base64 reaches the handler (`inlineUploadBodyLimit(MAX_SHEET_BYTES)`). The two import routes are added there too, with `MAX_IMPORT_BODY_BYTES` (4 MiB) exported from the controller.
+
+#### 63.23.2 The import body (both writing routes)
+
+```
+{ dryRun: boolean,
+  headerRow: boolean,                              // true: rows[0] is the header and is never imported
+  columns: { [field]: number },                    // each field's 0-based sheet column; a field left out is not imported
+  rows: string[][],                                // the cells, as parse answered them; at most 300 (allocation) or 1,000 (plan)
+  skip?: number[],                                 // indexes into rows that the person unticked
+  clientMatches?: { [sheetName]: engagementId },   // the person's pick for a client name the server could not match
+  officerMatches?: { [sheetName]: userId },        // allocation only
+  // plan only:
+  month: 'YYYY-MM', dateOrder: 'dmy'|'mdy'|'ymd', timeZone: string }   // timeZone: an IANA zone
+```
+
+Validation runs after authorization. A malformed body is 400 `invalid_field` with `field`:
+- a field name in `columns` that the route does not know, an index outside 0 to 59, or one column given to two fields;
+- a required field (`client`; for the plan also `date`) missing from `columns`;
+- more rows than allowed, a cell that is not a string, or a `skip` index outside `rows`;
+- a `clientMatches` value that is not an open engagement of this company, or an `officerMatches` value that is not an active employee member (both named by `field`, for example `clientMatches.<sheetName>`);
+- for the plan, a `month` that is not `YYYY-MM` or is before the report month (`todayIsoInTz(config.reportsTz)`), an unknown `dateOrder`, or a `timeZone` that `Intl` does not know.
+
+**Matching names** (`normalizeName`: lower case, accents removed, punctuation turned into spaces, spaces collapsed, trimmed):
+- **A client** is matched to an engagement through the client's name. Only engagements that are neither closed nor deleted count.
+  - One engagement: matched.
+  - None: `client_not_found`. The answer's `unmatched.clients` offers up to three `suggestions`: the open engagements whose normalized names share the most words with it, best first.
+  - Two or more open engagements of the same client: `client_ambiguous`.
+  - A `clientMatches` entry for the sheet name wins over the name rule.
+  - A client with no social engagement is refused, never created: an engagement carries its contract and scope and is opened in the ERP first (SCP-D10).
+- **An officer** is matched by email (exact, case ignored) or by the user's name under the same rule, among the company's active employee members (the allocation's officer test, 63.4).
+  - None: `officer_not_found`. Several: `officer_ambiguous`.
+  - An `officerMatches` entry wins.
+
+#### 63.23.3 The answer
+
+```
+{ dryRun: boolean, importId: string | null,
+  summary: { rows, ready, unchanged, refused, skipped },
+  unmatched: { clients: [{ sheetName, rows: number[], suggestions: [{ engagementId, clientName }] }],
+               officers: [{ sheetName, rows: number[] }] },
+  rows: [ { row: number,                                      // the index into rows
+            outcome: 'ready'|'unchanged'|'refused'|'skipped',
+            refusals: [{ field, code }],                      // every problem of the row at once
+            warnings: [{ field, code }],
+            ...the row as it would be written (63.23.4, 63.23.5) } ] }
+```
+- **The preview** (`dryRun: true`) answers 200 with `importId: null` and writes nothing.
+- **Apply** (`dryRun: false`) runs the preview again inside ONE transaction. It writes only when no row outside `skip` is refused. Otherwise it writes nothing and answers 409 `import_rows_refused` with the preview's answer as `detail`.
+- On success apply answers 200 with the same shape: `dryRun: false`, a new `importId` that every activity row of this import carries, and each written row's ids.
+- **A replay writes nothing new.** The rows it already wrote answer `unchanged`.
+- **Row codes.**
+  - Refusals: `missing_value`, `invalid_field`, `client_not_found`, `client_ambiguous`, `officer_not_found`, `officer_ambiguous`, `duplicate_client`, `date_outside_month`, `date_in_past`, `missing_title`, `no_cycle_deadline`.
+  - Warnings: `title_from_caption`, `default_time_used`, `same_title_in_cycle`, `discarded_since`.
+
+#### 63.23.4 Allocation rows
+
+Fields: `client` (required), `officer`, `postsPerCycle`, `creativeSource`, `deliveryBatch`, `reportFormat`, `reportDueDay`, `platforms`, `formats`, `defaultPostTime`. Each value is read leniently, then checked by the allocation PATCH's own rules (`parseAllocationPatch`, 63.4), so a value the PATCH refuses is refused here under the same field.
+- `postsPerCycle`, `reportDueDay`: the first whole number in the cell (`12`, `12 posts`).
+- `creativeSource`:
+  - `creatives` from "Creatives", "Creative team" or "Creatives dept";
+  - `in_team` from "In team", "In-team", "In house", "In-house", "Social designer" or "Own designer".
+- `deliveryBatch`: `A` or `B`, case ignored, also as "Batch A".
+- `reportFormat`: `email` from "Email" or "E-mail"; `meeting` from "Meeting", "Call", "Zoom" or "Meet".
+- `platforms` (and the plan's `placement`): a list split on `,` `/` `+` `&` `;` and new lines. Each item is mapped by the `NETWORKS` keys of `brand-book.ts`, by the networks' names, and by the short forms `IG` (instagram), `FB` (facebook), `TT` (tiktok), `LI` (linkedin), `YT` (youtube) and `Twitter` (x). An unknown item is `invalid_field`.
+- `formats` (and the plan's `format`):
+  - `feed` from "Feed", "Post", "Single", "Image" or "Static";
+  - `carousel` from "Carousel", "Slide", "Slides" or "Album";
+  - `reel` from "Reel", "Reels" or "Video";
+  - `story` from "Story", "Stories" or "IGS".
+- `defaultPostTime` (and the plan's `time`): `HH:MM`, `H:MM`, `H.MM`, `9am`, `9 am` or `7:30 pm`.
+- **An empty cell leaves the field as it is. The import never clears a value.**
+- A row is `unchanged` when every value it carries already equals the engagement's. A client named on two rows refuses both, with `duplicate_client`.
+- **Applying a row** is the allocation PATCH's write for that engagement: the same columns, the `social.engagement.allocation_changed` event with the fields, and one activity row `updated` with `{allocation: fields, via: "sheet_import", importId}`.
+- The row as written: `{engagementId, clientName, changes: {[field]: {from, to}}}`.
+
+#### 63.23.5 Plan rows
+
+One month per import. Fields: `client` and `date` (both required), `time`, `title`, `format`, `pillar`, `placement`, `isExtra`, `angle`, `objective`, `keyMessage`, `visualDirection`, `caption`, `onAssetText`, `cta`, `hashtags`.
+- **`date`** is read in `dateOrder`. The page's default is `dmy`.
+  - `2026-11-03` and an xlsx date are always year-month-day.
+  - A month name (`3 Nov`, `Nov 3`, `3 November 2026`) is read as such, in English or Indonesian; without a year it takes `month`'s year.
+  - Outside `month`: `date_outside_month`. Before today (the report day): `date_in_past`.
+- **`time`** follows `defaultPostTime`'s forms. An empty cell takes the engagement's `default_post_time`, and without one `09:00`, with the warning `default_time_used`. `scheduledAt` is the date and time in `timeZone`, written as an ISO instant.
+- **`title`** is required by the machine (1 to 200 characters). An empty title takes the caption's first line, cut at 80 characters, with the warning `title_from_caption`. With neither: `missing_title`.
+- **`isExtra`** is yes from `yes`, `y`, `ya`, `true`, `1`, `x`, `✓` or `extra`. An empty cell is no.
+- **`hashtags`** are split on spaces, commas and new lines, with each `#` dropped.
+- **Every value then passes the machine's own field rule.** `FIELD_VALUE_RULES` (63.6.3) is exported as `contentFieldProblem`, and its refusal names the field. Nothing here restates a length or a list of values.
+- **The cycle.** The row uses its engagement's cycle for `month`.
+  - With none, applying creates it exactly as `PUT cycles` does (63.5): the deadline the A/B pre-fill gives (`prefillDeadline`), its `ready_by`, and the content-month PM task of 63.13 (`syncContentMonthTask`).
+  - The preview names this as `cycle: {cycleId: null, deadline, created: true}`.
+  - With no batch there is no pre-fill: `no_cycle_deadline`. Set the client's batch in the allocation, or the deadline in Settings, first.
+- **The post.** Each ready row is the machine's `create` (63.6.1) with `title`, `isExtra`, `format`, `pillar`, `scheduledAt` and `placement`, in the state the machine writes (`planned`).
+  - The create's `set` gains, in the same INSERT, the row's other planning fields (`angle`, `objective`, `keyMessage`, `visualDirection`) and its copy (`caption`, `onAssetText`, `cta`, `hashtags`).
+  - **The sheet's copy is the post's starting text (SCP-D10).** The `edit` rules do not change. In `planned` only the planning fields are editable; the officer changes the copy once the post is in Drafting.
+- **The same row twice.**
+  - The post's id is a uuid v5 of `tenantId|engagementId|month|date|normalized title`. A replay finds it and answers `unchanged` (the create's `created: false`, 63.0).
+  - A post with that id that has since been discarded or deleted is `unchanged` too, with the warning `discarded_since`. The import never brings it back.
+  - Another post of the same cycle with the same normalized title is the warning `same_title_in_cycle`.
+- After the posts, each cycle the import touched has its content-month progress synced once (`syncContentMonthProgress`, as create does). Each new post gets the create's activity row, with `{via: "sheet_import", importId}` added.
+- The row as written: `{engagementId, clientName, cycle: {cycleId, deadline, created}, post: {id, title, format, scheduledAt, isExtra, placement}}`.
+
+#### 63.23.6 The page
+
+`{D}/settings/import`, "Import from your sheet", is linked from the Settings page. It sits in the `settings` row's area, so there is no new row and the row's `canLeadSocial` gate applies. Anyone else who opens it by address gets the routes' 403.
+1. **What:** the allocation, or a month's plan (next month by default).
+2. **The sheet:** upload an `.xlsx` or `.csv`, or paste. Then the tab, and "the first row is the header".
+3. **The columns:** each field with its sheet column, guessed from the header row by aliases (the names the team's sheet uses) and changeable. The date order is chosen here too.
+4. **The names** the server could not match: pick the client (offered the `suggestions`) or the officer.
+5. **The preview:** every row's outcome and reasons. Untick a row to skip it.
+6. **Import N rows**, then the result, with links to the allocation, each client's Plan tab and Settings' deadline table.
+
+A "CSV template" download holds the expected headers. In DEMO_MODE the page shows the steps' explanation and the template, and says importing needs the live ERP: the demo has no writer.
+
+#### 63.23.7 Proofs (63.21's rules)
+
+- `sheet-import.test.ts` (pure): the cell readers, the header guesses, `normalizeName` and the suggestions, the three date orders and the month names, the time forms, the lists, and the yes/no forms.
+- `sheet-parse.test.ts`: an xlsx built in the test with exceljs (dates, numbers, a formula, rich text, a hidden sheet, the limits); a csv with quotes, `;` and a BOM; a paste with tabs and quoted newlines.
+- `sheet-import.http.test.ts`, on real Postgres and Cerbos:
+  - a mock sheet's allocation and next month's plan for three mock clients, previewed and then applied: the rows written, a missing cycle made from the pre-fill with its content-month task, the posts `planned` with their copy, and the activity's `importId`;
+  - the replay answering `unchanged`;
+  - one refused row refusing the whole apply, and a skipped row left out;
+  - `clientMatches` and `officerMatches`;
+  - an officer and a company admin refused 403 `not_a_social_approver`;
+  - another company's engagement id in `clientMatches` refused 400.
+- The page's tests in platform-ui.
 
 ## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
 
