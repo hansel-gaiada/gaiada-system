@@ -75,9 +75,9 @@ export const ATTENTION_WORDS: Readonly<Record<AttentionKind, string>> = {
   at_risk: "Will be late unless it moves soon",
   blocked: "Stopped until something outside the post changes",
   failed_post: "The network refused it; it did not go live",
-  boost_waiting: "A boost candidate is waiting for a decision",
-  report_due: "The monthly report is due and not yet delivered",
-  report_to_check: "A drafted report is waiting to be checked",
+  boost_waiting: "A boost was requested and is waiting for the client, or was approved and has not started",
+  report_due: "Due on the client’s report day and not yet sent",
+  report_to_check: "A drafted report is waiting for its check",
 };
 
 export const WORK_ROLE_LABEL: Readonly<Record<WorkRole, string>> = { officer: "Officer", copywriter: "Copywriter", designer: "Designer", approver: "Approver" };
@@ -135,9 +135,14 @@ export function holderText(h: AttentionItem["holder"]): string | null {
 
 const e = encodeURIComponent;
 
-/** Where an attention row opens: the post when it names one, else the client's profile (a report is a tab there). */
+/** Where an attention row opens. A report opens its own page, or the reports list when it is not drafted yet (an overdue report has no id), and never the client's
+ *  profile; a boost opens the Boosting page; a post opens its post page. A row that names none of them falls back to the client's profile. */
 export function attentionHref(deptId: string, it: AttentionItem): string {
   const base = `/departments/${e(deptId)}`;
+  if (it.kind === "report_due" || it.kind === "report_to_check") {
+    return it.reportId ? `${base}/social-reports/${e(it.reportId)}` : `${base}/social-reports`;
+  }
+  if (it.kind === "boost_waiting") return `${base}/boosts`;
   if (it.postId) return `${base}/posts/${e(it.postId)}`;
   return `${base}/profile/${e(it.engagementId)}`;
 }

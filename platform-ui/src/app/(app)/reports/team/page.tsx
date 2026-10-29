@@ -14,6 +14,7 @@ import { ReportRangeError } from "@/components/reports/ReportRangeError";
 import { ReportPeriodBar } from "@/components/reports/ReportPeriodBar";
 import { PrintButton } from "@/components/reports/PrintButton";
 import { formatTeamKpi, NO_DATA } from "@/lib/teamReport";
+import { SocialTeamBlock } from "@/components/social/SocialTeamBlock";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -145,6 +146,8 @@ export default async function TeamReportPage({
       ];
     });
     const changeQs = new URLSearchParams({ periodKind: overview.periodKind, start: overview.start, end: overview.end });
+    // SCP-5d: awaited here (it is an async component that never throws and answers null for any other department or a refusal), so the page stays one tree.
+    const socialBlock = await SocialTeamBlock({ me, userId, tenantId: tenant, unit: sp.unit });
     return (
       <>
         <PageHeader
@@ -165,6 +168,9 @@ export default async function TeamReportPage({
         />
         <p className="rp-printonly">{periodText(overview.periodKind, overview.start, overview.end)}</p>
         <ReportPeriodBar value={{ kind: overview.periodKind, start: overview.start, end: overview.end }} todayIso={today} />
+        {/* SCP-5d (BFF §63.19): the Social Media department's Team dashboard block. It draws only for that department, only for the four approvers (a 403 or a failed read
+            hides it), and never changes the roster below it; every other unit renders exactly as before. */}
+        {socialBlock}
         {scopes.length === 0 ? (
           <EmptyNote>Nobody is placed in this department.</EmptyNote>
         ) : (
