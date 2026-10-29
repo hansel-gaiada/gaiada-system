@@ -652,13 +652,27 @@ describe("agent-runner service", () => {
 
     const r = await app.inject({ method: "GET", url: "/agents", headers: AUTH });
     expect(r.statusCode).toBe(200);
-    const body = r.json() as { agents: Array<{ name: string; tools: string[]; writeCapable: boolean }>; supervisor: { name: string } };
+    const body = r.json() as { agents: Array<{ name: string; tools: string[]; writeCapable: boolean; departments: string[] }>; supervisor: { name: string } };
     const byName = new Map(body.agents.map((a) => [a.name, a]));
     expect([...byName.keys()].sort()).toEqual(["extra-reader", "reader", "reconcile-writer", "task-triager", "test-writer"]);
     expect(byName.get("reader")?.writeCapable).toBe(false);
     expect(byName.get("reader")?.tools).toEqual(Object.keys(reader.tools));
     expect(byName.get("task-triager")?.writeCapable).toBe(true);
     expect(body.supervisor.name).toBe(realSupervisor.name);
+  });
+
+  // AIP-14 — `departments` is display metadata passed through from the AgentDef: a copy of what it declares, and [] (never
+  // missing) for a general agent, so a client can treat the field as always present.
+  it("GET /agents carries each agent's departments, and [] for a general one", async () => {
+    const { app } = build({
+      deps: scripted(['{"final":"x"}']),
+      reg: registry({ specialists: { reader, "social-reader": { ...reader, name: "social-reader", departments: ["social-media", "creatives"] } } }),
+    });
+    const r = await app.inject({ method: "GET", url: "/agents", headers: AUTH });
+    const byName = new Map((r.json() as { agents: Array<{ name: string; departments: string[] }> }).agents.map((a) => [a.name, a]));
+    expect(byName.get("social-reader")?.departments).toEqual(["social-media", "creatives"]);
+    expect(byName.get("reader")?.departments).toEqual([]);
+    for (const a of byName.values()) expect(Array.isArray(a.departments)).toBe(true);
   });
 
   // ASST-21 — episodic history, narrowed by caller-supplied run ids (the platform's own

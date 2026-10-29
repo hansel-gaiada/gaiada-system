@@ -24,6 +24,9 @@ export interface AssistantOrigin {
    *  or `null` when the origin has no department (a record page, a department the company does not have) or the
    *  workspace has no org node to take an id from. Sent to the server with each message; never shown. */
   departmentId: string | null;
+  /** AIP-14: the resolved workspace's `key` ("web-dev"), the one the roster's `departments` are written in, or `null`
+   *  when there is no department. Used to list that department's agents first; never sent to the server. */
+  workspaceKey: string | null;
   /** The page's own name within that workspace ("Board"), when the registry has one for the path. */
   page: string | null;
   /** The department's starter prompts; `null` leaves today's generic suggestions. */
@@ -83,11 +86,12 @@ export function resolveAssistantOrigin(from: string | null | undefined, refs: re
       deptId = refs.find((r) => r.workspace.key === area.slug)?.deptId ?? null;
     }
   }
-  if (!ws) return { path, department: null, departmentId: null, page: null, prompts: null };
+  if (!ws) return { path, department: null, departmentId: null, workspaceKey: null, page: null, prompts: null };
   return {
     path,
     department: ws.label,
     departmentId: deptId,
+    workspaceKey: ws.key,
     page: pageNameOf(ws, deptId, path),
     prompts: ws.assistantPrompts,
   };

@@ -248,9 +248,9 @@ interface DemoHandoff {
 // A small, fixed stand-in for the runner's REAL registry (see `handoffs.ts`'s `fetchRoster` for
 // why the live backend never hardcodes this) — demo mode has no runner process to ask.
 const DEMO_ROSTER_AGENTS = [
-  { name: "status-reporter", tools: ["projects.list", "tasks.list"], maxSteps: 8, maxToolCalls: 6, writeCapable: false, evaledProviders: [] as string[] },
-  { name: "approvals-chaser", tools: ["agency.pendingApprovals"], maxSteps: 4, maxToolCalls: 2, writeCapable: false, evaledProviders: [] as string[] },
-  { name: "task-triager", tools: ["tasks.list", "tasks.update"], maxSteps: 10, maxToolCalls: 6, writeCapable: true, evaledProviders: ["openai"] },
+  { name: "status-reporter", tools: ["projects.list", "tasks.list"], maxSteps: 8, maxToolCalls: 6, writeCapable: false, evaledProviders: [] as string[], departments: [] as string[] },
+  { name: "approvals-chaser", tools: ["agency.pendingApprovals"], maxSteps: 4, maxToolCalls: 2, writeCapable: false, evaledProviders: [] as string[], departments: ["social-media", "creatives"] },
+  { name: "task-triager", tools: ["tasks.list", "tasks.update"], maxSteps: 10, maxToolCalls: 6, writeCapable: true, evaledProviders: ["openai"], departments: [] as string[] },
 ];
 
 const now = () => new Date().toISOString();

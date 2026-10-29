@@ -7,8 +7,8 @@ import {
   groupCapabilities, parseCitations, parseSessionResumeMismatch,
   deriveProposalCardState, isWriteProposal, canActOnProposal, proposalStateLabel, formatRedactedArgs,
   hasPendingProposalDecision, normalizeThreadToolCall, normalizeLiveToolCall, partitionToolCalls,
-  formatExpiresAt,
-  type AssistantThread, type AssistantMemory, type AssistantCapability, type ThreadToolCall, type LiveToolCall,
+  formatExpiresAt, splitRosterByDepartment,
+  type RosterAgent, type AssistantThread, type AssistantMemory, type AssistantCapability, type ThreadToolCall, type LiveToolCall,
 } from "./assistant";
 
 function thread(overrides: Partial<AssistantThread> = {}): AssistantThread {
@@ -681,5 +681,31 @@ describe("BRAIN_OPTIONS", () => {
     for (const o of BRAIN_OPTIONS) expect(brainOptionLabel(o.value)).toBe(o.label);
     expect(brainOptionLabel("some-future-provider")).toBe("some-future-provider");
     expect(brainOptionLabel(null)).toBe("Auto (failover chain)");
+  });
+});
+
+// AIP-14 — the roster split by department.
+describe("splitRosterByDepartment", () => {
+  const agent = (name: string, departments: string[]): RosterAgent => ({ name, tools: [], maxSteps: 1, maxToolCalls: 1, writeCapable: false, evaledProviders: [], departments });
+  const all = [agent("general", []), agent("social", ["social-media", "creatives"]), agent("finance-only", ["finance"])];
+
+  it("with no department nothing is split: every agent is shown, in order", () => {
+    for (const key of [null, undefined, ""]) {
+      const r = splitRosterByDepartment(all, key);
+      expect(r.shown.map((a) => a.name)).toEqual(["general", "social", "finance-only"]);
+      expect(r.other).toEqual([]);
+    }
+  });
+
+  it("shows the department's agents and the general ones; the rest go to other, none dropped", () => {
+    const r = splitRosterByDepartment(all, "social-media");
+    expect(r.shown.map((a) => a.name)).toEqual(["general", "social"]);
+    expect(r.other.map((a) => a.name)).toEqual(["finance-only"]);
+    expect(r.shown.length + r.other.length).toBe(all.length);
+  });
+
+  it("treats an agent with a missing departments field as general", () => {
+    const legacy = { ...agent("legacy", []), departments: undefined } as unknown as RosterAgent;
+    expect(splitRosterByDepartment([legacy], "hr").shown.map((a) => a.name)).toEqual(["legacy"]);
   });
 });

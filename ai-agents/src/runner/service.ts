@@ -859,6 +859,8 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
       maxToolCalls: def.maxToolCalls,
       writeCapable,
       evaledProviders: def.evaledProviders ?? [],
+      // AIP-14 — display metadata: the workspace keys this agent is shown in; `[]` = every department.
+      departments: [...(def.departments ?? [])],
     });
     return {
       agents: [

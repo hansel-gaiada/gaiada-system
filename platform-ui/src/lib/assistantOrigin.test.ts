@@ -16,6 +16,7 @@ describe("resolveAssistantOrigin", () => {
     expect(o.path).toBe("/departments/d-web/board");
     expect(o.department).toBe("Web Dev");
     expect(o.departmentId).toBe("d-web");
+    expect(o.workspaceKey).toBe("web-dev");
     expect(o.page).toBe(boardLabel);
     expect(originLabel(o)).toBe(`Web Dev · ${boardLabel}`);
     expect(o.prompts).toEqual(webDev.assistantPrompts);
@@ -32,6 +33,7 @@ describe("resolveAssistantOrigin", () => {
     expect(o!.page).toBe("Pipeline");
     expect(o!.prompts).toEqual(webDev.assistantPrompts);
     expect(o!.departmentId).toBeNull(); // no ref to take an id from
+    expect(o!.workspaceKey).toBe("web-dev"); // the key comes from the workspace, not the ref
     // with the company's department list it takes the matching ref's id
     expect(resolveAssistantOrigin("/pipeline", refs)!.departmentId).toBe("d-web");
   });
@@ -41,6 +43,7 @@ describe("resolveAssistantOrigin", () => {
     const o = resolveAssistantOrigin("/departments/d-x", [{ deptId: "d-x", workspace: generic }])!;
     expect(o.department).toBe("Brand Studio");
     expect(o.departmentId).toBe("d-x");
+    expect(o.workspaceKey).toBe(generic.key);
     expect(o.prompts).toEqual(GENERIC_WORKSPACE.assistantPrompts);
   });
 
@@ -55,6 +58,7 @@ describe("resolveAssistantOrigin", () => {
       expect(o.path).toBe(path);
       expect(o.department).toBeNull();
       expect(o.departmentId).toBeNull();
+      expect(o.workspaceKey).toBeNull();
       expect(o.page).toBeNull();
       expect(o.prompts).toBeNull();
       expect(originLabel(o)).toBeNull();
@@ -64,6 +68,7 @@ describe("resolveAssistantOrigin", () => {
   it("shows no department for a department the person's company does not have", () => {
     expect(resolveAssistantOrigin("/departments/d-gone/board", refs)!.department).toBeNull();
     expect(resolveAssistantOrigin("/departments/d-gone/board", refs)!.departmentId).toBeNull();
+    expect(resolveAssistantOrigin("/departments/d-gone/board", refs)!.workspaceKey).toBeNull();
   });
 
   it("is null without an origin, and for a path it will not send anyone back to", () => {

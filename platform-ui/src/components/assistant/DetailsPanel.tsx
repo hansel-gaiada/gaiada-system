@@ -21,11 +21,13 @@ export const DETAILS_TABS: readonly { key: DetailsTab; label: string }[] = [
 
 export const DETAILS_PANEL_ID = "asst-details-panel";
 
-export function DetailsPanel({ tab, onTab, onClose, activeThreadId }: {
+export function DetailsPanel({ tab, onTab, onClose, activeThreadId, workspaceKey = null }: {
   tab: DetailsTab;
   onTab: (tab: DetailsTab) => void;
   onClose: () => void;
   activeThreadId: string | null;
+  /** AIP-14: the department the assistant was opened from (a workspace key), for the Roster tab's filter; `null` = no filter. */
+  workspaceKey?: string | null;
 }) {
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
@@ -91,7 +93,7 @@ export function DetailsPanel({ tab, onTab, onClose, activeThreadId }: {
       </div>
       <div id="asst-details-tabpanel" className="asst-details__body" role="tabpanel" aria-labelledby={`asst-details-tab-${tab}`}>
         {tab === "memory" && <MemoryPanel activeThreadId={activeThreadId} />}
-        {tab === "roster" && <RosterPanel activeThreadId={activeThreadId} />}
+        {tab === "roster" && <RosterPanel activeThreadId={activeThreadId} workspaceKey={workspaceKey} />}
         {tab === "capabilities" && <CapabilitiesPanel />}
       </div>
     </aside>

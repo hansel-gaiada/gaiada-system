@@ -24,6 +24,9 @@ export const approvalsChaser: AgentDef = {
   },
   maxSteps: 4,
   maxToolCalls: 2,
+  // AIP-14 (display only): agency.pendingApprovals is the agency module's campaign-approval queue, which the
+  // social and creative workspaces own.
+  departments: ["social-media", "creatives"],
 };
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -263,6 +266,8 @@ export const socialDrafter: AgentDef = {
   maxSteps: 6,
   maxToolCalls: 4,
   evaledProviders: [],
+  // AIP-14 (display only): drafts replies to social inbox threads.
+  departments: ["social-media"],
 };
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════

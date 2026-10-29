@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import {
-  handoffStatusLabel, hasActiveHandoff, type AssistantHandoff, type RosterAgent, type RosterEpisode,
+  handoffStatusLabel, hasActiveHandoff, splitRosterByDepartment, type AssistantHandoff, type RosterAgent, type RosterEpisode,
 } from "@/lib/assistant";
 import {
   createHandoffAction, getHandoffTranscriptAction, refreshHandoffsAction, refreshRosterAction,
@@ -24,7 +24,11 @@ const POLL_MS = 4000;
 
 // DW-2h — the Roster tab of the Details panel (`DetailsPanel`): the panel renders only its body; the title row
 // and the close button belong to the Details panel.
-export function RosterPanel({ activeThreadId }: { activeThreadId: string | null }) {
+//
+// AIP-14 — with a `workspaceKey` (the department the assistant was opened from) the registry lists that department's
+// agents and the general ones first, and the rest under a collapsed "Other agents": display only, nothing is hidden for
+// good, and the hand-off picker above still offers every agent.
+export function RosterPanel({ activeThreadId, workspaceKey = null }: { activeThreadId: string | null; workspaceKey?: string | null }) {
   const [agents, setAgents] = useState<RosterAgent[]>([]);
   const [supervisorName, setSupervisorName] = useState<string | null>(null);
   const [runnerConfigured, setRunnerConfigured] = useState(true);
@@ -80,6 +84,17 @@ export function RosterPanel({ activeThreadId }: { activeThreadId: string | null 
     const t = setInterval(() => void loadHandoffs(activeThreadId), POLL_MS);
     return () => clearInterval(t);
   }, [activeThreadId, handoffs, loadHandoffs]);
+
+  const { shown: shownAgents, other: otherAgents } = splitRosterByDepartment(agents, workspaceKey);
+  const agentRow = (a: RosterAgent) => (
+    <li key={a.name} className="asst-mem__row">
+      <p className="asst-mem__content">{a.name}</p>
+      <p className="asst-mem__group-hint">
+        {a.tools.length > 0 ? a.tools.join(", ") : "no tools"}
+        {a.writeCapable ? " · write-capable" : ""}
+      </p>
+    </li>
+  );
 
   async function handleHandoff(e: React.FormEvent) {
     e.preventDefault();
@@ -207,21 +222,19 @@ export function RosterPanel({ activeThreadId }: { activeThreadId: string | null 
             <section aria-label="Registry">
               <h2 className="asst-mem__group-label">Roster</h2>
               <ul>
-                {agents.map((a) => (
-                  <li key={a.name} className="asst-mem__row">
-                    <p className="asst-mem__content">{a.name}</p>
-                    <p className="asst-mem__group-hint">
-                      {a.tools.length > 0 ? a.tools.join(", ") : "no tools"}
-                      {a.writeCapable ? " · write-capable" : ""}
-                    </p>
-                  </li>
-                ))}
+                {shownAgents.map(agentRow)}
                 {supervisorName && (
                   <li className="asst-mem__row">
                     <p className="asst-mem__content">{supervisorName} <span className="asst-mem__group-hint">(supervisor)</span></p>
                   </li>
                 )}
               </ul>
+              {otherAgents.length > 0 && (
+                <details className="asst-roster__other">
+                  <summary className="asst-roster__other-summary">Other agents ({otherAgents.length})</summary>
+                  <ul>{otherAgents.map(agentRow)}</ul>
+                </details>
+              )}
             </section>
 
             <section aria-label="Episodic history">

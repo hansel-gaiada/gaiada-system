@@ -5,7 +5,7 @@ import { DetailsPanel, DETAILS_TABS, type DetailsTab } from "./DetailsPanel";
 
 // The three panels load their own data; this test is about the Details panel's own structure and keys.
 vi.mock("./MemoryPanel", () => ({ MemoryPanel: ({ activeThreadId }: { activeThreadId: string | null }) => <div data-testid="memory-body">{activeThreadId}<input aria-label="draft" /></div> }));
-vi.mock("./RosterPanel", () => ({ RosterPanel: () => <div data-testid="roster-body" /> }));
+vi.mock("./RosterPanel", () => ({ RosterPanel: ({ workspaceKey }: { workspaceKey?: string | null }) => <div data-testid="roster-body" data-workspace={workspaceKey ?? ""} /> }));
 vi.mock("./CapabilitiesPanel", () => ({ CapabilitiesPanel: () => <div data-testid="capabilities-body" /> }));
 
 function Harness({ initial = "memory", onClose = () => {} }: { initial?: DetailsTab; onClose?: () => void }) {
@@ -34,6 +34,14 @@ describe("DetailsPanel", () => {
     expect(screen.queryByTestId("memory-body")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Capabilities" }));
     expect(screen.getByTestId("capabilities-body")).toBeInTheDocument();
+  });
+
+  it("hands the department's workspace key to the Roster tab (AIP-14), and none by default", () => {
+    const { unmount } = render(<DetailsPanel tab="roster" onTab={() => {}} onClose={() => {}} activeThreadId="t1" workspaceKey="seo" />);
+    expect(screen.getByTestId("roster-body")).toHaveAttribute("data-workspace", "seo");
+    unmount();
+    render(<DetailsPanel tab="roster" onTab={() => {}} onClose={() => {}} activeThreadId="t1" />);
+    expect(screen.getByTestId("roster-body")).toHaveAttribute("data-workspace", "");
   });
 
   it("opens on the tab it is given, focused, with the tab panel named by that tab", () => {

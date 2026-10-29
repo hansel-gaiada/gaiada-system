@@ -1006,6 +1006,23 @@ export interface RosterAgent {
   maxToolCalls: number;
   writeCapable: boolean;
   evaledProviders: string[];
+  /** AIP-14 — workspace keys (`web-dev`, `social-media`, ...) this specialist is shown in; `[]` = every department.
+   *  Display metadata only: it never limits who may be handed work. */
+  departments: string[];
+}
+
+/** AIP-14 — the roster split for one department: the agents shown in it (their `departments` list the key, or is empty = a
+ *  general agent) and the rest. With no `workspaceKey` nothing is split: every agent is `shown`. Order is kept, and no
+ *  agent is dropped, so the "other" group can still be used to hand work to. */
+export function splitRosterByDepartment(agents: readonly RosterAgent[], workspaceKey: string | null | undefined): { shown: RosterAgent[]; other: RosterAgent[] } {
+  if (!workspaceKey) return { shown: [...agents], other: [] };
+  const shown: RosterAgent[] = [];
+  const other: RosterAgent[] = [];
+  for (const a of agents) {
+    const d = a.departments ?? [];
+    (d.length === 0 || d.includes(workspaceKey) ? shown : other).push(a);
+  }
+  return { shown, other };
 }
 
 /** One episodic run-history entry (ai-agents `Episode`, narrowed server-side to THIS caller's own

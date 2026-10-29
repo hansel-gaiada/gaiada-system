@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), back: vi.
 vi.mock("@/lib/prefsActions", () => ({ setAssistantRailCollapsedAction: vi.fn() }));
 vi.mock("./navigate", () => ({ replaceLocation: vi.fn() }));
 vi.mock("./MemoryPanel", () => ({ MemoryPanel: () => <div data-testid="memory-body" /> }));
-vi.mock("./RosterPanel", () => ({ RosterPanel: () => <div data-testid="roster-body" /> }));
+vi.mock("./RosterPanel", () => ({ RosterPanel: ({ workspaceKey }: { workspaceKey?: string | null }) => <div data-testid="roster-body" data-workspace={workspaceKey ?? ""} /> }));
 vi.mock("./CapabilitiesPanel", () => ({ CapabilitiesPanel: () => <div data-testid="capabilities-body" /> }));
 vi.mock("@/lib/assistantActions", () => ({
   refreshThreadsAction: vi.fn(), refreshThreadAction: vi.fn(), createThreadAction: vi.fn(),
@@ -44,6 +44,7 @@ const WEB_DEV: AssistantOrigin = {
   path: "/departments/d-web/board",
   department: "Web Dev",
   departmentId: "d-web",
+  workspaceKey: "web-dev",
   page: "Board",
   prompts: [
     { label: "Summarise this week's requests", prompt: "Summarise this week's requests to the Web Dev team." },
@@ -97,6 +98,18 @@ describe("the Details panel", () => {
     expect(screen.getByRole("tab", { name: "Roster" })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("gives the Roster tab the origin's workspace key (AIP-14), and none when there is no department", () => {
+    const { unmount } = renderPage({ origin: WEB_DEV });
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Roster" }));
+    expect(screen.getByTestId("roster-body")).toHaveAttribute("data-workspace", "web-dev");
+    unmount();
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Roster" }));
+    expect(screen.getByTestId("roster-body")).toHaveAttribute("data-workspace", "");
+  });
+
   it("'See everything I can do' in the empty state opens Details on the Capabilities tab", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "See everything I can do" }));
@@ -135,7 +148,7 @@ describe("where you are: the department chip and its prompts", () => {
   });
 
   it("an origin that belongs to no department keeps today's suggestions and shows no department", async () => {
-    renderPage({ origin: { path: "/projects/p-web-1", department: null, departmentId: null, page: null, prompts: null } });
+    renderPage({ origin: { path: "/projects/p-web-1", department: null, departmentId: null, workspaceKey: null, page: null, prompts: null } });
     expect(await screen.findByRole("button", { name: "Ask about your projects" })).toBeInTheDocument();
     expect(screen.queryByText("Opened from")).not.toBeInTheDocument();
   });

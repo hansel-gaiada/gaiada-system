@@ -68,6 +68,8 @@ export interface RosterAgent {
   maxToolCalls: number;
   writeCapable: boolean;
   evaledProviders: string[];
+  /** AIP-14 — workspace keys this agent is shown in; `[]` = every department. Display metadata only. */
+  departments: string[];
 }
 
 export interface Roster {
@@ -101,6 +103,10 @@ async function timedFetch(url: string, opts: FetchOpts, init: RequestInit = {}):
   }
 }
 
+function stringList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
 /** The roster's registry half. Fails CLOSED to an empty, `runnerConfigured:false` list on any
  *  transport/parse problem — never a cached or hardcoded fallback that could drift from what the
  *  runner would actually accept at handoff time. */
@@ -113,8 +119,10 @@ export async function fetchRoster(opts: FetchOpts = {}): Promise<Roster> {
       headers: token ? { authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) return { agents: [], supervisor: null, runnerConfigured: false };
-    const body = (await res.json()) as { agents?: RosterAgent[]; supervisor?: { name: string } | null };
-    return { agents: Array.isArray(body.agents) ? body.agents : [], supervisor: body.supervisor ?? null, runnerConfigured: true };
+    const body = (await res.json()) as { agents?: Array<Omit<RosterAgent, "departments"> & { departments?: unknown }>; supervisor?: { name: string } | null };
+    // AIP-14: an older runner sends no `departments`; anything that is not an array of strings reads as [] (every department).
+    const agents = Array.isArray(body.agents) ? body.agents.map((a) => ({ ...a, departments: stringList(a.departments) })) : [];
+    return { agents, supervisor: body.supervisor ?? null, runnerConfigured: true };
   } catch {
     return { agents: [], supervisor: null, runnerConfigured: false };
   }

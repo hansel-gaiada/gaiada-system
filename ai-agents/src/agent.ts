@@ -121,6 +121,12 @@ export interface AgentDef {
    *  write-capable agent is forced read-only until an operator evals one (see runWriteAgent). Ignored
    *  for read-only agents. */
   evaledProviders?: string[];
+  /** AIP-14 — the departments this specialist is SHOWN in: workspace keys (`web-dev`, `seo`, `social-media`,
+   *  `creatives`, `gm`, `hr`, `finance`, `it` — `platform-ui/src/lib/workspaces.ts`). Absent or empty ⇒ every
+   *  department (a general agent). DISPLAY METADATA ONLY: the assistant's Details panel uses it to list a
+   *  department's agents first. It changes no agent's behaviour, tools, prompt, budget or authority, and a
+   *  person may still hand work to any agent. */
+  departments?: readonly string[];
 }
 
 export interface Envelope {

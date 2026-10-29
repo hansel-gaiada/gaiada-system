@@ -498,7 +498,7 @@ export function AssistantWorkspace({
         />
       </div>
       {detailsOpen && (
-        <DetailsPanel tab={detailsTab} onTab={setDetailsTab} onClose={closeDetails} activeThreadId={activeThreadId} />
+        <DetailsPanel tab={detailsTab} onTab={setDetailsTab} onClose={closeDetails} activeThreadId={activeThreadId} workspaceKey={origin?.workspaceKey ?? null} />
       )}
       {toastMsg && <Toast message={toastMsg} />}
     </div>

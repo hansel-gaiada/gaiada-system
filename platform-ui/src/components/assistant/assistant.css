@@ -276,6 +276,9 @@
 
 /* ---- Roster panel (ASST-21) — reuses .asst-mem's shell; these are the roster/handoff-only bits -- */
 .asst-roster__handoff { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 12px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.asst-roster__other { border-top: 0.5px solid var(--erp-hairline-soft); }
+.asst-roster__other-summary { padding: 8px 14px; cursor: pointer; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
+.asst-roster__other-summary:hover, .asst-roster__other-summary:focus-visible { color: var(--text-primary); }
 .asst-roster__status-chip {
   font: 700 9px var(--font-body); letter-spacing: 0.06em; color: var(--ink-subtle);
 }
