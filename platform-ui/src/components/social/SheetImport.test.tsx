@@ -53,6 +53,21 @@ const mount = (over: Partial<Parameters<typeof SheetImport>[0]> = {}) => render(
 const click = (name: string | RegExp) => fireEvent.click(screen.getByRole("button", { name }));
 const pickPlan = () => fireEvent.click(screen.getByRole("radio", { name: /A month's plan/ }));
 
+/** Picks a name in the names step. Under CI load the select found by a query can be re-rendered before the change lands, so the pick is applied to a
+ *  fresh query until the select holds it (a lost pick once sent a second preview without `officerMatches`, ci.yml 40850692318). */
+async function pickName(label: RegExp, value: string) {
+  await waitFor(() => {
+    const el = screen.getByLabelText(label) as HTMLSelectElement;
+    if (el.value !== value) fireEvent.change(el, { target: { value } });
+    expect(screen.getByLabelText(label)).toHaveValue(value);
+  });
+}
+/** "Preview again", once the first preview has finished (the button reads "Checking…" and is disabled while it runs). */
+async function previewAgain() {
+  await waitFor(() => expect(screen.getByRole("button", { name: "Preview again" })).toBeEnabled());
+  click("Preview again");
+}
+
 /** Step 1 to 3 on a pasted plan: leaves the wizard on the columns step. */
 async function toColumns(tabs = [{ name: "Pasted", rows: PLAN_ROWS }]) {
   parse.mockResolvedValue({ ok: true, tabs });
@@ -283,7 +298,7 @@ describe("title rows above the header", () => {
     expect(body).not.toHaveProperty("skip");
     // The names step: the server's row 2 is the sheet's row 6 (offset 3).
     expect(screen.getByText("Row 6")).toBeInTheDocument();
-    click("Preview again");
+    await previewAgain();
     await screen.findByRole("heading", { name: /5\. Preview/ });
     const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(2);
@@ -370,8 +385,8 @@ describe("a plan import, end to end", () => {
     expect([...groups].map((g) => g.label)).toEqual(["Suggested", "All open clients"]);
     expect([...groups[0].querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Alpha Co"]);
     expect([...groups[1].querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Brand Alpha", "Gamma Ltd"]);
-    fireEvent.change(pick, { target: { value: "e-alpha2" } });
-    click("Preview again");
+    await pickName(/Client for .Alfa Co./, "e-alpha2");
+    await previewAgain();
 
     // The second preview carries the pick.
     await screen.findByRole("heading", { name: /5\. Preview/ });
@@ -465,8 +480,8 @@ describe("a plan import, end to end", () => {
     click("Preview");
     const pick = await screen.findByLabelText(/Officer for .Sammy./);
     expect(within(pick).getAllByRole("option").map((o) => o.textContent)).toEqual(["Leave unmatched (its rows are refused)", "Sam Officer"]);
-    fireEvent.change(pick, { target: { value: "u-sam" } });
-    click("Preview again");
+    await pickName(/Officer for .Sammy./, "u-sam");
+    await previewAgain();
     await screen.findByRole("heading", { name: /5\. Preview/ });
     expect(preview.mock.calls[1][1]).toMatchObject({ officerMatches: { Sammy: "u-sam" } });
     expect(preview.mock.calls[1][1]).not.toHaveProperty("month");
