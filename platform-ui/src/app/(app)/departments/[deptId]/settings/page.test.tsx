@@ -150,6 +150,22 @@ describe("the deadline table", () => {
   });
 });
 
+describe("the way into the sheet import (SCP-6a)", () => {
+  it("links 'Import from your sheet' for a person who may plan", async () => {
+    const { container } = await mount();
+    const slot = container.querySelector('[data-slot="sheet-import"]') as HTMLElement;
+    expect(slot).not.toBeNull();
+    expect(within(slot).getByRole("heading", { name: "Moving from the sheet?" })).toBeInTheDocument();
+    expect(within(slot).getByRole("link", { name: "Import from your sheet" })).toHaveAttribute("href", "/departments/d-soc/settings/import");
+  });
+  it("shows no link to a person who may not plan", async () => {
+    vi.mocked(getSocialSettings).mockResolvedValue(ok(settings({ canPlan: false })));
+    const { container } = await mount();
+    expect(container.querySelector('[data-slot="sheet-import"]')).toBeNull();
+    expect(screen.queryByRole("link", { name: "Import from your sheet" })).not.toBeInTheDocument();
+  });
+});
+
 describe("the settings section", () => {
   it("shows the buffer and the factor, and says 'weekends only' with no holiday calendar", async () => {
     await mount();

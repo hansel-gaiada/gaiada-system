@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { sidebarRows, workspaceBySlug } from "./workspaces";
 import { SKINS } from "./skins";
-import { areaFor } from "./areas";
+import { AREA_RULES, areaFor, bestRules } from "./areas";
 import { gateAllows, resolveMyWorkspaces, workspaceUnitsOf, type OrgTreeNode } from "./workspaceAccess";
-import { buildShellModel, allRows } from "./shellModel";
+import { buildShellModel, allRows, activeLocation } from "./shellModel";
 import { lead, me, member, node, person } from "./workspaceFixtures";
 import type { Me } from "./platform";
 
@@ -50,6 +50,22 @@ describe("the Social Media `settings` row", () => {
 
   it("sits in the department's own area (one area, the workspace's)", () => {
     expect(areaFor("/departments/d-soc/settings")).toEqual({ kind: "workspace", deptId: "d-soc" });
+  });
+
+  // SCP-6a (BFF §63.23.6): "Import from your sheet" is a page under Settings, so it has no row of its own. It sits in the department's area (its own AREA_RULES
+  // entry, the way every page of this workspace has one) and the Settings row, with its `canLeadSocial` gate, stays the active one.
+  it("holds the import page under Settings: one area (the department's own, its own entry) and the Settings row active", () => {
+    const rules = AREA_RULES.filter((r) => r.path === "/departments/[deptId]/settings/import");
+    expect(rules).toHaveLength(1);
+    expect(rules[0].kind).toBe("workspace");
+    expect(rules[0].subtree).toBeFalsy();
+    expect(bestRules(["departments", "d-soc", "settings", "import"])).toHaveLength(1);
+    expect(areaFor("/departments/d-soc/settings/import")).toEqual({ kind: "workspace", deptId: "d-soc" });
+    const m = me([member(), lead("d-soc")]);
+    const model = buildShellModel({ me: m, tenantId: "co-a", workspaces: resolveMyWorkspaces({ me: m, tenantId: "co-a", root: tree }) });
+    const social = model.workspaces.find((w) => w.key === "social-media")!;
+    expect(activeLocation(allRows(social), "/departments/d-soc/settings/import")).toEqual({ rowKey: "settings", tabKey: "settings" });
+    expect(settingsRow.tabs).toHaveLength(1);
   });
 });
 

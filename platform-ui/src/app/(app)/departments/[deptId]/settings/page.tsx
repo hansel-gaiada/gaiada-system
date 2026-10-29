@@ -86,6 +86,17 @@ export default async function SocialSettingsPage({ params, searchParams }: { par
               </p>}
         </section>
 
+        {/* SCP-6a (BFF §63.23.6): the one-off move from the sheet, for the four approvers (`canPlan`). The page behind it is the wizard; the routes are the server's. */}
+        {settings.data.canPlan && (
+          <section aria-labelledby="scp-import-title" className="scp-slot" data-slot="sheet-import">
+            <h3 className="scp-slot__title" id="scp-import-title">Moving from the sheet?</h3>
+            <p className="scp-note" style={{ marginTop: 0, marginBottom: 12 }}>
+              Bring the team&rsquo;s allocation, or a month&rsquo;s plan, over from your spreadsheet. You see every row&rsquo;s outcome before anything is written.
+            </p>
+            <Link href={`/departments/${encodeURIComponent(deptId)}/settings/import`} className="lux-btn lux-btn--ghost lux-btn--sm">Import from your sheet</Link>
+          </section>
+        )}
+
         <section aria-labelledby="scp-deadlines-title">
           <h3 className="scp-section__title" id="scp-deadlines-title">Deadlines</h3>
           <p className="scp-lede">

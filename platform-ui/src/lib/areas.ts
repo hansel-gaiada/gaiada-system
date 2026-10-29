@@ -124,6 +124,7 @@ const ADMIN: AreaRule[] = [
 const WORKSPACE: AreaRule[] = [
   rule("/departments/[deptId]", "workspace", true),
   rule("/departments/[deptId]/settings", "workspace", false, "SCP-1c: the Social Media Settings page (the HoD's buffer and deadline table); its own entry so the page sits in one area, the department's own"),
+  rule("/departments/[deptId]/settings/import", "workspace", false, "SCP-6a: Import from your sheet (the one-off allocation and plan import), reached from the Settings page; its own entry so the page sits in one area, the department's own, and the Settings row stays the active one"),
   rule("/departments/[deptId]/messages", "workspace", false, "SCP-1j: the Social Media Messages page (who holds each of the officer's posts, and Follow up); its own entry so the page sits in one area, the department's own"),
   rule("/departments/[deptId]/profile", "workspace", false, "SCP-1k: the Social Media Profile switcher (the caller's clients, or every client for a Social approver); its own entry so the page sits in one area, the department's own"),
   rule("/departments/[deptId]/profile/[engagementId]", "workspace", false, "SCP-1k, SCP-1m: one client's page (Plan, Stories, Calendar, List, Client profile) and its create bar; the department's own area, like the Allocation page it is reached from"),
