@@ -72,6 +72,9 @@ export async function ingestDocument(doc: IngestDocument): Promise<number> {
     provenance: doc.provenance ?? "human",
     trust: "trusted",
     audience: doc.audience,
+    // Always sent (null when none): the store rewrites it on the rows it keeps, so a record that left its department, or
+    // the first sweep after the column was added, converges without re-embedding anything.
+    departmentId: doc.departmentId ?? null,
   }, INGEST_TIMEOUT_MS);
   if (res.status === 429) throw new EmbeddingBudgetExhaustedError();
   if (!res.ok) throw new Error(`knowledge /ingest ${res.status}: ${await res.text().catch(() => "")}`);

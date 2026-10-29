@@ -19,6 +19,10 @@ export interface IngestDocument {
   kind?: "doc" | "memory";
   provenance?: "human" | "agent" | "external";
   chunks: string[];
+  /** AIP-11: the org node id of the department that owns the record (same shape as `projects.department_id`, e.g. `d-seo`),
+   *  or null/absent when the record is company-wide. Ranking metadata only (the knowledge store boosts the asker's own
+   *  department; it never gates on it). It is NEVER part of `chunks`: changed chunk text re-embeds the whole corpus. */
+  departmentId?: string | null;
   /** Human-readable label for run reporting/logs only — never persisted as a chunk. */
   label: string;
 }

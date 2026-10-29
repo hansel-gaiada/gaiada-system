@@ -46,18 +46,29 @@ function date(v: unknown): string {
   return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
 }
 
-/** Build one ingest document from a rendered body, or null when there is nothing worth embedding. */
-function doc(
+/** A department id column as the store wants it: a trimmed non-empty string, else null. */
+function dept(v: unknown): string | null {
+  const t = str(v).trim();
+  return t === "" ? null : t;
+}
+
+/** Build one ingest document from a rendered body, or null when there is nothing worth embedding.
+ *
+ *  `departmentId` (AIP-11) is the owning department's org node id and is carried BESIDE the chunks, never in them: the chunk
+ *  text is the content identity the store reuses vectors by, so a "Department:" line would re-embed every chunk of the
+ *  corpus (about 2 hours on the live box) for a signal the store ranks on from a column. Exported for the test that pins that. */
+export function doc(
   tenantId: string,
   sourceRef: string,
   label: string,
   header: string,
   body: string,
+  departmentId: string | null = null,
 ): IngestDocument | null {
   const h = boundHeader(header, body);
   const chunks = chunkText(h.body.slice(0, MAX_TEXT_CHARS)).map((c) => `${h.header}\n\n${c}`);
   if (chunks.length === 0) return null;
-  return { tenantId, sourceRef, audience: "internal", acl: [], kind: "doc", provenance: "human", chunks, label };
+  return { tenantId, sourceRef, audience: "internal", acl: [], kind: "doc", provenance: "human", chunks, departmentId, label };
 }
 
 // ── per-family builders ──────────────────────────────────────────────────────────────────────────
@@ -86,7 +97,7 @@ async function clients(c: PoolClient, tenantId: string): Promise<IngestDocument[
 
 async function projects(c: PoolClient, tenantId: string): Promise<IngestDocument[]> {
   const { rows } = await c.query<Row>(
-    `SELECT p.id, p.name, p.status, p.start_date, p.due_date, p.is_internal, p.custom_fields,
+    `SELECT p.id, p.name, p.status, p.start_date, p.due_date, p.is_internal, p.custom_fields, p.department_id,
             cl.name AS client_name, u.name AS owner_name
      FROM projects p
      LEFT JOIN clients cl ON cl.id = p.client_id
@@ -108,6 +119,7 @@ async function projects(c: PoolClient, tenantId: string): Promise<IngestDocument
           ["Due date", date(r.due_date)],
           ["Additional fields", r.custom_fields && Object.keys(r.custom_fields as object).length ? JSON.stringify(r.custom_fields) : ""],
         ]),
+        dept(r.department_id),
       ),
     )
     .filter((d): d is IngestDocument => d !== null);
@@ -125,7 +137,7 @@ async function projects(c: PoolClient, tenantId: string): Promise<IngestDocument
 async function pmTasks(c: PoolClient, tenantId: string): Promise<IngestDocument[]> {
   const { rows } = await c.query<Row>(
     `SELECT t.id, t.title, t.description, t.status, t.priority, t.progress, t.assignee,
-            t.start_date, t.due_date, t.tags, p.name AS project_name, m.name AS milestone_name
+            t.start_date, t.due_date, t.tags, p.name AS project_name, p.department_id AS project_department_id, m.name AS milestone_name
      FROM pm_tasks t
      JOIN projects p ON p.id = t.project_id
      LEFT JOIN pm_milestones m ON m.id = t.milestone_id
@@ -153,6 +165,7 @@ async function pmTasks(c: PoolClient, tenantId: string): Promise<IngestDocument[
           ["Tags", tags.join(", ")],
           ["Project", r.project_name],
         ]),
+        dept(r.project_department_id),
       );
     })
     .filter((d): d is IngestDocument => d !== null);
@@ -160,7 +173,8 @@ async function pmTasks(c: PoolClient, tenantId: string): Promise<IngestDocument[
 
 async function tasks(c: PoolClient, tenantId: string): Promise<IngestDocument[]> {
   const { rows } = await c.query<Row>(
-    `SELECT t.id, t.title, t.status, t.priority, t.due_date, p.name AS project_name, u.name AS assignee_name
+    `SELECT t.id, t.title, t.status, t.priority, t.due_date, p.name AS project_name, p.department_id AS project_department_id,
+            u.name AS assignee_name
      FROM tasks t
      JOIN projects p ON p.id = t.project_id
      LEFT JOIN users u ON u.id = t.assignee_id
@@ -180,6 +194,7 @@ async function tasks(c: PoolClient, tenantId: string): Promise<IngestDocument[]>
           ["Due date", date(r.due_date)],
           ["Project", r.project_name],
         ]),
+        dept(r.project_department_id),
       ),
     )
     .filter((d): d is IngestDocument => d !== null);
@@ -187,7 +202,7 @@ async function tasks(c: PoolClient, tenantId: string): Promise<IngestDocument[]>
 
 async function deliverables(c: PoolClient, tenantId: string): Promise<IngestDocument[]> {
   const { rows } = await c.query<Row>(
-    `SELECT d.id, d.name, d.status, d.due_date, p.name AS project_name, cl.name AS client_name
+    `SELECT d.id, d.name, d.status, d.due_date, p.name AS project_name, p.department_id AS project_department_id, cl.name AS client_name
      FROM deliverables d
      JOIN projects p ON p.id = d.project_id
      LEFT JOIN clients cl ON cl.id = d.client_id
@@ -206,6 +221,7 @@ async function deliverables(c: PoolClient, tenantId: string): Promise<IngestDocu
           ["Project", r.project_name],
           ["Client", r.client_name],
         ]),
+        dept(r.project_department_id),
       ),
     )
     .filter((d): d is IngestDocument => d !== null);
@@ -215,7 +231,8 @@ async function deliverables(c: PoolClient, tenantId: string): Promise<IngestDocu
  *  that answers "what did we agree with the client" in a way no structured row can. */
 async function meetings(c: PoolClient, tenantId: string): Promise<IngestDocument[]> {
   const { rows } = await c.query<Row>(
-    `SELECT m.id, m.title, m.started_at, m.transcript, p.name AS project_name, cl.name AS client_name
+    `SELECT m.id, m.title, m.started_at, m.transcript, p.name AS project_name, cl.name AS client_name,
+            COALESCE(NULLIF(btrim(m.department_id), ''), p.department_id) AS department_id
      FROM meeting_recordings m
      LEFT JOIN projects p ON p.id = m.project_id
      LEFT JOIN clients cl ON cl.id = m.client_id
@@ -230,6 +247,7 @@ async function meetings(c: PoolClient, tenantId: string): Promise<IngestDocument
         `Meeting ${title}`,
         `Meeting transcript: ${title}${r.client_name ? ` with ${str(r.client_name)}` : ""}${r.project_name ? ` (project ${str(r.project_name)})` : ""} on ${date(r.started_at)}`,
         str(r.transcript),
+        dept(r.department_id),
       );
     })
     .filter((d): d is IngestDocument => d !== null);
@@ -238,7 +256,7 @@ async function meetings(c: PoolClient, tenantId: string): Promise<IngestDocument
 /** PM documents (PRDs, scopes, notes authored in the PM console). */
 async function pmDocs(c: PoolClient, tenantId: string): Promise<IngestDocument[]> {
   const { rows } = await c.query<Row>(
-    `SELECT d.id, d.title, d.body, p.name AS project_name, u.name AS author_name, d.updated_at
+    `SELECT d.id, d.title, d.body, p.name AS project_name, p.department_id AS project_department_id, u.name AS author_name, d.updated_at
      FROM pm_docs d
      JOIN projects p ON p.id = d.project_id
      LEFT JOIN users u ON u.id = d.author_id
@@ -252,6 +270,7 @@ async function pmDocs(c: PoolClient, tenantId: string): Promise<IngestDocument[]
         `Doc ${str(r.title)}`,
         `Document: ${str(r.title)} (project ${str(r.project_name)}${r.author_name ? `, author ${str(r.author_name)}` : ""})`,
         str(r.body),
+        dept(r.project_department_id),
       ),
     )
     .filter((d): d is IngestDocument => d !== null);
@@ -340,8 +359,18 @@ async function orgAndPeople(c: PoolClient, tenantId: string): Promise<IngestDocu
  *  module README. `extractText` is the seam where they would plug in. */
 async function files(c: PoolClient, tenantId: string, extractText?: FileTextExtractor): Promise<IngestDocument[]> {
   const { rows } = await c.query<Row>(
-    `SELECT id, filename, content_type, byte_size, target_entity_type, target_entity_id, storage_key, created_at
-     FROM files WHERE deleted_at IS NULL`,
+    // The department comes from the project the file hangs off: the project itself, or the project of the task (core or PM)
+    // or deliverable it is attached to. Every other target (client, invoice, contract, campaign...) has none. The joins are keyed on the
+    // target TYPE as well as the id, so a uuid that exists in two tables cannot lend its project to the wrong kind of file.
+    `SELECT f.id, f.filename, f.content_type, f.byte_size, f.target_entity_type, f.target_entity_id, f.storage_key, f.created_at,
+            COALESCE(pj.department_id, tp.department_id) AS department_id
+     FROM files f
+     LEFT JOIN tasks tk ON f.target_entity_type = 'task' AND tk.id = f.target_entity_id
+     LEFT JOIN pm_tasks pt ON f.target_entity_type = 'task' AND pt.id = f.target_entity_id
+     LEFT JOIN deliverables dv ON f.target_entity_type = 'deliverable' AND dv.id = f.target_entity_id
+     LEFT JOIN projects pj ON f.target_entity_type = 'project' AND pj.id = f.target_entity_id
+     LEFT JOIN projects tp ON tp.id = COALESCE(tk.project_id, pt.project_id, dv.project_id)
+     WHERE f.deleted_at IS NULL`,
   );
   const out: IngestDocument[] = [];
   for (const r of rows) {
@@ -357,7 +386,7 @@ async function files(c: PoolClient, tenantId: string, extractText?: FileTextExtr
       const text = await extractText(str(r.storage_key), str(r.content_type), str(r.filename)).catch(() => "");
       if (text) body = `${meta}\n\nContents:\n${text}`;
     }
-    const d = doc(tenantId, `erp:file:${str(r.id)}`, `File ${str(r.filename)}`, `File: ${str(r.filename)}`, body);
+    const d = doc(tenantId, `erp:file:${str(r.id)}`, `File ${str(r.filename)}`, `File: ${str(r.filename)}`, body, dept(r.department_id));
     if (d) out.push(d);
   }
   return out;

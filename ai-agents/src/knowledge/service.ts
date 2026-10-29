@@ -9,7 +9,7 @@ import { timingSafeEqual } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
-import { KnowledgeStore, type IngestDoc } from "./store";
+import { KnowledgeStore, normaliseDepartmentId, normaliseSearchDepartment, parseDepartmentBoost, type IngestDoc } from "./store";
 import { KnowledgeGraph } from "./graph";
 import { ingestEvent, type PlatformEvent } from "./graph-ingest";
 import { PgEpisodicStore } from "../memory/episodic-pg";
@@ -27,6 +27,9 @@ export const knowledgeConfig = {
   platformToken: process.env.PLATFORM_SERVICE_TOKEN ?? "",
   gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:3002",
   gatewayToken: process.env.GATEWAY_TOKEN ?? "",
+  // AIP-12: how much a chunk of the asker's own department outranks an equally similar company-wide one. Default 1.25,
+  // NaN or missing means the default, clamped to [1, 2] (see parseDepartmentBoost). Only /search with a `department` reads it.
+  departmentBoost: parseDepartmentBoost(process.env.KNOWLEDGE_DEPARTMENT_BOOST),
 };
 
 function safeEqual(a: string, b: string): boolean {
@@ -144,9 +147,12 @@ export function buildKnowledgeApp(
     // "public" — absent, misspelled, or hostile — resolves to 'internal', so a malformed ingest
     // can only ever under-share.
     const audience = doc.audience === "public" ? ("public" as const) : ("internal" as const);
+    // AIP-11: the owning department is fail-soft metadata. A wrong type or an over-long value becomes null, never a 400:
+    // the platform's sweep must not lose a whole record over a tag.
+    const departmentId = normaliseDepartmentId(doc.departmentId);
     try {
       const r = await embedUsageContext.run({ tenantId: doc.tenantId, userId: null, task: "knowledge.ingest" }, () =>
-        store.ingestDetailed({ ...doc, acl: doc.acl ?? [], kind: doc.kind ?? "doc", audience }),
+        store.ingestDetailed({ ...doc, acl: doc.acl ?? [], kind: doc.kind ?? "doc", audience, departmentId }),
       );
       return r;
     } catch (err) {
@@ -165,7 +171,11 @@ export function buildKnowledgeApp(
   // answered from the gaiada.com corpus while internal knowledge stays invisible. A resolver
   // FAILURE degrades to the same public-only state rather than 500ing, so the marketing tier
   // survives a platform outage; it can never widen access because the fallback set is empty.
-  app.post<{ Body: { query?: string; scope?: string; topK?: number; publicOnly?: boolean } }>("/search", async (req, reply) => {
+  //
+  // AIP-12: the optional `department: { tenantId, nodeId }` only RE-RANKS (see KnowledgeStore.search). It is never an
+  // authorization input: the tenant set still comes from the resolved envelope, and an invalid department (a non-uuid tenant,
+  // an empty or over-long node id, a wrong type) is ignored, which means no boost and never an error.
+  app.post<{ Body: { query?: string; scope?: string; topK?: number; publicOnly?: boolean; department?: unknown } }>("/search", async (req, reply) => {
     if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
     const provider = String(req.headers["x-obo-provider"] ?? "");
     const externalId = String(req.headers["x-obo-external-id"] ?? "");
@@ -185,6 +195,8 @@ export function buildKnowledgeApp(
         scope: scope ?? "",
         topK: req.body?.topK,
         publicOnly: req.body?.publicOnly === true,
+        department: normaliseSearchDepartment(req.body?.department) ?? undefined,
+        departmentBoost: knowledgeConfig.departmentBoost,
       }),
     );
     return { hits };
