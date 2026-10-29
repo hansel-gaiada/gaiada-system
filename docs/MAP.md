@@ -170,11 +170,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610291200_assistant_brain_owner_only.sql`
+- Head: `202610291510_iam_dept_assistant_preamble_permissions.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 347 (121 legacy `NNNN_`, 226 timestamped)
+- Applied files on disk: 349 (121 legacy `NNNN_`, 228 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -274,6 +274,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/signatures/simulated-psre.controller.ts` |
 | `/api/:tenantId/appraisals` | `platform-nest/src/modules/reports/appraisals.controller.ts` |
 | `/api/:tenantId/checkins` | `platform-nest/src/modules/reports/checkins.controller.ts` |
+| `/api/:tenantId/departments/:unitNodeId/assistant-preamble` | `platform-nest/src/core/dept-assistant-preamble.controller.ts` |
 | `/api/:tenantId/departments/:unitNodeId/calendar` | `platform-nest/src/core/dept-calendar.controller.ts` |
 | `/api/:tenantId/dept-appraisals` | `platform-nest/src/modules/reports/dept-appraisals.controller.ts` |
 | `/api/:tenantId/dept-kpis` | `platform-nest/src/modules/reports/dept-kpi-watch.controller.ts` |
@@ -429,6 +430,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/analytics`
 - `/departments/[deptId]/assets`
 - `/departments/[deptId]/assets/[assetId]`
+- `/departments/[deptId]/assistant-guidance`
 - `/departments/[deptId]/audit`
 - `/departments/[deptId]/ball`
 - `/departments/[deptId]/board`
