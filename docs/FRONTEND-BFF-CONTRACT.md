@@ -13259,7 +13259,7 @@ Takes `{filename, contentBase64}` (an `.xlsx` or `.csv`, at most 2 MiB decoded) 
 - **text:** one tab named `Pasted`. Tab-separated when the first line holds a tab, else the csv rule. A quoted cell keeps its newlines, which is what Google Sheets puts on the clipboard.
 - **Limits:** at most 20 tabs, 2,000 rows and 60 columns per tab, and 5,000 characters per cell.
 - **Refusals:**
-  - 400 `sheet_too_large` with `field` (`tabs`, `rows`, `columns` or `cell`) when a limit is passed;
+  - 400 `sheet_too_large` with `field` (`tabs`, `rows`, `columns` or `cell`) when a limit is passed, and with `field: "file"` when an `.xlsx` unpacks to more than 32 MiB (every part inflated first under that budget, before exceljs reads it: the zip-bomb check, on the bytes zlib produces, never on the sizes the zip declares);
   - 400 `invalid_field` with `field: "contentBase64"` when it is not base64 or is over 2 MiB, `field: "filename"` for any other extension, `field: "text"` when it is over 2 MiB, and `field: "body"` when neither or both are given;
   - 400 `unreadable_sheet` when exceljs cannot open the file.
 - **Body limit.** The route is added to `upload-body-limits.ts`, so 2 MiB of base64 reaches the handler (`inlineUploadBodyLimit(MAX_SHEET_BYTES)`). The two import routes are added there too, with `MAX_IMPORT_BODY_BYTES` (4 MiB) exported from the controller.

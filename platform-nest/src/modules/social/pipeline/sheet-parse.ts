@@ -11,11 +11,13 @@
 // text, an error its code (`#N/A`), a boolean `TRUE`/`FALSE`, an empty cell `""`. The slave cells of a merged range are `""`: the value sits in
 // the range's top-left cell only.
 //
-// THE LIMITS (400 `sheet_too_large` with `field`): 20 tabs, 2,000 rows and 60 columns per tab (after trailing empty rows and columns are trimmed),
+// THE LIMITS (400 `sheet_too_large` with `field`; an .xlsx past 32 MiB unpacked is `file`, see THE ZIP BOMB): 20 tabs, 2,000 rows and 60 columns per tab (after trailing empty rows and columns are trimmed),
 // 5,000 characters per cell. A non-empty cell past row 2,000 or column 60 is refused while the sheet is read, so a huge sheet is never held whole.
 //
-// KNOWN EDGE. exceljs inflates the workbook in memory, so a hostile 2 MiB zip could expand far past that. The caller is one of the four approvers
-// and the file is theirs; a streaming read or a zip-size pre-check is the follow-up if the route ever opens wider.
+// THE ZIP BOMB. exceljs inflates the whole workbook in memory, so a 2 MiB upload could expand to gigabytes and take platform-nest down with it.
+// `assertZipInflatesWithin` inflates every part first under a hard budget (`MAX_XLSX_INFLATED_BYTES`, 32 MiB) and refuses past it (400
+// `sheet_too_large`, `field: "file"`) before exceljs sees a byte.
+import { inflateRawSync } from "node:zlib";
 import { BadRequestException } from "@nestjs/common";
 import { parseCsvRows, UnterminatedQuoteError } from "../../../core/csv";
 
@@ -31,7 +33,7 @@ export interface SheetTab {
 const invalid = (field: string): never => {
   throw new BadRequestException({ message: "invalid_field", field });
 };
-const tooLarge = (field: "tabs" | "rows" | "columns" | "cell"): never => {
+const tooLarge = (field: "tabs" | "rows" | "columns" | "cell" | "file"): never => {
   throw new BadRequestException({ message: "sheet_too_large", field });
 };
 const unreadable = (): never => {
@@ -108,8 +110,55 @@ export function shapeTab(name: string, raw: string[][]): SheetTab {
 
 // ── the three sources ────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** What an `.xlsx` may unpack to, every part together. A real 2,000-row sheet is a few MiB of XML; this leaves room for styles and images. */
+export const MAX_XLSX_INFLATED_BYTES = 32 * 1024 * 1024;
+
+/**
+ * The zip-bomb check, run BEFORE exceljs (which unpacks the whole workbook in memory). An `.xlsx` is a zip: every entry the central directory lists
+ * is inflated here with zlib's `maxOutputLength` set to what is left of `max`, so the bound holds on the bytes zlib actually produces, never on the
+ * sizes the zip declares (a hostile zip may lie about those). Over the bound: 400 `sheet_too_large` with `field: "file"`. Not a zip, a truncated one,
+ * a ZIP64 one or an unknown compression method: 400 `unreadable_sheet`, which exceljs would answer too.
+ */
+export function assertZipInflatesWithin(bytes: Buffer, max: number): void {
+  const EOCD = 0x06054b50, CEN = 0x02014b50, LOC = 0x04034b50;
+  // The end-of-central-directory record: 22 bytes, followed by a comment of at most 65,535 bytes.
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 0xffff); i--) {
+    if (bytes.readUInt32LE(i) === EOCD) { eocd = i; break; }
+  }
+  if (eocd < 0) return unreadable();
+  const entries = bytes.readUInt16LE(eocd + 10);
+  let p = bytes.readUInt32LE(eocd + 16);
+  if (entries === 0xffff || p === 0xffffffff) return unreadable(); // ZIP64: no spreadsheet the team saves needs it
+  let left = max;
+  for (let n = 0; n < entries; n++) {
+    if (p + 46 > bytes.length || bytes.readUInt32LE(p) !== CEN) return unreadable();
+    const method = bytes.readUInt16LE(p + 10);
+    const compressed = bytes.readUInt32LE(p + 20);
+    const local = bytes.readUInt32LE(p + 42);
+    p += 46 + bytes.readUInt16LE(p + 28) + bytes.readUInt16LE(p + 30) + bytes.readUInt16LE(p + 32);
+    if (local + 30 > bytes.length || bytes.readUInt32LE(local) !== LOC) return unreadable();
+    const start = local + 30 + bytes.readUInt16LE(local + 26) + bytes.readUInt16LE(local + 28);
+    if (start + compressed > bytes.length) return unreadable();
+    const data = bytes.subarray(start, start + compressed);
+    let produced: number;
+    if (method === 0) produced = data.length;
+    else if (method === 8) {
+      try {
+        produced = inflateRawSync(data, { maxOutputLength: left + 1 }).length;
+      } catch (e) {
+        if (e instanceof RangeError) return tooLarge("file");
+        return unreadable();
+      }
+    } else return unreadable();
+    left -= produced;
+    if (left < 0) return tooLarge("file");
+  }
+}
+
 /** An `.xlsx` as one tab per visible worksheet, in workbook order. 400 `unreadable_sheet` when exceljs cannot open it. */
 export async function tabsFromXlsx(bytes: Buffer): Promise<SheetTab[]> {
+  assertZipInflatesWithin(bytes, MAX_XLSX_INFLATED_BYTES);
   const { Workbook } = await import("exceljs");
   const wb = new Workbook();
   try {

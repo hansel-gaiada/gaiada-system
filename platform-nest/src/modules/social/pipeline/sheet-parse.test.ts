@@ -1,9 +1,13 @@
 // SCP-6a — `POST import/parse`'s reader (BFF §63.23.1), PURE: no database, no Cerbos. The workbooks are built here with exceljs and read back through
 // the real `parseSheetBody`, so the dates, numbers, formulas, rich text, hidden sheets and limits are proved on what exceljs really hands over.
+import { deflateRawSync } from "node:zlib";
 import { describe, it, expect } from "vitest";
 import { BadRequestException } from "@nestjs/common";
 import ExcelJS from "exceljs";
-import { MAX_SHEET_BYTES, SHEET_LIMITS, dateCellText, numberCellText, parseSheetBody, tabsFromCsv, tabsFromPaste, valueText } from "./sheet-parse";
+import {
+  MAX_SHEET_BYTES, MAX_XLSX_INFLATED_BYTES, SHEET_LIMITS, assertZipInflatesWithin, dateCellText, numberCellText, parseSheetBody, tabsFromCsv,
+  tabsFromPaste, valueText,
+} from "./sheet-parse";
 
 /** The `{message, field}` of the 400 a call rejects with. */
 async function refusal(fn: () => Promise<unknown> | unknown): Promise<{ message?: string; field?: string }> {
@@ -166,6 +170,70 @@ describe("an .xlsx", () => {
   it("the extension is matched in any case", async () => {
     const bytes = await xlsx((wb) => { wb.addWorksheet("S").getCell("A1").value = "x"; });
     expect((await parseSheetBody(file("BOOK.XLSX", bytes))).tabs[0].rows).toEqual([["x"]]);
+  });
+});
+
+/** A zip built by hand, so a test can make one exceljs never would: a bomb, or one that lies about its sizes. `declared` overrides the
+ *  uncompressed size the headers state. */
+function zip(entries: Array<{ name: string; data: Buffer; deflate?: boolean; declared?: number }>): Buffer {
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
+  let offset = 0;
+  for (const e of entries) {
+    const body = e.deflate === false ? e.data : deflateRawSync(e.data);
+    const name = Buffer.from(e.name);
+    const size = e.declared ?? e.data.length;
+    const loc = Buffer.alloc(30);
+    loc.writeUInt32LE(0x04034b50, 0); loc.writeUInt16LE(20, 4); loc.writeUInt16LE(e.deflate === false ? 0 : 8, 8);
+    loc.writeUInt32LE(body.length, 18); loc.writeUInt32LE(size, 22); loc.writeUInt16LE(name.length, 26);
+    const cen = Buffer.alloc(46);
+    cen.writeUInt32LE(0x02014b50, 0); cen.writeUInt16LE(20, 4); cen.writeUInt16LE(20, 6); cen.writeUInt16LE(e.deflate === false ? 0 : 8, 10);
+    cen.writeUInt32LE(body.length, 20); cen.writeUInt32LE(size, 24); cen.writeUInt16LE(name.length, 28); cen.writeUInt32LE(offset, 42);
+    locals.push(loc, name, body);
+    centrals.push(cen, name);
+    offset += 30 + name.length + body.length;
+  }
+  const cd = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, cd, end]);
+}
+
+describe("the zip bomb (an .xlsx is a zip; exceljs unpacks it whole)", () => {
+  const over = Buffer.alloc(MAX_XLSX_INFLATED_BYTES + 1024 * 1024); // zeros: deflates to a few KiB
+
+  it("a part that inflates past the budget is 400 sheet_too_large on the file, before exceljs runs", async () => {
+    const bomb = zip([{ name: "xl/worksheets/sheet1.xml", data: over }]);
+    expect(bomb.length).toBeLessThan(MAX_SHEET_BYTES);
+    expect(await refusal(() => parseSheetBody(file("bomb.xlsx", bomb)))).toEqual({ message: "sheet_too_large", field: "file" });
+  });
+
+  it("the bound is on what zlib produces, not on what the zip declares", async () => {
+    const liar = zip([{ name: "a.xml", data: over, declared: 10 }]);
+    expect(await refusal(() => assertZipInflatesWithin(liar, MAX_XLSX_INFLATED_BYTES))).toEqual({ message: "sheet_too_large", field: "file" });
+  });
+
+  it("the parts count together: many parts each under the budget still refuse past it", () => {
+    const quarter = Buffer.alloc(MAX_XLSX_INFLATED_BYTES / 4 + 1);
+    const many = zip([0, 1, 2, 3].map((i) => ({ name: `p${i}.xml`, data: quarter })));
+    expect(() => assertZipInflatesWithin(many, MAX_XLSX_INFLATED_BYTES)).toThrow(BadRequestException);
+    const three = zip([0, 1, 2].map((i) => ({ name: `p${i}.xml`, data: quarter })));
+    expect(() => assertZipInflatesWithin(three, MAX_XLSX_INFLATED_BYTES)).not.toThrow();
+  });
+
+  it("a stored (uncompressed) part counts too, and an unknown method is unreadable_sheet", async () => {
+    expect(() => assertZipInflatesWithin(zip([{ name: "s.xml", data: Buffer.alloc(100), deflate: false }]), 99)).toThrow(BadRequestException);
+    expect(() => assertZipInflatesWithin(zip([{ name: "s.xml", data: Buffer.alloc(100), deflate: false }]), 100)).not.toThrow();
+    const odd = zip([{ name: "a.xml", data: Buffer.from("x") }]);
+    odd.writeUInt16LE(12, odd.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])) + 10); // bzip2 in the central directory
+    expect(await refusal(() => assertZipInflatesWithin(odd, 1000))).toEqual({ message: "unreadable_sheet" });
+  });
+
+  it("a real workbook passes, and still reads", async () => {
+    const bytes = await xlsx((wb) => { wb.addWorksheet("S").getCell("A1").value = "x"; });
+    expect(() => assertZipInflatesWithin(bytes, MAX_XLSX_INFLATED_BYTES)).not.toThrow();
+    expect((await parseSheetBody(file("ok.xlsx", bytes))).tabs[0].rows).toEqual([["x"]]);
   });
 });
 
