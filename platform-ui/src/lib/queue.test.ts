@@ -600,3 +600,35 @@ describe("getMyWorkQueue: the Social pipeline's leg (SCP-1j, BFF §63.7)", () =>
     expect(ids).toEqual(["social:co-a:p-9:proofread", "social:co-b:p-9:proofread"]);
   });
 });
+
+describe("getMyWorkQueue: the monthly report's items in Needs you (SCP-5a, BFF §63.7, §63.18)", () => {
+  const companies = [{ id: "co-a", name: "Agency" }];
+  const m = me(companies, [{ role: "member", scopeType: "company", scopeId: "co-a" }]);
+  const report = (kind: string, id: string, over: Record<string, unknown> = {}) => ({
+    id: `social:co-a:${id}:${kind}`, kind, role: kind === "report_due" ? "officer" : "approver", title: "Monthly report, September 2026", clientName: "Mock Bakery",
+    since: "2026-10-01T00:00:00.000Z", due: "2026-10-05", href: `/departments/d-soc/social-reports/${id}`, ...over,
+  });
+  const stub = (items: unknown[]) =>
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/co-a/modules/social/needs-you")) return new Response(JSON.stringify({ items, partial: [] }), { status: 200 });
+      if (u.includes("/co-a/dept-kpis/alerts")) return new Response(JSON.stringify({ alerts: [] }), { status: 200 });
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+
+  it("maps report_due, report_check and report_send to work items with their words and the report's own link", async () => {
+    stub([report("report_due", "r-1"), report("report_check", "r-2"), report("report_send", "r-3")]);
+    const items = (await getMyWorkQueue(m, "u1", companies)).items;
+    const byKind = (k: string) => items.find((i) => i.id.endsWith(`:${k}`))!;
+    expect(byKind("report_due")).toMatchObject({ type: "task", title: "Monthly report, September 2026", meta: "Mock Bakery · A monthly report is due", href: "/departments/d-soc/social-reports/r-1", dueDate: "2026-10-05", decidable: true });
+    expect(byKind("report_check")).toMatchObject({ meta: "Mock Bakery · A report to check", href: "/departments/d-soc/social-reports/r-2" });
+    expect(byKind("report_send")).toMatchObject({ meta: "Mock Bakery · A report to send", href: "/departments/d-soc/social-reports/r-3" });
+  });
+
+  it("a report that does not exist yet opens the list, and is not an unknown kind (it keeps its words)", async () => {
+    stub([report("report_due", "e-9", { href: "/departments/d-soc/social-reports" })]);
+    const item = (await getMyWorkQueue(m, "u1", companies)).items.find((i) => i.id.endsWith(":report_due"))!;
+    expect(item.href).toBe("/departments/d-soc/social-reports");
+    expect(item.meta).not.toMatch(/report_due/);
+  });
+});

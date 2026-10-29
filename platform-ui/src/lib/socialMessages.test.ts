@@ -86,6 +86,10 @@ describe("the words", () => {
     expect(statusWords("something_new")).toBe("something_new");
     expect(needsKindWords("proofread")).toBe("To proofread");
     expect(needsKindWords("new_kind")).toBe("new_kind");
+    // SCP-5a: the monthly report's three kinds
+    expect(needsKindWords("report_due")).toBe("A monthly report is due");
+    expect(needsKindWords("report_check")).toBe("A report to check");
+    expect(needsKindWords("report_send")).toBe("A report to send");
   });
   it("links a post to the post page and a client to the conversation section of its Work tab", () => {
     expect(postHref("d-soc", "p-1")).toBe("/departments/d-soc/posts/p-1");

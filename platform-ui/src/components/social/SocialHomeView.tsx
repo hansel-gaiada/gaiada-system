@@ -21,6 +21,7 @@ import type { ReadResult } from "@/lib/readResult";
 import { cycleCountsText, type AllocationRow } from "@/lib/socialAllocation";
 import { HEALTH_LABEL, type CycleTable } from "@/lib/socialCycles";
 import { RING_TOKEN, reportsDue, storyCircles, type FeedPage } from "@/lib/socialHome";
+import { dueReportPeriod, type SocialReportRow } from "@/lib/socialReports";
 import { clientConversationHref, holderTitle, postHref, statusWords, agoWords, type WaitingGroup } from "@/lib/socialMessages";
 import "./cycles.css";
 import "./social-home.css";
@@ -41,6 +42,8 @@ export interface SocialHomeReads {
   checkin: CheckinCardData | null;
   /** SCP-Ki: the unit's current notices (pinned first). */
   notices: ReadResult<NoticeList>;
+  /** SCP-5a: the due month's reports, so a sent report's reminder card is dropped. Absent or failed keeps every card. */
+  reportsOfMonth?: ReadResult<SocialReportRow[]>;
 }
 
 function Section({ id, title, children, className }: { id: string; title: string; children: ReactNode; className?: string }) {
@@ -74,7 +77,8 @@ export function SocialHomeView({ reads, deptId, userId, tenantId, submitCheckin,
         {/* SCP-Ki (SCP-Q24): the design's reminder cards, after the stories and before the feed. No heading of its own. */}
         <HomeReminders
           tenantId={tenantId} deptId={deptId} checkin={checkin} submitCheckin={submitCheckin} notices={notices} now={now} profile={profile}
-          reports={accounts.kind === "ok" ? reportsDue(accounts.data, todayIso) : null}
+          reports={accounts.kind === "ok" ? reportsDue(accounts.data, todayIso) : null} todayIso={todayIso}
+          monthReports={reads.reportsOfMonth?.kind === "ok" ? { period: dueReportPeriod(todayIso), rows: reads.reportsOfMonth.data } : null}
           reportsFailure={accounts.kind !== "ok" ? <Refused read={accounts} subject="The reports due" /> : null}
         />
 

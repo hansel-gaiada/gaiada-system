@@ -339,20 +339,47 @@ describe("the reminders", () => {
   });
 
   describe("reports due", () => {
-    it("is one card per client due inside the window (3 days ago to a week ahead), soonest first, each opening the client", () => {
+    it("is one card per client due inside the window (3 days ago to a week ahead), soonest first, each opening the list of reports for the month to draft it", () => {
       mount(only({ accounts: ok([alloc("e-1", "Northwind Traders", { reportDueDay: 20 }), alloc("e-2", "Harborlight Hotel", { reportDueDay: 14 }), alloc("e-3", "No Day Brand", { reportDueDay: null }), alloc("e-4", "Long Past Brand", { reportDueDay: 2 }), alloc("e-5", "Far Off Brand", { reportDueDay: 28 })]) }));
       const cards = Array.from(section("Reminders").querySelectorAll<HTMLElement>('[data-reminder="report"]'));
       expect(cards).toHaveLength(2);
       expect(cards[0]).toHaveTextContent("Harborlight Hotel monthly report");
       expect(cards[0]).toHaveTextContent("Was due 14 Oct 2026");
-      expect(within(cards[0]).getByRole("link", { name: /Open/ })).toHaveAttribute("href", "/departments/d-soc/profile/e-2");
+      expect(within(cards[0]).getByRole("link", { name: "Draft Harborlight Hotel monthly report" })).toHaveAttribute("href", "/departments/d-soc/social-reports?period=2026-09");
       expect(cards[1]).toHaveTextContent("Northwind Traders monthly report");
       expect(cards[1]).toHaveTextContent("Due 20 Oct 2026");
-      expect(within(cards[1]).getByRole("link", { name: /Open/ })).toHaveAttribute("href", "/departments/d-soc/profile/e-1");
+      expect(within(cards[1]).getByRole("link", { name: "Draft Northwind Traders monthly report" })).toHaveAttribute("href", "/departments/d-soc/social-reports?period=2026-09");
       expect(section("Reminders")).not.toHaveTextContent("No Day Brand");
       expect(section("Reminders")).not.toHaveTextContent("Long Past Brand");
       expect(section("Reminders")).not.toHaveTextContent("Far Off Brand");
       expect(screen.queryByText(/more reports? due/)).toBeNull();
+    });
+
+    // SCP-5a: a report that is SENT is no longer due; one that exists opens itself.
+    describe("the month's reports (SCP-5a)", () => {
+      const due = [alloc("e-1", "Northwind Traders", { reportDueDay: 20 }), alloc("e-2", "Harborlight Hotel", { reportDueDay: 14 }), alloc("e-3", "Saltmarsh Day Spa", { reportDueDay: 18 })];
+      const rep = (engagementId: string, status: string, over: Record<string, unknown> = {}) => ({ id: `r-${engagementId}`, engagementId, status, kind: "monthly", period: "2026-09", ...over });
+      const cardsOf = () => Array.from(section("Reminders").querySelectorAll<HTMLElement>('[data-reminder="report"]'));
+      const monthOf = (...rows: ReturnType<typeof rep>[]) => ok(rows.map((r) => ({ ...r, clientName: "x", createdAt: null, approvedAt: null, deliveredAt: null, notesComplete: true, simulated: false })));
+
+      it("drops the card of a client whose report for the month is Sent, and keeps the others", () => {
+        mount(only({ accounts: ok(due), reportsOfMonth: monthOf(rep("e-2", "delivered")) }));
+        expect(cardsOf().map((c) => c.textContent)).toEqual([expect.stringContaining("Saltmarsh Day Spa monthly report"), expect.stringContaining("Northwind Traders monthly report")]);
+        expect(section("Reminders")).not.toHaveTextContent("Harborlight Hotel");
+      });
+      it("a report that exists but is not sent keeps its card and opens the report itself", () => {
+        mount(only({ accounts: ok(due), reportsOfMonth: monthOf(rep("e-1", "in_review")) }));
+        expect(within(cardsOf().find((c) => c.textContent?.includes("Northwind"))!).getByRole("link", { name: "Open Northwind Traders monthly report" })).toHaveAttribute("href", "/departments/d-soc/social-reports/r-e-1");
+        expect(within(cardsOf().find((c) => c.textContent?.includes("Saltmarsh"))!).getByRole("link", { name: /^Draft / })).toHaveAttribute("href", "/departments/d-soc/social-reports?period=2026-09");
+      });
+      it("keeps every card when the month's reports could not be read: nothing says one was sent", () => {
+        mount(only({ accounts: ok(due), reportsOfMonth: { kind: "unavailable", reason: "x" } }));
+        expect(cardsOf()).toHaveLength(3);
+      });
+      it("keeps every card for a report of another month or another kind that is Sent", () => {
+        mount(only({ accounts: ok(due), reportsOfMonth: monthOf(rep("e-2", "delivered", { period: "2026-08" }), rep("e-3", "delivered", { kind: "campaign" })) }));
+        expect(cardsOf()).toHaveLength(3);
+      });
     });
 
     it("caps the cards at three and links the rest to the Allocation page", () => {
