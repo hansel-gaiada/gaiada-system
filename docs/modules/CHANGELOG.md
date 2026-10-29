@@ -11,6 +11,40 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.202.0` + platform-ui `0.222.0` - SCP-6a: the one-off sheet import, so the Social Media team can leave the Excel (plan §8 SCP-6, SCP-D10; FRONTEND-BFF-CONTRACT §63.23) - PROTOTYPED
+
+- **What it is.** The four social approvers bring the team's sheet over once. That is either the **allocation** (one row per client) or **a month's plan** (one row per post).
+  - Access: `social_engagement` · `plan` (PERMISSION §53.6). Anyone else gets 403 `not_a_social_approver` before the body is read.
+  - Flow: upload an `.xlsx` or `.csv`, or paste rows from Google Sheets or Excel. Say which column is which, and pick the client or officer names the ERP could not match. Every row's outcome is shown, then all of it is written or nothing.
+  - No new Cerbos kind or action, no migration, so no Cerbos restart.
+- **platform-nest.**
+  - **Routes:** `POST import/parse`, `import/allocation` and `import/plan`, in `sheet-import.controller.ts`.
+  - **Cell readers** (`sheet-import.ts`, pure): names, numbers, lists, formats, times, dates in three orders with English and Indonesian month names, yes/no, and hashtags.
+  - **Sheet reader** (`sheet-parse.ts`): exceljs for `.xlsx`. For `.csv` and pasted text, the RFC 4180 tokenizer, moved from the keyword import to `core/csv.ts`.
+  - **All or nothing.** Apply runs the preview again inside ONE transaction. When any kept row is refused it answers 409 `import_rows_refused`, with the preview as `detail`.
+  - **The writes are the existing ones**, extracted and shared, not copied:
+    - the allocation PATCH's write (`applyAllocationPatchInTx`);
+    - `PUT cycles`' upsert with the content-month task (`writeCycleInTx`), so a missing cycle is made from the A/B pre-fill;
+    - the machine's `create` (`createPostInTx`), with the sheet's planning fields and copy in the same INSERT as the post's starting text.
+  - **No quiet overwrites.** An empty cell never clears a value. Post ids are a uuid v5 of the row, so a replay answers `unchanged`.
+  - **Zip-bomb guard.** An `.xlsx` is inflated part by part under a 32 MiB budget before exceljs reads it. Past it: 400 `sheet_too_large` with `field: "file"`. The bound is on what zlib produces, not on the sizes the zip declares.
+  - The three routes get their own body limits (`upload-body-limits.ts`).
+  - A plan date outside the import's month is only `date_outside_month`, never also `date_in_past`.
+- **platform-ui.** `{D}/settings/import`, "Import from your sheet", linked from Settings for the four.
+  - Six steps:
+    1. what to import;
+    2. the sheet;
+    3. the columns, guessed from the header by English and Indonesian aliases;
+    4. the names;
+    5. the preview, with untick-to-skip;
+    6. import, and the result's links.
+  - CSV templates, and every row code in words.
+  - In DEMO_MODE: the steps and the templates only.
+- **Proofs.**
+  - Run anywhere: `sheet-import.test.ts` (103 tests) and `sheet-parse.test.ts` (36, including a hand-built zip bomb and a zip that lies about its sizes).
+  - `sheet-import.http.test.ts`, on real Postgres and Cerbos: preview and apply of both sheets, the pre-filled cycle and its task, the posts `planned` with their copy, the replay, the all-or-nothing rollback, picks, and the 403s.
+  - platform-ui: the `sheetImport`, `socialImportActions` and `SheetImport` tests, and the page's tests.
+
 ### platform-nest `0.201.0`, platform-ui `0.221.0`, ai-agents `0.21.0`, infra `0.13.18` - AIP Phase 3 train 1: the assistant knows the department it is used in (AIP-10, 11, 12, 13, 14), behind `ASSISTANT_DEPT_CONTEXT`, off by default - PROTOTYPED
 
 - **Design.** `docs/plans/2026-10-27-ai-plan.md` §6.2. The department is a label that narrows, never an authority that widens (§3.3): DW-D26's per-record read filter still decides what may be cited.

@@ -309,6 +309,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/feed.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/metrics.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/pipeline.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/sheet-import.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/simulated-accounts.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social-reports.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social.controller.ts` |
@@ -477,6 +478,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/schedule`
 - `/departments/[deptId]/search-terms`
 - `/departments/[deptId]/settings`
+- `/departments/[deptId]/settings/import`
 - `/departments/[deptId]/sites`
 - `/departments/[deptId]/sites/[slug]`
 - `/departments/[deptId]/sites/portfolio`
