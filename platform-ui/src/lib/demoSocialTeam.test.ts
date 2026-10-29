@@ -225,3 +225,17 @@ describe("the other sections and the partial option", () => {
     expect(d.workload).toEqual([]);
   });
 });
+
+describe("SCP-5d demo: needs attention names roles, never people (BFF §63.19: team-level, the same for every reader)", () => {
+  it("labels each holder with the server's role words, and only late, at-risk and blocked rows carry a holder", () => {
+    const words = new Set(["The officer", "A copywriter", "The HoD or the GM", "The designer", "The client", "Someone outside the team"]);
+    for (const u of ["u-pm", "u-gm", "demo-owner", "demo-hansel"]) {
+      for (const it of dashboard(u).needsAttention as Array<{ kind: string; holder?: { label: string } }>) {
+        if (it.holder) {
+          expect(["late", "at_risk", "blocked"], `${u} ${it.kind}`).toContain(it.kind);
+          expect(words.has(it.holder.label), `${u} ${it.kind} ${it.holder.label}`).toBe(true);
+        }
+      }
+    }
+  });
+});
