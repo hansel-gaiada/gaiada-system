@@ -128,7 +128,7 @@ export async function resolveDepartment(c: PoolClient, tenantId: string, departm
   const id = departmentId.trim();
   if (!id || id.length > NODE_ID_MAX) return null;
   const anchored = await c.query<{ node_id: string; name: string }>(
-    `SELECT node_id, name FROM org_units WHERE tenant_id = $1 AND node_id = $2 AND status = 'active' LIMIT 1`,
+    `SELECT node_id, name FROM org_units WHERE tenant_id = $1 AND node_id = $2 AND kind = 'department' AND status = 'active' LIMIT 1`,
     [tenantId, id],
   );
   let row = anchored.rows[0];

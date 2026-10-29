@@ -42,7 +42,7 @@ import { refreshThreadCost } from "./thread-cost";
 import { searchKnowledgeStrict, type KnowledgeHit, type KnowledgeStoreHit } from "../search/knowledge-client";
 import { collapseHits, filterReadableHits, searchTopK, type StoreHit } from "../knowledge/search-filter";
 import { assemblePrincipal, type Principal } from "../../rbac/principal";
-import { contextLine, resolvePreamble, type TurnContext, type TurnDepartment } from "./department-context";
+import { contextLine, GUIDANCE_HEADING, resolvePreamble, type TurnContext, type TurnDepartment } from "./department-context";
 
 /** The assistant's fixed system preamble. Deliberately generic in Phase 1 — no per-department
  *  persona (blueprint D-B: "one Hermes front door", personas deferred), no tool-capability list
@@ -398,7 +398,7 @@ export async function assembleContext(
       } catch {
         preamble = null; // a preamble is additive (like grounding): never fails the turn
       }
-      if (preamble) sections.push(`Department guidance:\n${preamble}`);
+      if (preamble) sections.push(`${GUIDANCE_HEADING}\n${preamble}`);
     }
   }
   if (memoryBlock) sections.push(`Known facts and preferences about this user (confirmed):\n${memoryBlock}`);
