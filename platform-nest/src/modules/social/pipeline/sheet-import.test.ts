@@ -589,7 +589,7 @@ describe("the plan preview", () => {
     expect(at("28 Oct", { month: "2026-10" }).refusals).toEqual([{ field: "date", code: "date_in_past" }]);
     expect(at("29 Oct", { month: "2026-10" }).outcome).toBe("ready");
     // Outside the month AND in the past: both, at once.
-    expect(at("5 Sep", { month: "2026-11" }).refusals).toEqual([{ field: "date", code: "date_outside_month" }, { field: "date", code: "date_in_past" }]);
+    expect(at("5 Sep", { month: "2026-11" }).refusals).toEqual([{ field: "date", code: "date_outside_month" }]); // one reason: never also date_in_past
   });
 
   it("the time: every form, the engagement's default, then 09:00 with the warning", () => {

@@ -13344,7 +13344,7 @@ One month per import. Fields: `client` and `date` (both required), `time`, `titl
 - **`date`** is read in `dateOrder`. The page's default is `dmy`.
   - `2026-11-03` and an xlsx date are always year-month-day.
   - A month name (`3 Nov`, `Nov 3`, `3 November 2026`) is read as such, in English or Indonesian; without a year it takes `month`'s year.
-  - Outside `month`: `date_outside_month`. Before today (the report day): `date_in_past`.
+  - Outside `month`: `date_outside_month` (only that, never also `date_in_past`). Inside it but before today (the report day): `date_in_past`.
 - **`time`** follows `defaultPostTime`'s forms. An empty cell takes the engagement's `default_post_time`, and without one `09:00`, with the warning `default_time_used`. `scheduledAt` is the date and time in `timeZone`, written as an ISO instant.
 - **`title`** is required by the machine (1 to 200 characters). An empty title takes the caption's first line, cut at 80 characters, with the warning `title_from_caption`. With neither: `missing_title`.
 - **`isExtra`** is yes from `yes`, `y`, `ya`, `true`, `1`, `x`, `✓` or `extra`. An empty cell is no.

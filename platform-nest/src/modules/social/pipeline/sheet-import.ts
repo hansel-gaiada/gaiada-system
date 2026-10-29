@@ -693,8 +693,9 @@ export function stagePlanRows(
       if (!date) d.refusals.push({ field: "date", code: "invalid_field" });
       else {
         d.date = date;
+        // One reason per date: outside the month is the problem to fix (often the date order or a missing year), so it is not also "in the past".
         if (date.slice(0, 7) !== plan.month) d.refusals.push({ field: "date", code: "date_outside_month" });
-        if (date < a.today) d.refusals.push({ field: "date", code: "date_in_past" });
+        else if (date < a.today) d.refusals.push({ field: "date", code: "date_in_past" });
       }
     }
 
