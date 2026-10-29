@@ -573,6 +573,16 @@ const SOCIAL_MEDIA: Workspace = {
         blurb: "Posts worth boosting, the boosts running and waiting for the client, and what each month's boost budget has committed.",
       }],
     },
+    // SCP-5d (BFF §63.17, §63.19): the Team dashboard: the department's KPI strip, needs attention, clients this cycle, workload and waits. Shown to the four Social
+    // approvers only (the same gate as Settings); the page's read is `plan` itself, so anyone else who opens the address gets its refusal. The row key `dashboard`
+    // is the Social skin's pin (`lib/skins.ts`) and is free in this workspace.
+    {
+      key: "dashboard", label: "Dashboard", icon: "dashboard", gate: { kind: "leadSocial" },
+      tabs: [{
+        key: "dashboard", label: "Dashboard", href: deptPath("dashboard"), icon: "dashboard",
+        blurb: "The team's month at a glance: what needs attention, each client against its target, who holds what and where work waits.",
+      }],
+    },
     // SCP-1c (BFF §63.17): the HoD's Settings page (the ready-by buffer, the deadline table). Shown to the four Social approvers only; the page itself is
     // readable by the team and editable with `plan`. The row key `settings` is the Social skin's pin (`lib/skins.ts`); Admin's `settings` row is another list.
     {
