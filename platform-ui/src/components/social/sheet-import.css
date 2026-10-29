@@ -1,0 +1,72 @@
+/* SCP-6a — the "Import from your sheet" wizard (BFF §63.23.6). Tokens only, no colour, radius or shadow literal and no uppercase transform (the tokens
+   guard), so the Standard and the Social skin (SCP-K) restyle it by changing tokens and nothing here. It builds on the `.scp-*` classes of cycles.css
+   and allocation.css (inputs, notes, messages, tables, buttons), which the wizard imports with it. */
+
+.scp-import { display: grid; gap: 20px; }
+
+/* The steps: a numbered list, the current one marked (aria-current="step") and set in bold with a rule, never by colour alone. */
+.scp-import__steps { display: flex; flex-wrap: wrap; gap: 6px 18px; list-style: none; margin: 0; padding: 0; counter-reset: scp-import-step; }
+.scp-import__step {
+  counter-increment: scp-import-step; display: inline-flex; align-items: center; gap: 6px;
+  font: 400 12px var(--font-body); color: var(--erp-ink-60); padding-bottom: 3px; border-bottom: 2px solid transparent;
+}
+.scp-import__step::before { content: counter(scp-import-step) "."; font-variant-numeric: tabular-nums; }
+.scp-import__step[aria-current="step"] { font-weight: 700; color: var(--text-primary); border-bottom-color: var(--accent-fg); }
+.scp-import__step--done { color: var(--text-primary); }
+
+/* The explanation (a list with a sentence per step), shown where the wizard is not. */
+.scp-import__explain { display: grid; gap: 10px; margin: 0; padding: 0 0 0 20px; max-width: 68ch; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.scp-import__explain strong { font-weight: 700; }
+
+.scp-import__panel { display: grid; gap: 14px; min-width: 0; }
+.scp-import__title { font: 700 14px var(--font-body); color: var(--text-primary); margin: 0; }
+.scp-import__title:focus { outline: none; }
+.scp-import__title:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 2px; }
+
+.scp-import__choices { display: grid; gap: 10px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.scp-import__choices legend { font: 600 11px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-60); padding: 0; margin: 0 0 6px; }
+.scp-import__choice { display: flex; gap: 8px; align-items: flex-start; font: 400 13px/1.4 var(--font-body); color: var(--text-primary); }
+.scp-import__choice input { margin: 3px 0 0; }
+.scp-import__choice small { display: block; font: 400 11px var(--font-body); color: var(--erp-ink-60); }
+
+.scp-import__paste { width: 100%; max-width: 760px; min-height: 140px; font-family: var(--font-body); box-sizing: border-box; }
+
+/* The columns step: one row per field, a label and a select, on two columns where the width allows. */
+.scp-import__fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px 24px; margin: 0; padding: 0; list-style: none; }
+.scp-import__field { display: grid; gap: 4px; min-width: 0; }
+.scp-import__field select { max-width: 100%; }
+.scp-import__req { font: 600 11px var(--font-body); color: var(--status-critical-fg); margin-left: 4px; }
+
+.scp-import__sample { font-size: 12px; }
+.scp-import__sample td, .scp-import__sample th { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.scp-import__nav { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 4px 0 0; }
+
+.scp-import__names { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.scp-import__name { display: grid; gap: 4px; max-width: 520px; }
+.scp-import__name small { font: 400 11px var(--font-body); color: var(--erp-ink-60); }
+
+/* The preview: a real table. A refused row has a rule down its edge and says "Refused" in words. */
+.scp-import__summary { font: 600 13px var(--font-body); color: var(--text-primary); margin: 0; }
+.scp-import__table td { vertical-align: top; }
+.scp-import__table tr.scp-import__row--refused { box-shadow: inset 3px 0 0 var(--status-critical-fg); background: var(--tint-hover); }
+.scp-import__table tr.scp-import__row--skipped { color: var(--erp-ink-60); }
+.scp-import__outcome { font: 700 11px var(--font-body); white-space: nowrap; }
+.scp-import__outcome--refused { color: var(--status-critical-fg); }
+.scp-import__outcome--ready { color: var(--status-ok-fg); }
+.scp-import__outcome--unchecked { color: var(--status-warning-fg); }
+.scp-import__reasons { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font: 400 12px/1.4 var(--font-body); }
+.scp-import__reason--refusal { color: var(--status-critical-fg); }
+.scp-import__reason--warning { color: var(--status-warning-fg); }
+.scp-import__changes { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font: 400 12px/1.4 var(--font-body); }
+.scp-import__check { display: inline-flex; align-items: center; }
+
+.scp-import__links { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.scp-import__links a { color: var(--accent-fg); font: 600 13px var(--font-body); }
+
+/* At phone width the wizard's controls take the whole line and the preview scrolls sideways inside its wrapper, not the page. */
+@media (max-width: 640px) {
+  .scp-import__fields { grid-template-columns: 1fr; }
+  .scp-import__nav .lux-btn { flex: 1 1 auto; }
+  .scp-import__paste { min-height: 110px; }
+}
