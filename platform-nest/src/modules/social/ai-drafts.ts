@@ -312,6 +312,20 @@ export interface ReportNarrativeDraftResult {
 }
 
 export function buildReportNarrativePrompt(facts: ReportNarrativeGroundingFacts): string {
+  const lines = reportGroundingLines(facts);
+  lines.push(
+    "Write 2-4 short paragraphs in this brand's voice, summarizing performance for the period. "
+      + "NEVER state a number you were not given above, and never imply a metric was zero just "
+      + "because it was not mentioned — say it has not been fetched yet instead. Never suggest "
+      + "generating or attaching an image — this system has no image-generation capability.",
+    'Reply with STRICT JSON only, no prose, no markdown fences: {"narrative": "<the summary text>"}',
+  );
+  return lines.join("\n\n");
+}
+
+/** The grounding half of a report prompt: who it is for, the ONLY numbers it may state, the top posts and the client's own
+ *  brand corpus. Shared by the narrative prompt above and SCP-5a's monthly draft (report-notes.ts). */
+export function reportGroundingLines(facts: ReportNarrativeGroundingFacts): string[] {
   const lines = [
     `You are writing the narrative summary section of a social-media performance report for `
       + `"${facts.clientName}" (engagement "${facts.engagementName}"), covering ${facts.periodLabel}.`,
@@ -343,14 +357,7 @@ export function buildReportNarrativePrompt(facts: ReportNarrativeGroundingFacts)
         .join("\n")}`,
     );
   }
-  lines.push(
-    "Write 2-4 short paragraphs in this brand's voice, summarizing performance for the period. "
-      + "NEVER state a number you were not given above, and never imply a metric was zero just "
-      + "because it was not mentioned — say it has not been fetched yet instead. Never suggest "
-      + "generating or attaching an image — this system has no image-generation capability.",
-    'Reply with STRICT JSON only, no prose, no markdown fences: {"narrative": "<the summary text>"}',
-  );
-  return lines.join("\n\n");
+  return lines;
 }
 
 // ───────────────────────────────────────────── Inbox triage (SMM-16) ──────────────────────────────

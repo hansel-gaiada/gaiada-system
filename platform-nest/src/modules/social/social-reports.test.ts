@@ -420,12 +420,16 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("social-media client-facing report
     expect(approveCalls[0][1]).toMatchObject({ module: "social", id, tenantId: A });
     expect(Array.isArray(approveCalls[0][1].approverIds)).toBe(true);
 
-    // list and detail: module social + approverIds too.
+    // list and detail: module social + approverIds too. The detail also asks `approve` and `deliver` as plain checks for
+    // its `canApprove` / `canDeliver` (SCP-5a, BFF §63.18), on the same resource.
     mocked.mockClear();
     expect((await app.inject({ method: "GET", url: `/api/${A}/modules/social/reports`, headers: asUser(uA) })).statusCode).toBe(200);
-    expect((await app.inject({ method: "GET", url: `/api/${A}/modules/social/reports/${id}`, headers: asUser(uA) })).statusCode).toBe(200);
-    for (const [, r, a] of mocked.mock.calls.filter(([, r]) => r.kind === "social_report")) {
-      expect(a).toBe("read");
+    const detail = await app.inject({ method: "GET", url: `/api/${A}/modules/social/reports/${id}`, headers: asUser(uA) });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({ canApprove: true, canDeliver: true });
+    const readCalls = mocked.mock.calls.filter(([, r]) => r.kind === "social_report");
+    expect(readCalls.map(([, , a]) => a)).toEqual(["read", "read", "approve", "deliver"]);
+    for (const [, r] of readCalls) {
       expect(r.module).toBe("social");
       expect(Array.isArray(r.approverIds)).toBe(true);
     }

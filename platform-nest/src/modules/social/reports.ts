@@ -23,6 +23,7 @@
 import type {
   ReportHeader, ReportKpi, ReportSeries, ReportSeriesPoint, ReportTable, ReportHighlight, ReportDocument,
 } from "../reports/report-document";
+import { NOTE_AREAS, type ReportAction, type ReportNotes } from "./report-notes";
 
 export type ReportKind = "monthly" | "campaign" | "adhoc";
 
@@ -115,6 +116,22 @@ export interface KpiTargetInput {
   duePeriod: string | null;
 }
 
+/** SCP-5a (§63.18, PV7-Q3): one boost the client paid for in the period: the CLIENT'S OWN ad spend, never our fees. `spendMinor`
+ *  is in minor units of `currency` (`minorUnit` digits), and null until the boost stops or completes (the spend is recorded
+ *  then): a running boost's spend is unknown, never a fabricated 0. */
+export interface BoostSpendInput {
+  boostId: string;
+  postTitle: string;
+  startsOn: string;
+  days: number;
+  status: string;
+  currency: string;
+  minorUnit: number;
+  spendMinor: number | null;
+  paidReach: number | null;
+  clicks: number | null;
+}
+
 export interface ReportSnapshotFacts {
   rangeStart: string;
   rangeEnd: string;
@@ -122,6 +139,19 @@ export interface ReportSnapshotFacts {
   posts: PostMetricInput[];
   postsPublishedInPeriod: number; // a REAL count of our own rows — always known, real 0 is legitimate
   kpiTargets: KpiTargetInput[];
+  /** SCP-5a: the period's boosts that ran (optional: a caller with none passes nothing). */
+  boosts?: BoostSpendInput[];
+}
+
+/** SCP-5a: the client's own ad spend of the period, per currency (a mixed-currency month is never summed across currencies). */
+export interface FrozenAdSpend {
+  currency: string;
+  minorUnit: number;
+  boosts: number;
+  /** Sum of the KNOWN spends, or null when no boost of this currency has its spend recorded yet. */
+  spendMinor: number | null;
+  paidReach: number | null;
+  clicks: number | null;
 }
 
 /** The FROZEN snapshot half of `social_reports.metrics` — everything computed from SMM-21's tables,
@@ -143,6 +173,8 @@ export interface FrozenSocialReportMetrics {
    *  `buildSocialReportSnapshot` (which knows nothing about the narrative call). */
   narrativeSource?: "ai" | "deterministic";
   narrativeModel?: string;
+  /** SCP-5a: the client's own ad spend of the period (boosts), absent when no boost ran or on a snapshot frozen before SCP-5a. */
+  adSpend?: FrozenAdSpend[];
 }
 
 function seriesFor(
@@ -274,12 +306,49 @@ export function buildSocialReportSnapshot(facts: ReportSnapshotFacts): FrozenSoc
     });
   }
 
+  // ── SCP-5a (§63.18, PV7-Q3): the period's boosts, as the CLIENT'S OWN ad spend. The spend is the amount the client's ad
+  //    account paid, recorded when the boost stopped or completed; no fee or margin of ours is in these rows, and none is read.
+  //    A running boost's spend is null ("not recorded yet"), never 0. Money is shown in major units of its currency.
+  const boosts = facts.boosts ?? [];
+  const adSpend: FrozenAdSpend[] = [];
+  if (boosts.length > 0) {
+    const major = (minor: number | null, mu: number) => (minor === null ? null : minor / 10 ** mu);
+    for (const currency of [...new Set(boosts.map((b) => b.currency))].sort()) {
+      const of = boosts.filter((b) => b.currency === currency);
+      adSpend.push({
+        currency, minorUnit: of[0].minorUnit, boosts: of.length,
+        spendMinor: sumKnown(of.map((b) => b.spendMinor)), paidReach: sumKnown(of.map((b) => b.paidReach)), clicks: sumKnown(of.map((b) => b.clicks)),
+      });
+    }
+    const single = adSpend.length === 1 ? adSpend[0] : null;
+    tables.push({
+      key: "ad_spend",
+      label: "Paid boosts (your own ad spend)",
+      columns: [
+        { key: "post", label: "Post" },
+        { key: "startsOn", label: "Started" },
+        { key: "days", label: "Days", unit: "count", align: "right" },
+        { key: "spend", label: "Spend", align: "right" },
+        { key: "currency", label: "Currency" },
+        { key: "paidReach", label: "Paid reach", unit: "count", align: "right" },
+        { key: "clicks", label: "Clicks", unit: "count", align: "right" },
+      ],
+      rows: [...boosts].sort((a, b) => a.startsOn.localeCompare(b.startsOn) || a.boostId.localeCompare(b.boostId)).map((b) => ({
+        post: b.postTitle, startsOn: b.startsOn, days: b.days, spend: major(b.spendMinor, b.minorUnit), currency: b.currency,
+        paidReach: b.paidReach, clicks: b.clicks,
+      })),
+      ...(single
+        ? { totalRow: { post: "Total", startsOn: null, days: null, spend: major(single.spendMinor, single.minorUnit), currency: single.currency, paidReach: single.paidReach, clicks: single.clicks } }
+        : {}),
+    });
+  }
+
   const highlights: ReportHighlight[] = [];
   if (facts.postsPublishedInPeriod === 0) {
     highlights.push({ kind: "anomaly", text: "No posts were published in this engagement during this period." });
   }
 
-  return { rangeStart, rangeEnd, kpis, series, tables, highlights };
+  return { rangeStart, rangeEnd, kpis, series, tables, highlights, ...(adSpend.length > 0 ? { adSpend } : {}) };
 }
 
 /** Assemble the final `ReportDocument` the print pipeline (`report-pdf-export.ts`'s
@@ -301,6 +370,11 @@ export function buildSocialReportDocument(input: {
   frozen: FrozenSocialReportMetrics;
   narrativeText: string;
   generatedAt: string;
+  /** SCP-5a: the notes and the action plan, printed as two tables so the PDF the client receives carries them. */
+  notes?: ReportNotes;
+  actionPlan?: ReportAction[];
+  /** SCP-5a: the row's `simulated` (the frozen numbers include simulated rows): the page and the PDF draw the watermark. */
+  simulated?: boolean;
 }): ReportDocument {
   const header: ReportHeader = {
     tenantId: input.tenantId,
@@ -320,8 +394,66 @@ export function buildSocialReportDocument(input: {
     kpis: input.frozen.kpis,
     series: input.frozen.series,
     distributions: [],
-    tables: input.frozen.tables,
+    tables: [...input.frozen.tables, ...notesTables(input.notes ?? {}, input.actionPlan ?? [])],
     highlights: input.frozen.highlights,
     narrative: { source: input.frozen.narrativeSource ?? "deterministic", text: input.narrativeText, model: input.frozen.narrativeModel },
+    ...(input.simulated ? { simulated: true } : {}),
   };
+}
+
+const AREA_LABELS: Record<(typeof NOTE_AREAS)[number], string> = { followers: "Followers", engagement: "Engagement", audience: "Audience" };
+
+/** SCP-5a: the notes (`notes`; an area with nothing written is left out) and the action plan (`action_plan`), as document
+ *  tables the existing print page already renders. Neither table is drawn when it would be empty. */
+export function notesTables(notes: ReportNotes, actionPlan: ReportAction[]): ReportTable[] {
+  const out: ReportTable[] = [];
+  const rows = NOTE_AREAS.flatMap((a) => {
+    const n = notes[a];
+    if (!n || (!/\S/.test(n.insight) && !/\S/.test(n.suggestion))) return [];
+    return [{ area: AREA_LABELS[a], insight: n.insight, suggestion: n.suggestion }];
+  });
+  if (rows.length > 0) {
+    out.push({
+      key: "notes", label: "Insights and suggestions",
+      columns: [{ key: "area", label: "Area" }, { key: "insight", label: "Insight" }, { key: "suggestion", label: "Suggestion" }],
+      rows,
+    });
+  }
+  if (actionPlan.length > 0) {
+    out.push({
+      key: "action_plan", label: "Action plan",
+      columns: [{ key: "action", label: "Action" }, { key: "owner", label: "Owner" }, { key: "due", label: "Due" }],
+      rows: actionPlan.map((x) => ({ action: x.action, owner: x.owner === "client" ? "Client" : "Agency", due: x.due ?? null })),
+    });
+  }
+  return out;
+}
+
+/**
+ * SCP-5a (§63.18 "Reports due"): the day a monthly report for `period` (`YYYY-MM`) is due: the engagement's `report_due_day`
+ * of the month after the period, clamped to that month's last day (a 31 in a 30-day month is the 30th). Null for a bad period
+ * or day.
+ */
+export function reportDueDate(period: string, dueDay: number): string | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(period);
+  if (!m || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return null;
+  const last = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate(); // the last day of the month after `period`
+  return new Date(Date.UTC(y, mo, Math.min(dueDay, last))).toISOString().slice(0, 10);
+}
+
+/** SCP-5a: the period (`YYYY-MM`) whose monthly report falls due in the month of `todayIso` (`YYYY-MM-DD`): the month before. */
+export function previousPeriod(todayIso: string): string {
+  const y = Number(todayIso.slice(0, 4));
+  const mo = Number(todayIso.slice(5, 7));
+  return new Date(Date.UTC(y, mo - 2, 1)).toISOString().slice(0, 7);
+}
+
+/** "August 2026" for `2026-08`; the raw value otherwise. */
+export function monthLabel(period: string | null): string {
+  if (!period || !/^\d{4}-\d{2}$/.test(period)) return period ?? "";
+  const [y, mo] = period.split("-").map(Number);
+  return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 }

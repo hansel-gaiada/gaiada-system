@@ -4,6 +4,8 @@
 //   GET waiting                                                                                    social_post · read   Messages: who holds my posts
 //   GET needs-you                                                                                  social_post · read   the pipeline's leg of lib/queue.ts
 //                                                                                                  (SCP-4a: + the seats' boosts approved, not started)
+//                                                                                                  (SCP-5a: + the officer's monthly reports due, the seats'
+//                                                                                                   reports to check and to send)
 //   GET overview                                                                                   social_post · read   the Overview's Pulse tiles (SCP-3f)
 //
 // AUTHORIZATION BEFORE VALIDATION (BFF §63.0): the read decision is asked first, so a refused caller always gets 403, never a 400.
@@ -29,6 +31,8 @@ import { loadSocialApproverIds } from "../pipeline-authz";
 import { isSocialSimulationEnabled } from "../publisher/simulation";
 import { findDepartmentBySlug, roleHolders } from "./pipeline-data";
 import { readBoostsToStart } from "./boosts-data";
+import { readReportsDue, readReportsToAct } from "../report-data";
+import { monthLabel, previousPeriod, reportDueDate } from "../reports";
 import { HOLDER_LABELS } from "./pipeline-read";
 import {
   FEED_WINDOW_AHEAD_DAYS, FEED_WINDOW_BEHIND_DAYS, readFeedCandidates, readFeedContext, readFeedPageExtras, readLastFollowUps, readMetricsMissing,
@@ -305,6 +309,55 @@ export class SocialFeedController {
       }
     } catch {
       partial.push("boosts");
+    }
+    // Source 4 (SCP-5a, §63.7, §63.18 "Reports due"): the officer's monthly reports due. An engagement with a `report_due_day`
+    // has its report for last month (M-1) due on that day of this month (M), clamped to the month's end, until a monthly report
+    // for M-1 is delivered; the item shows whether or not the report row exists yet (it opens the report, or the list).
+    // "This month" is the company's report day (REPORTS_TZ, UTC when unset), as every day count of the pipeline.
+    try {
+      const today = todayIsoInTz(config.reportsTz);
+      const period = previousPeriod(today);
+      const data = await withTenants([tenantId], async (c) => ({
+        rows: await readReportsDue(c, tenantId, me, period),
+        dept: await findDepartmentBySlug(c, tenantId, "social-media"),
+      }), SOCIAL);
+      const base = data.dept ? `/departments/${data.dept.id}/social-reports` : "/departments#";
+      for (const r of data.rows) {
+        const due = reportDueDate(period, r.reportDueDay);
+        items.push({
+          id: `social:${tenantId}:${r.reportId ?? r.engagementId}:report_due`, kind: "report_due", role: "officer",
+          title: `Monthly report, ${monthLabel(period)}`, clientName: r.clientName,
+          since: `${today.slice(0, 7)}-01T00:00:00.000Z`, ...(due ? { due } : {}),
+          href: r.reportId && data.dept ? `${base}/${r.reportId}` : base,
+        });
+      }
+    } catch {
+      partial.push("reports due");
+    }
+    // Source 5 (SCP-5a, §63.7): for the HoD and GM seats, every client's reports in the HoD check (`report_check`) and ready to
+    // send (`report_send`). The owner and the superadmin act from the same pages but get no queue.
+    try {
+      const data = await withTenants([tenantId], async (c) => {
+        const approverIds = await loadSocialApproverIds(c, tenantId);
+        if (!approverIds.includes(me)) return null;
+        const dept = await findDepartmentBySlug(c, tenantId, "social-media");
+        return { dept, rows: await readReportsToAct(c, tenantId, NEEDS_YOU_MAX) };
+      }, SOCIAL);
+      if (data) {
+        const base = data.dept ? `/departments/${data.dept.id}/social-reports` : "/departments#";
+        for (const r of data.rows) {
+          const due = r.kind === "monthly" && r.period && r.reportDueDay !== null ? reportDueDate(r.period, r.reportDueDay) : null;
+          const what = r.kind === "monthly" ? "Monthly report" : r.kind === "campaign" ? "Campaign report" : "Report";
+          items.push({
+            id: `social:${tenantId}:${r.id}:${r.status === "in_review" ? "report_check" : "report_send"}`,
+            kind: r.status === "in_review" ? "report_check" : "report_send", role: "approver",
+            title: r.period ? `${what}, ${monthLabel(r.period)}` : what, clientName: r.clientName, since: r.since,
+            ...(due ? { due } : {}), href: data.dept ? `${base}/${r.id}` : base,
+          });
+        }
+      }
+    } catch {
+      partial.push("reports");
     }
     items.sort((a, b) => (a.since < b.since ? -1 : a.since > b.since ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     return { items: items.slice(0, NEEDS_YOU_MAX), partial };
