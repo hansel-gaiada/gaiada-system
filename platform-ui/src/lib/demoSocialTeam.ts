@@ -11,13 +11,14 @@
 // Boost rows (`boost_waiting`) are the boosts demo store's own (`demoSocialBoosts.ts`): a boost `requested` (waiting for the client), or `approved` and not started, the
 // same rule as the Overview's Boosts waiting tile (BFF §63.7), on an unarchived post, in the month its `startsOn` falls in (a boost belongs to that month's cycle).
 //
-// The report rows are INVENTED (the demo has no reports store for the dashboard to read yet; a later lane gives it one) but follow the real rule (BFF §63.18): a monthly
-// report for period M-1 is due on the allocation's report day in month M, so `report_due` appears once that day is reached, `since` the first of M, and carries no
-// `reportId` when no report exists yet. `report_to_check` is a report in the HoD check (it has an id).
+// The report rows read the monthly report demo (`demoSocialReports.ts`), on the server's rules (BFF §63.18, §63.19): a monthly report for period M-1 is due on the
+// allocation's report day in month M, so `report_due` appears once that day is reached and until it is Sent, `since` the first of M, with no `reportId` while no report
+// exists yet. `report_to_check` is today's state: every report in the HoD check.
 import "server-only";
 import { todayIsoInDisplayZone } from "./format";
 import { demoBoosts } from "./demoSocialBoosts";
 import { scpHolderOf } from "./scpStageMachine";
+import { demoReportsFor, demoReportsInReview } from "./demoSocialReports";
 import {
   COPYWRITER, CREATIVES_DESIGNER, DEMO_MEMBER_NAMES, IN_TEAM_DESIGNER, PIPE_ENGAGEMENTS, PIPE_POSTS, SEAT_APPROVERS, allocStore, demoCycleTable, demoPostHealth,
   isDemoSocialApprover, type DemoResult, type PipePost,
@@ -110,22 +111,29 @@ export function demoTeamDashboard(month: string, userId: string, opts: DemoTeamO
     });
   }
 
-  // monthly reports (invented, on the real rule): month M is on or before the current month, and the report day of M has come (a past month's has).
-  if (month <= today.slice(0, 7)) {
-    const engs = PIPE_ENGAGEMENTS.filter((e) => e.status !== "closed");
-    const reportDayReached = (engagementId: string): boolean => {
-      const day = allocStore.byEngagement[engagementId]?.reportDueDay ?? null;
-      return day !== null && today >= `${month}-${String(day).padStart(2, "0")}`;
-    };
-    // The report is the previous month's (period M-1), titled as the server titles it; like the server, report rows carry no holder.
+  // monthly reports (BFF §63.19, the rulings of 2026-10-29): `report_due` for month M is period M-1's monthly report, once the client's report day in M has come (a past
+  // month's always has, a future month's never), until it is Sent; no `reportId` while no report exists. `report_to_check` is today's state: every report in the HoD check.
+  // Like the server, report rows carry no holder.
+  {
     const [y, m] = month.split("-").map(Number);
     const period = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
-    // the second client's report has not been drafted (no id); the third's is in the HoD check.
-    if (engs[1] && reportDayReached(engs[1].id)) {
-      needsAttention.push({ kind: "report_due", engagementId: engs[1].id, clientName: engs[1].clientName, title: `Monthly report ${period}`, since: `${month}-01` });
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const reportDayReached = (engagementId: string): boolean => {
+      const day = allocStore.byEngagement[engagementId]?.reportDueDay ?? null;
+      return day !== null && today >= `${month}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+    };
+    const ofPeriod = demoReportsFor(period);
+    for (const e of PIPE_ENGAGEMENTS.filter((x) => x.status !== "closed")) {
+      if (!reportDayReached(e.id)) continue;
+      const rows = ofPeriod.filter((r) => r.engagementId === e.id);
+      if (rows.some((r) => r.status === "delivered")) continue;
+      const row = rows[0];
+      needsAttention.push({ kind: "report_due", ...(row ? { reportId: row.id } : {}), engagementId: e.id, clientName: e.clientName, title: `Monthly report ${period}`, since: `${month}-01` });
     }
-    if (engs[2]) {
-      needsAttention.push({ kind: "report_to_check", reportId: `rep-demo-${engs[2].id}-${period}`, engagementId: engs[2].id, clientName: engs[2].clientName, title: `Monthly report ${period}`, since: `${month}-01` });
+    for (const r of demoReportsInReview()) {
+      const e = PIPE_ENGAGEMENTS.find((x) => x.id === r.engagementId);
+      if (!e) continue;
+      needsAttention.push({ kind: "report_to_check", reportId: r.id, engagementId: e.id, clientName: e.clientName, title: r.period ? `Monthly report ${r.period}` : "Report", since: r.updatedAt });
     }
   }
 

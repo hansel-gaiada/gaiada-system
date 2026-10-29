@@ -492,3 +492,9 @@ export const demoReportsRoute = demoReports.staff;
  */
 export const demoReportsFor = (month: string): Array<{ id: string; engagementId: string; period: string; status: string; updatedAt: string }> =>
   demoStore.reports.filter((r) => r.kind === "monthly" && r.period === month).map((r) => ({ id: r.id, engagementId: r.engagementId, period: month, status: r.status, updatedAt: r.updatedAt }));
+
+/** SCP-5d: every report in the HoD check (`in_review`), any kind and any period, oldest change first: the Team dashboard's "Report to check" is today's state, as the server reads it. */
+export const demoReportsInReview = (): Array<{ id: string; engagementId: string; kind: string; period: string | null; updatedAt: string }> =>
+  demoStore.reports.filter((r) => r.status === "in_review")
+    .map((r) => ({ id: r.id, engagementId: r.engagementId, kind: r.kind, period: r.period ?? null, updatedAt: r.updatedAt }))
+    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));

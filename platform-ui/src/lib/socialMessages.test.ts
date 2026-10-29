@@ -89,6 +89,7 @@ describe("the words", () => {
     // SCP-5a: the monthly report's three kinds
     expect(needsKindWords("report_due")).toBe("A monthly report is due");
     expect(needsKindWords("report_check")).toBe("A report to check");
+    expect(needsKindWords("boost_start")).toBe("A boost to start");
     expect(needsKindWords("report_send")).toBe("A report to send");
   });
   it("links a post to the post page and a client to the conversation section of its Work tab", () => {

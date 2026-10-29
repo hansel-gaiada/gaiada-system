@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getDepartment } from "@/lib/departments";
+import { getDepartmentNode } from "@/lib/departments";
 import { activeCompany } from "@/lib/companyContext";
 import { workspaceFor } from "@/lib/workspaces";
 import { todayIsoInDisplayZone } from "@/lib/format";
@@ -30,7 +30,7 @@ export default async function SocialReportsPage({ params, searchParams }: { para
   const tenant = await getActiveTenant(me);
   const { deptId } = await params;
   if (!tenant) notFound();
-  const dept = await getDepartment(userId, tenant, deptId);
+  const dept = await getDepartmentNode(userId, tenant, deptId);
   if (!dept) notFound();
   if (workspaceFor(activeCompany(me, tenant)?.vertical, dept.name).key !== "social-media") notFound();
 
