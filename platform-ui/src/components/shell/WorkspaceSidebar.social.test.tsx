@@ -75,10 +75,10 @@ describe("the Social menu: which entries a person sees", () => {
     expect(link("Profile")).toHaveAttribute("href", "/departments/d-soc/profile");
   });
 
-  it("a head also sees Settings (SCP-1c); the Dashboard page stays hidden while ticketed", () => {
+  it("a head also sees Dashboard (SCP-5d) and Settings (SCP-1c), the officer neither", () => {
     renderAt(socialModel(head), "/departments/d-soc");
-    expect(entries()).toEqual(["Home", "Search", "Messages", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "Profile", "AI Assistant", "Settings", "More"]);
-    expect(within(menu()).queryByRole("link", { name: "Dashboard" })).toBeNull();
+    expect(entries()).toEqual(["Home", "Search", "Messages", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "Profile", "AI Assistant", "Dashboard", "Settings", "More"]);
+    expect(link("Dashboard")).toHaveAttribute("href", "/departments/d-soc/dashboard");
     expect(link("Settings")).toHaveAttribute("href", "/departments/d-soc/settings");
   });
 

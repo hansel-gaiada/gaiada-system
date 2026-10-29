@@ -33,10 +33,9 @@ describe("skins: switched on", () => {
     expect(skinsOn("")).toEqual(["standard", "social"]);
   });
 
-  it("Social is on, yet no pinned entry points at a page that does not exist: the unbuilt ones stay ticketed", () => {
-    // Settings (SCP-1c), Messages (SCP-1j) and Profile (SCP-1k) are built, so their pins lost their tickets; Dashboard waits for SCP-5d.
-    const ticketed = SKINS.social.pinned!.filter((p) => p.ticket).map((p) => p.key).sort();
-    expect(ticketed).toEqual(["dashboard"]);
+  it("Social is on, and no pinned entry points at a page that does not exist: every entry's page is built, so none is ticketed", () => {
+    // Settings (SCP-1c), Messages (SCP-1j), Profile (SCP-1k) and, last, the Dashboard (SCP-5d) are built, so their pins lost their tickets.
+    expect(SKINS.social.pinned!.filter((p) => p.ticket).map((p) => p.key)).toEqual([]);
   });
 });
 
@@ -103,8 +102,8 @@ describe("skins: the pinned menu", () => {
     return pinnedFor(soc.skin, allRows(soc))!.map((p) => p.key);
   };
 
-  it("keeps the Dashboard hidden while its page (SCP-5d) is not built; Messages (SCP-1j) opens the registry's `messages` row and its first tab is `{dept}/messages`; Settings (SCP-1c) is built and shows to the Social head only, never to an officer or an ancestor's head", () => {
-    expect(SKINS.social.pinned!.find((p) => p.key === "dashboard")).toMatchObject({ kind: "row", row: "dashboard", ticket: "SCP-5d" });
+  it("the Dashboard (SCP-5d) is built and shows to the Social head only, never to an officer or an ancestor's head; Messages (SCP-1j) opens the registry's `messages` row and its first tab is `{dept}/messages`; Settings (SCP-1c) is built and shows to the Social head only, never to an officer or an ancestor's head", () => {
+    expect(SKINS.social.pinned!.find((p) => p.key === "dashboard")).toEqual({ kind: "row", key: "dashboard", row: "dashboard", label: "Dashboard", icon: "dashboard" });
     // Settings is built: its pin names no ticket and opens the registry's `settings` row (the four approvers' page, `canLeadSocial`).
     expect(SKINS.social.pinned!.find((p) => p.key === "settings")).toEqual({ kind: "row", key: "settings", row: "settings", label: "Settings", icon: "settings" });
     const officer = pinsOf(me([member()]));
@@ -115,7 +114,7 @@ describe("skins: the pinned menu", () => {
     expect(officer).toContain("messages");
     const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
     expect(pinnedFor("social", allRows(soc))!.find((p) => p.key === "messages")).toMatchObject({ kind: "link", label: "Messages", href: "/departments/d-soc/messages", row: "messages" });
-    expect(pinsOf(me([member(), lead("d-soc")]))).toEqual([...officer, "settings"]);
+    expect(pinsOf(me([member(), lead("d-soc")]))).toEqual([...officer, "dashboard", "settings"]);
     expect(pinsOf(me([member(), lead("root")]))).toEqual(officer);
     expect(pinsOf(me([member(), lead("d-web")]))).toEqual(officer);
   });
@@ -263,6 +262,55 @@ describe("skins: the phone (SCP-Ke)", () => {
     const pins = ["home", "tasks", "dashboard", "settings", "profile"].map(link);
     expect(phoneMenuFor("social", pins).map((p) => p.key)).toEqual(["dashboard", "settings"]);
     expect(phoneBarFor("social", pins).map((p) => p.key)).toEqual(["home", "tasks", "profile"]);
+  });
+});
+
+// SCP-5d (BFF §63.17, §63.21; SCP-Q19, PERMISSION §53.4): the Dashboard pin and the registry's `dashboard` row show in the Social menu under `canLeadSocial` EXACTLY: to
+// each of the four approvers (the Social Media lead seat, the GM's lead seat, the owner, the superadmin) and not to a company admin, a Web Dev head or an officer. The gate
+// hides, it grants nothing: the page's read (`GET team`, `plan`) is what refuses.
+describe("skins: the Dashboard shows to the four approvers only (SCP-5d)", () => {
+  const tree: OrgTreeNode = node("root", "Agency", "company", [
+    node("d-soc", "Social Media", "department", [person("p-soc-0", "u-1")]),
+    node("d-web", "Web Dev", "department"),
+    node("d-gm", "GM", "department"),
+  ]);
+  const global = (role: string) => ({ role, scopeType: "global", scopeId: null as unknown as string });
+  const personas: Array<[string, Me["roles"], boolean]> = [
+    ["a Social Media lead seat", [member(), lead("d-soc")], true],
+    ["a GM lead seat", [member(), lead("d-gm")], true],
+    ["the owner", [member(), { role: "owner", scopeType: "company", scopeId: "co-a" }], true],
+    ["the superadmin", [member(), global("platform_admin")], true],
+    ["a company admin", [member(), { role: "company_admin", scopeType: "company", scopeId: "co-a" }], false],
+    ["a Web Dev head", [member(), lead("d-web")], false],
+    ["an officer", [member()], false],
+  ];
+  const social = (roles: Me["roles"]) => {
+    const m = me(roles);
+    return wsByKey(buildShellModel({ me: m, tenantId: "co-a", workspaces: resolveMyWorkspaces({ me: m, tenantId: "co-a", root: tree }), skins: { on: ["standard", "social"] } }), "social-media");
+  };
+
+  for (const [who, roles, sees] of personas) {
+    it(`${sees ? "shows" : "hides"} the Dashboard row and its pin for ${who}`, () => {
+      const ws = social(roles);
+      const row = allRows(ws).find((r) => r.key === "dashboard");
+      const pin = pinnedFor(ws.skin, allRows(ws))!.find((p) => p.key === "dashboard");
+      if (sees) {
+        expect(row?.tabs.map((t) => t.href)).toEqual(["/departments/d-soc/dashboard"]);
+        expect(pin).toMatchObject({ kind: "link", label: "Dashboard", href: "/departments/d-soc/dashboard", row: "dashboard" });
+      } else {
+        expect(row).toBeUndefined();
+        expect(pin).toBeUndefined();
+      }
+    });
+  }
+
+  it("the Standard menu lists the row under the same gate (it is a registry row, not a skin one)", () => {
+    const std = (roles: Me["roles"]) => {
+      const m = me(roles);
+      const ws = wsByKey(buildShellModel({ me: m, tenantId: "co-a", workspaces: resolveMyWorkspaces({ me: m, tenantId: "co-a", root: tree }) }), "social-media");
+      return allRows(ws).some((r) => r.key === "dashboard");
+    };
+    expect(personas.map(([, roles]) => std(roles))).toEqual(personas.map(([, , sees]) => sees));
   });
 });
 

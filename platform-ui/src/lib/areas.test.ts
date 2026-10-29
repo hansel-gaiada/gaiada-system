@@ -118,6 +118,13 @@ describe("areaFor", () => {
     expect(areaFor("/departments/d%20web")).toEqual({ kind: "workspace", deptId: "d web" });
   });
 
+  // SCP-5d: the Team dashboard page is in exactly one area, the department's own (DW-1c), through its own entry.
+  it("puts the Social Media Team dashboard in the department's own workspace area, through one rule", () => {
+    expect(bestRules(["departments", "[deptId]", "dashboard"]).map((r) => r.path)).toEqual(["/departments/[deptId]/dashboard"]);
+    expect(areaFor("/departments/d-soc/dashboard")).toEqual({ kind: "workspace", deptId: "d-soc" });
+    expect(areaFor("/departments/d-soc/dashboard?month=2026-09")).toEqual({ kind: "workspace", deptId: "d-soc" });
+  });
+
   it("lets a static segment beat a dynamic one", () => {
     expect(areaFor("/appraisals/cycles/abc")).toEqual({ kind: "workspace", slug: "hr" });
     expect(areaFor("/appraisals/abc")).toEqual({ kind: "performance" });
