@@ -16,13 +16,15 @@ import { HOME_NOTICES_LIMIT } from "@/lib/socialHomeReminders";
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { getCycleTable } from "@/lib/socialCycles-data";
 import { getMyOpenTasks, getYourTurn } from "@/lib/socialHome-data";
+import { getSocialReports } from "@/lib/socialReports-data";
+import { dueReportPeriod } from "@/lib/socialReports";
 import { getWaiting } from "@/lib/socialMessages-data";
 import { todayIsoInDisplayZone } from "@/lib/format";
 import { SocialHomeView } from "./SocialHomeView";
 
 export async function SocialHome({ userId, tenantId, deptId, noQueue = false }: { userId: string; tenantId: string; deptId: string; noQueue?: boolean }) {
   const todayIso = todayIsoInDisplayZone();
-  const [turn, waiting, tasks, accounts, cycles, checkin, notices] = await Promise.all([
+  const [turn, waiting, tasks, accounts, cycles, checkin, notices, reportsOfMonth] = await Promise.all([
     getYourTurn(userId, tenantId),
     getWaiting(userId, tenantId),
     getMyOpenTasks(userId, tenantId),
@@ -30,6 +32,8 @@ export async function SocialHome({ userId, tenantId, deptId, noQueue = false }: 
     getCycleTable(userId, tenantId, todayIso.slice(0, 7)),
     getCheckinCardData(tenantId, userId),
     listNotices(userId, tenantId, { unitNodeId: deptId }, { state: "current", limit: HOME_NOTICES_LIMIT }),
+    // SCP-5a: the month a report is due for, so a SENT report's reminder card is dropped (one read, not one per client).
+    getSocialReports(userId, tenantId, { period: dueReportPeriod(todayIso) }),
   ]);
-  return <SocialHomeView reads={{ turn, waiting, tasks, accounts, cycles, checkin, notices }} deptId={deptId} userId={userId} tenantId={tenantId} submitCheckin={submitCheckin} noQueue={noQueue} todayIso={todayIso} nowIso={new Date().toISOString()} />;
+  return <SocialHomeView reads={{ turn, waiting, tasks, accounts, cycles, checkin, notices, reportsOfMonth }} deptId={deptId} userId={userId} tenantId={tenantId} submitCheckin={submitCheckin} noQueue={noQueue} todayIso={todayIso} nowIso={new Date().toISOString()} />;
 }

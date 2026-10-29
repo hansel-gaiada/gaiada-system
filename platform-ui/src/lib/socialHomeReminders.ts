@@ -3,11 +3,12 @@
 //   check-in      a card only when today is expected, not yet submitted and not excused (the four states of `CheckinCard`: excused, submitted and not-expected draw no card);
 //   notice        a card for the first pinned CURRENT notice. There are no read receipts in the backend (BFF §57, v1), so the card stays for as long as the notice is pinned
 //                 and current: reading it does not dismiss it. A refused read draws nothing (as the Overview's block did), a failed read says so, never "no notices";
-//   report        one card per report `reportsDue` lists.
+//   report        one card per report `reportsDue` lists, until that month's report is sent (SCP-5a).
 import type { CheckinCardData } from "./checkins-data";
 import { BLOCK_NOTICES_MAX, noticeAge, noticeHref, noticeUnitLabel, pinnedFirst, type NoticeList } from "./notices";
 import type { ReadResult } from "./readResult";
 import type { ReportDue } from "./socialHome";
+import type { SocialReportRow } from "./socialReports";
 
 /** How many current notices the Home asks for: the same page the Overview's block read. */
 export const HOME_NOTICES_LIMIT = BLOCK_NOTICES_MAX;
@@ -46,10 +47,24 @@ export const HOME_REPORT_CARDS_MAX = 3;
 /** The window of `daysLeft` a report is a reminder in: just missed (3 days ago) up to due within a week. */
 export const REPORT_WINDOW = { from: -3, to: 7 } as const;
 
+/** The reports of the month a due report is for (`GET reports?period=`), as far as a card needs them: the report's id and state. */
+export interface MonthReports { period: string; rows: ReadonlyArray<Pick<SocialReportRow, "id" | "engagementId" | "status" | "kind" | "period">> }
+/** A reminder card: the due report, and the month's report row when one exists (a card opens it; with none it opens the list to draft it). */
+export type ReportCard = ReportDue & { reportId: string | null; reportStatus: string | null };
+
 /** The report cards: only reports due within the window, soonest first (the input's order), at most `HOME_REPORT_CARDS_MAX`; `more` counts the in-window ones left out.
- *  There is no "sent" state until SCP-5a, so without a window a past report would nag all month and an officer with many clients would get a card each. The full list of
- *  report days is the Allocation page. */
-export function reportReminders(due: readonly ReportDue[]): { cards: ReportDue[]; more: number } {
-  const inWindow = due.filter((r) => r.daysLeft >= REPORT_WINDOW.from && r.daysLeft <= REPORT_WINDOW.to);
-  return { cards: inWindow.slice(0, HOME_REPORT_CARDS_MAX), more: Math.max(0, inWindow.length - HOME_REPORT_CARDS_MAX) };
+ *  A report that is SENT (`delivered`) is no longer due, so its card is dropped (SCP-5a; before it there was no sent state, which is why the window exists: without one a past report would
+ *  nag all month and an officer with many clients would get a card each). `month` is the month's reports, read once; null (the read failed) keeps every card, since nothing says it was sent.
+ *  The full list of report days is the Allocation page. */
+export function reportReminders(due: readonly ReportDue[], month: MonthReports | null = null): { cards: ReportCard[]; more: number } {
+  const monthly = (month?.rows ?? []).filter((r) => r.kind === "monthly" && r.period === month?.period);
+  const open: ReportCard[] = [];
+  for (const r of due) {
+    if (r.daysLeft < REPORT_WINDOW.from || r.daysLeft > REPORT_WINDOW.to) continue;
+    const mine = monthly.filter((m) => m.engagementId === r.engagementId);
+    if (mine.some((m) => m.status === "delivered")) continue;
+    const row = mine[0] ?? null;
+    open.push({ ...r, reportId: row?.id ?? null, reportStatus: row?.status ?? null });
+  }
+  return { cards: open.slice(0, HOME_REPORT_CARDS_MAX), more: Math.max(0, open.length - HOME_REPORT_CARDS_MAX) };
 }
