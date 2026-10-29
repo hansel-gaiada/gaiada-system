@@ -9,6 +9,7 @@ import { StackedBars } from "./charts/StackedBars";
 import { ReportTableView } from "./charts/ReportTableView";
 import { WarningsBanner } from "./WarningsBanner";
 import { ComparisonChip } from "./ComparisonChip";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { PeriodSelector, type PeriodSelectorValue } from "./PeriodSelector";
 import "./reports.css";
 
@@ -44,7 +45,14 @@ export function ReportViewer({ document, periodControl, scopeHeading = true, chi
   const cmpLabel = comparisonLabel(header.comparison);
 
   return (
-    <div className="rc-viz rc-page">
+    <div className={document.simulated ? "rc-viz rc-page rc-page--simulated" : "rc-viz rc-page"}>
+      {/* SCP-5a (BFF §63.18): a report whose numbers include simulated rows carries the one SIMULATED mark here, and the print stylesheet tiles a SIMULATED watermark behind every page of
+          the PDF (`app/print/print.css`, `.rc-page--simulated`). A document that is not simulated draws nothing extra. */}
+      {document.simulated && (
+        <div className="rc-simulated" role="note">
+          <SimulatedMark of="metrics" withNote />
+        </div>
+      )}
       <div className="rc-header">
         <div>
           {scopeHeading && <h2 className="rc-header__scope">{header.scopeName}</h2>}
