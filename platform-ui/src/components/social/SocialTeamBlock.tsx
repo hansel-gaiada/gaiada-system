@@ -5,7 +5,7 @@
 // is the page's own and is not touched. A department that is not the Social Media one never reads it.
 import type { ReactElement } from "react";
 import Link from "next/link";
-import { getDepartment } from "@/lib/departments";
+import { getDepartmentNode } from "@/lib/departments";
 import { activeCompany } from "@/lib/companyContext";
 import { workspaceFor } from "@/lib/workspaces";
 import { todayIsoInDisplayZone } from "@/lib/format";
@@ -20,7 +20,7 @@ export async function SocialTeamBlock(props: { me: Me; userId: string; tenantId:
 }
 
 async function draw({ me, userId, tenantId, unit }: { me: Me; userId: string; tenantId: string; unit: string }): Promise<ReactElement | null> {
-  const dept = await getDepartment(userId, tenantId, unit);
+  const dept = await getDepartmentNode(userId, tenantId, unit);
   if (!dept || workspaceFor(activeCompany(me, tenantId)?.vertical, dept.name).key !== "social-media") return null;
   const today = todayIsoInDisplayZone();
   const month = today.slice(0, 7);

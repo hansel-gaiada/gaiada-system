@@ -10,7 +10,7 @@ vi.mock("@/lib/session-server", () => ({ getSessionUserId: vi.fn(async () => "u-
 vi.mock("@/lib/platform", async (orig) => ({ ...(await orig<typeof import("@/lib/platform")>()), getMe: vi.fn(async () => ({ userId: "u-1", companies: [{ id: "co-a", vertical: "agency" }] })) }));
 vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "co-a") }));
 vi.mock("@/lib/companyContext", () => ({ activeCompany: vi.fn(() => ({ id: "co-a", vertical: "agency" })) }));
-vi.mock("@/lib/departments", () => ({ getDepartment: vi.fn() }));
+vi.mock("@/lib/departments", () => ({ getDepartmentNode: vi.fn() }));
 vi.mock("@/lib/socialTeam-data", () => ({ getTeamDashboard: vi.fn() }));
 // The KPI strip and the pipeline tiles have their own tests; here they only hold their place in the page's order.
 vi.mock("@/components/social/TeamDashboardKpis", () => ({ TeamDashboardKpis: ({ month }: { month: string }) => <div data-testid="kpis" data-month={month} /> }));
@@ -18,7 +18,7 @@ vi.mock("@/components/social/TeamDashboardTiles", () => ({ TeamDashboardTiles: (
 
 import { getSessionUserId } from "@/lib/session-server";
 import { getActiveTenant } from "@/lib/tenant";
-import { getDepartment } from "@/lib/departments";
+import { getDepartmentNode } from "@/lib/departments";
 import { activeCompany } from "@/lib/companyContext";
 import { getTeamDashboard } from "@/lib/socialTeam-data";
 import { asTeamDashboard, type TeamDashboard } from "@/lib/socialTeam";
@@ -58,7 +58,7 @@ beforeEach(() => {
   vi.mocked(getSessionUserId).mockReset().mockResolvedValue("u-1");
   vi.mocked(getActiveTenant).mockReset().mockResolvedValue("co-a");
   vi.mocked(activeCompany).mockReset().mockReturnValue({ id: "co-a", vertical: "agency" } as never);
-  vi.mocked(getDepartment).mockReset().mockResolvedValue({ id: "d-soc", name: "Social Media" } as never);
+  vi.mocked(getDepartmentNode).mockReset().mockResolvedValue({ id: "d-soc", name: "Social Media" } as never);
   vi.mocked(getTeamDashboard).mockReset().mockResolvedValue(ok(FULL));
 });
 afterEach(() => vi.useRealTimers());
@@ -77,9 +77,9 @@ describe("what is asked of the platform", () => {
     expect(getTeamDashboard).toHaveBeenLastCalledWith("u-1", "co-a", "2026-07");
   });
   it("is not found for a department that is not Social Media, or that does not exist, and signs out to the login", async () => {
-    vi.mocked(getDepartment).mockResolvedValue({ id: "d-web", name: "Web Dev" } as never);
+    vi.mocked(getDepartmentNode).mockResolvedValue({ id: "d-web", name: "Web Dev" } as never);
     await expect(mount({}, "d-web")).rejects.toThrow("notFound");
-    vi.mocked(getDepartment).mockResolvedValue(null as never);
+    vi.mocked(getDepartmentNode).mockResolvedValue(null as never);
     await expect(mount({}, "d-x")).rejects.toThrow("notFound");
     vi.mocked(getTeamDashboard).mockClear();
     vi.mocked(getSessionUserId).mockResolvedValue(null as never);
