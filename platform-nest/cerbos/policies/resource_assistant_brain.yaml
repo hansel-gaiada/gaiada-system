@@ -8,10 +8,11 @@
 # from the validated route `:tenantId` alone, never from a body. No other attribute is read, so the resourcePayload() allow-list needs
 # nothing new (id and tenantId are already carried).
 #
-# WHO: company_admin of THAT company (and therefore `owner`, which mirrors company_admin's bundle and reaches this kind through the
-# permission arm below, owner having no Cerbos rules of its own); the platform_admin wildcard; and anyone a role edit gives
-# `assistant.brain.choose_provider` (uiGrantable), through the permission arm. Nobody else: manager, member, viewer and every module
-# tier get Auto, Fast and Strong only.
+# WHO (owner ruling AIP-D5 holders, 2026-10-29: "only superadmin and owner"): the platform_admin wildcard (the superadmin) and `owner`,
+# which holds the key through OWNER_EXTENSION (scripts/generate-role-bundles.mjs) and reaches this kind through the permission arm
+# below, owner having no Cerbos rules of its own. The key is uiGrantable:false, so no role edit or position can hand it to anyone
+# else. Nobody else: company_admin (no rule since 202610291200), manager, member, viewer and every module tier get Auto, Fast and
+# Strong only.
 #
 # THIS IS NOT resource_assistant_thread.yaml. That policy is owner-private with no admin rule, by design, and stays untouched: this
 # kind decides only WHICH brain a person may ask for on their own thread. The thread's own `create` / `update` / `message` / `stream`
@@ -30,14 +31,10 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    - actions: ["choose_provider"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # =========== permission-matching arm (IAM-04 pattern, as resource_knowledge_source.yaml). Generic global-or-company mirror. ======
-    # This is how `owner` (permission-native) and a role edit's holder reach the action. The platform_admin wildcard is deliberately
-    # NOT mirrored (IAM-04c: the tier bypass never enters the permission catalog).
+    # This is how `owner` (permission-native) reaches the action. The platform_admin wildcard is deliberately NOT mirrored (IAM-04c:
+    # the tier bypass never enters the permission catalog).
     - actions: ["choose_provider"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_assistant_brain_choose_provider"]

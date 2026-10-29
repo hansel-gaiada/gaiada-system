@@ -106,10 +106,13 @@ const REAL_ROLES = [
 ];
 
 /** SCP-1b (PERMISSION-CONTRACT §53.11, owner ruling SCP-Q19): the five approver-only keys `owner` holds and `company_admin`
- *  does not. `owner` is company_admin's envelope PLUS exactly these (amending IAM-14 D-8's derivation for these five only).
+ *  does not. `owner` is company_admin's envelope PLUS exactly these (amending IAM-14 D-8's derivation for these keys only).
  *  Each has a perm_* mirror, is uiGrantable:false, is named by no real role's rule, and is absent from company_admin's
- *  bundle: cerbos-social-pipeline.test.ts pins all four. Kept byte-aligned with the migration's DO block. */
+ *  bundle: cerbos-social-pipeline.test.ts pins all four. Kept byte-aligned with the migration's DO block.
+ *  AIP-D5 holders (PERMISSION-CONTRACT §55.1, owner ruling 2026-10-29: "only superadmin and owner"): + the named-provider key,
+ *  on the same four terms; cerbos-assistant-brain.test.ts pins it and 202610291200 is its migration. */
 const OWNER_EXTENSION = [
+  "assistant.brain.choose_provider",
   "social.engagement.budget",
   "social.engagement.plan",
   "social.post.approve",
@@ -579,8 +582,9 @@ export function generate() {
   if (!roles.company_admin) {
     throw new Error("generate-role-bundles: company_admin missing — cannot derive the owner envelope");
   }
-  // SCP-1b (§53.11): plus OWNER_EXTENSION, the five approver-only keys. Each must be a catalog key and must NOT already be in
-  // company_admin's envelope (else the extension would be a silent no-op hiding a widened company_admin).
+  // SCP-1b (§53.11): plus OWNER_EXTENSION (the five approver-only keys, and AIP-D5's named-provider key, §55.1). Each must be a
+  // catalog key and must NOT already be in company_admin's envelope (else the extension would be a silent no-op hiding a widened
+  // company_admin).
   for (const k of OWNER_EXTENSION) {
     if (!catalogKeys.has(k)) throw new Error(`generate-role-bundles: OWNER_EXTENSION key "${k}" is not in the catalog`);
     if (roles.company_admin.includes(k)) {

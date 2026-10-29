@@ -23,7 +23,9 @@ const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
 
 // AIP-08b (AIP-D5): picking a NAMED provider needs `assistant.brain.choose_provider`. The thread owner in this file picks named
-// providers, so they get it the way a non-admin really would: a tenant role holding the key (a role edit), granted at company scope.
+// providers, so they hold the key through a tenant role granted at company scope: the same permission arm the `owner` role rides.
+// Since AIP-D5 holders (2026-10-29, "only superadmin and owner") the key is uiGrantable:false, so no role edit can build this role;
+// the direct insert is a fixture that keeps this file's thread owner a plain member everywhere else.
 async function grantChooseProvider(userId: string, tenantId: string): Promise<void> {
   const roleId = randomUUID();
   const pool = adminPool();
@@ -43,6 +45,8 @@ describe.skipIf(!TEST_URL)("Assistant module (ASST-05)", () => {
   let owner: string; // member of A and B; owns threads in both
   let other: string; // a DIFFERENT member of A — the cross-user deny probe
   let admin: string; // A's company_admin — the no-admin-backdoor probe
+  let coOwner: string; // A's `owner` role holder (AIP-D5 holders: the owner keeps the named-provider grant)
+  let superadmin: string; // platform_admin (global): the superadmin, who keeps it too
 
   beforeAll(async () => {
     await initTestDb();
@@ -57,16 +61,22 @@ describe.skipIf(!TEST_URL)("Assistant module (ASST-05)", () => {
     owner = await createUser("owner@asst-a.test");
     other = await createUser("other@asst-a.test");
     admin = await createUser("admin@asst-a.test");
+    coOwner = await createUser("co-owner@asst-a.test");
+    superadmin = await createUser("super@asst-a.test");
 
     await addMembership(A, owner);
     await addMembership(A, other);
     await addMembership(A, admin);
+    await addMembership(A, coOwner);
+    await addMembership(A, superadmin);
     await addMembership(B, owner);
     await addMembership(C, owner);
 
     const companyAdminRole = await createRole("company_admin");
     const memberRole = await createRole("member");
     await grantRole(admin, companyAdminRole, "company", A);
+    await grantRole(coOwner, await createRole("owner"), "company", A);
+    await grantRole(superadmin, await createRole("platform_admin"), "global", null);
     await grantRole(other, memberRole, "company", A);
     await grantRole(owner, memberRole, "company", A);
     await grantRole(owner, memberRole, "company", B);
@@ -175,15 +185,20 @@ describe.skipIf(!TEST_URL)("Assistant module (ASST-05)", () => {
     expect((await patch({ brainProvider: null })).statusCode).toBe(200);
     expect((await patch({ brainTier: null })).statusCode).toBe(200);
 
-    // the role-edit holder (owner) and company_admin may
+    // the key holder (this file's thread owner) and the `owner` role may; company_admin may NOT (AIP-D5 holders, 2026-10-29)
     const ownerCreate = await app.inject({
       method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(owner), payload: { title: "Pinned to openai", brainProvider: "openai" },
     });
     expect(ownerCreate.statusCode).toBe(201);
+    const coOwnerCreate = await app.inject({
+      method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(coOwner), payload: { title: "Owner pin", brainProvider: "openai" },
+    });
+    expect(coOwnerCreate.statusCode).toBe(201);
     const adminCreate = await app.inject({
       method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(admin), payload: { title: "Admin pin", brainProvider: "openai" },
     });
-    expect(adminCreate.statusCode).toBe(201);
+    expect(adminCreate.statusCode).toBe(403);
+    expect(adminCreate.json().error).toMatch(/brain_provider_forbidden/);
     // ... but the owner's grant is at A only: in B they are a plain member
     const ownerInB = await app.inject({
       method: "POST", url: `/api/${B}/assistant/threads`, headers: asUser(owner), payload: { title: "B pin", brainProvider: "openai" },
@@ -200,7 +215,12 @@ describe.skipIf(!TEST_URL)("Assistant module (ASST-05)", () => {
     const plain = await get(other);
     expect(plain.canChooseProvider).toBe(false);
     expect(plain.brains).toEqual([]);
-    expect((await get(admin)).canChooseProvider).toBe(true);
+    // AIP-D5 holders (2026-10-29): "only superadmin and owner"
+    const adminView = await get(admin);
+    expect(adminView.canChooseProvider).toBe(false);
+    expect(adminView.brains).toEqual([]);
+    expect((await get(coOwner)).canChooseProvider).toBe(true);
+    expect((await get(superadmin)).canChooseProvider).toBe(true);
     expect((await get(owner)).canChooseProvider).toBe(true);
     expect((await get(owner, B)).canChooseProvider).toBe(false);
     // asked again for the plain member right after a holder: no answer is shared between callers

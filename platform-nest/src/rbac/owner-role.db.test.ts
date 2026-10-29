@@ -52,6 +52,7 @@ describe.skipIf(!TEST_URL)("IAM-14 · the owner role", () => {
 
   // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.11, owner ruling SCP-Q19): owner == company_admin + OWNER_EXTENSION. The five
   // approver-only social keys are the owner's and NOT company_admin's; everywhere else the envelope is unchanged (D-8).
+  // AIP-D5 holders (2026-10-29, §55.1): + assistant.brain.choose_provider ("only superadmin and owner"), migration 202610291200.
   it("🔴 the DB bundle is company_admin's EXACTLY plus OWNER_EXTENSION — the envelope cannot be short or long", async () => {
     const owner = await keysFor("owner");
     const admin = await keysFor("company_admin");

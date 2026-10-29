@@ -1,13 +1,16 @@
 // AIP-08b (owner ruling AIP-D5, docs/PERMISSION-CONTRACT.md §55) — Cerbos matrix for the NEW `assistant_brain` kind: who may pin their
 // own assistant thread to a NAMED AI provider instead of Auto, Fast or Strong.
 //
+// AIP-D5 holders (owner ruling 2026-10-29: "only superadmin and owner", §55.1, migration 202610291200): company_admin's rule and bundle
+// row are gone, the key is uiGrantable:false and rides OWNER_EXTENSION, as SCP-1b's five social approver keys do.
+//
 // THE CLAIMS UNDER TEST
-//   1. One action, `choose_provider`. ALLOW: the platform_admin wildcard; company_admin of the resource's company (`inTenant && notLow`);
-//      the permission arm (`perm_assistant_brain_choose_provider`, `inTenant && notLow && inRoot`). No other role rule, no DENY rule.
-//   2. `owner` (permission-native, zero rules) reaches it through its bundle and the permission arm; a staff member whose role edit gave
-//      them the key reaches it the same way.
-//   3. DENY for a plain staff member (manager, member, viewer, a module tier, client), for company_admin of ANOTHER company, for a
-//      low-assurance session, and for a permission held at another company.
+//   1. One action, `choose_provider`. ALLOW: the platform_admin wildcard (the superadmin); the permission arm
+//      (`perm_assistant_brain_choose_provider`, `inTenant && notLow && inRoot`). No other role rule, no DENY rule.
+//   2. `owner` (permission-native, zero rules) reaches it through its bundle (OWNER_EXTENSION) and the permission arm. The key is
+//      uiGrantable:false, so no role edit or position can give it to anyone else; the arm still decides on the key alone.
+//   3. DENY for company_admin, for a plain staff member (manager, member, viewer, a module tier, client), for a low-assurance session,
+//      and for a permission held at another company.
 //   4. The resource is the company: id = tenantId. No attribute beyond `tenantId` is read, so an unfed resource is still decided.
 //   5. resource_assistant_thread.yaml is untouched: still no platform_admin / company_admin rule there.
 //
@@ -22,6 +25,7 @@ import { join } from "node:path";
 import * as yaml from "js-yaml";
 import { check, type Resource } from "./cerbos";
 import type { Principal, RoleGrant, PermissionGrant } from "./principal";
+import { OWNER_EXTENSION } from "../../scripts/generate-role-bundles.mjs";
 
 const POLICIES_DIR = join(__dirname, "../../cerbos/policies");
 const KEY = "assistant.brain.choose_provider";
@@ -61,8 +65,8 @@ function derivedRoleExprs(): Map<string, string> {
 describe("AIP-08b static pin — resource_assistant_brain.yaml", () => {
   const rules = parsePolicy("resource_assistant_brain.yaml", "assistant_brain");
 
-  it("exactly three rules, all ALLOW: the platform_admin wildcard, company_admin, and the permission arm", () => {
-    expect(rules.length).toBe(3);
+  it("exactly two rules, both ALLOW: the platform_admin wildcard and the permission arm", () => {
+    expect(rules.length).toBe(2);
     expect(rules.every((r) => r.effect === "EFFECT_ALLOW")).toBe(true);
     expect(rules.every((r) => r.roles.length === 0), "no base-role (`user`) rule: nobody gets it by merely existing").toBe(true);
   });
@@ -71,17 +75,9 @@ describe("AIP-08b static pin — resource_assistant_brain.yaml", () => {
     expect(rules[0]).toEqual({ actions: ["*"], effect: "EFFECT_ALLOW", derivedRoles: ["platform_admin"], roles: [], condition: "" });
   });
 
-  it("company_admin: choose_provider only, alone in its rule, under inTenant && notLow", () => {
-    const admin = rules.filter((r) => r.derivedRoles.includes("company_admin"));
-    expect(admin.length).toBe(1);
-    expect(admin[0].derivedRoles).toEqual(["company_admin"]);
-    expect(admin[0].actions).toEqual(["choose_provider"]);
-    expect(admin[0].condition).toBe("variables.inTenant && variables.notLow");
-  });
-
-  it("no other role rule: manager, member, viewer, client, org_unit_lead and every module tier are named nowhere", () => {
+  it("no role rule beyond the wildcard: company_admin (AIP-D5 holders), manager, member, viewer, client, org_unit_lead and every module tier are named nowhere", () => {
     const named = new Set(rules.flatMap((r) => r.derivedRoles));
-    expect([...named].sort()).toEqual(["company_admin", "perm_assistant_brain_choose_provider", "platform_admin"]);
+    expect([...named].sort()).toEqual(["perm_assistant_brain_choose_provider", "platform_admin"]);
   });
 
   it("the permission arm: choose_provider under inTenant && notLow && inRoot, and its derived role matches the catalog key at global or company scope", () => {
@@ -97,22 +93,23 @@ describe("AIP-08b static pin — resource_assistant_brain.yaml", () => {
     expect(expr).toContain('g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId');
   });
 
-  it("the catalog: one grantable, uiGrantable, not sensitive entry mapping to (assistant_brain, choose_provider)", () => {
+  it("the catalog: one grantable, NOT uiGrantable (AIP-D5 holders), not sensitive entry mapping to (assistant_brain, choose_provider)", () => {
     const catalog = JSON.parse(readFileSync(join(__dirname, "permission-catalog.json"), "utf8")) as {
       permissions: Array<{ key: string; cerbosKind: string; cerbosAction: string; class: string; sensitive: boolean; uiGrantable: boolean; domain: string }>;
     };
     const kind = catalog.permissions.filter((p) => p.cerbosKind === "assistant_brain");
     expect(kind.length).toBe(1);
-    expect(kind[0]).toMatchObject({ key: KEY, domain: "assistant", cerbosAction: "choose_provider", class: "grantable", sensitive: false, uiGrantable: true });
+    expect(kind[0]).toMatchObject({ key: KEY, domain: "assistant", cerbosAction: "choose_provider", class: "grantable", sensitive: false, uiGrantable: false });
   });
 
-  it("the bundle JSON: platform_admin, company_admin and owner hold the key, and no other role; nothing self-scoped", () => {
+  it("the bundle JSON: platform_admin and owner hold the key (owner through OWNER_EXTENSION), and no other role; nothing self-scoped", () => {
     const doc = JSON.parse(readFileSync(join(__dirname, "role-permission-bundles.json"), "utf8")) as {
       roles: Record<string, string[]>;
       selfScoped: Record<string, string[]>;
     };
     const holders = Object.keys(doc.roles).filter((r) => doc.roles[r].includes(KEY)).sort();
-    expect(holders).toEqual(["company_admin", "owner", "platform_admin"]);
+    expect(holders).toEqual(["owner", "platform_admin"]);
+    expect(OWNER_EXTENSION).toContain(KEY);
     for (const role of Object.keys(doc.selfScoped ?? {})) expect(doc.selfScoped[role] ?? [], role).not.toContain(KEY);
   });
 
@@ -156,20 +153,21 @@ const brain = (tenantId = T1): Resource => ({ kind: "assistant_brain", id: tenan
 const allow = async (p: Principal, r: Resource = brain()) => (await check(p, r, "choose_provider")).allow;
 
 describe.skipIf(!live)("AIP-08b Cerbos matrix — assistant_brain · choose_provider", () => {
-  it("SMOKE: the kind is loaded and the ALLOW path really allows (a company_admin of the company)", async () => {
-    // If this fails, every deny below proves nothing: restart gaiada-test-cerbos so it loads the NEW policy file.
-    expect(await allow(principal([co("company_admin")]))).toBe(true);
+  it("SMOKE: the kind is loaded and the ALLOW path really allows (the owner, through the permission arm)", async () => {
+    // If this fails, every deny below proves nothing: restart gaiada-test-cerbos so it loads the CURRENT policy file.
+    expect(await allow(principal([co("owner")], { perms: [perm()] }))).toBe(true);
   });
 
   const table: Array<[string, Principal, Resource, boolean]> = [
     // ALLOW
     ["platform_admin (global)", principal([glob("platform_admin")]), brain(), true],
     ["platform_admin (global) on another company (the operator tier's wildcard)", principal([glob("platform_admin")]), brain(T2), true],
-    ["company_admin @T1, T1's brain", principal([co("company_admin")]), brain(), true],
     ["owner @T1 (permission-native: the key at company scope, zero rules)", principal([co("owner")], { perms: [perm()] }), brain(), true],
-    ["a member whose role edit gave the key at T1 (the permission arm)", principal([co("member")], { perms: [perm()] }), brain(), true],
-    ["the key held globally, a company in the principal's tenants and root", principal([co("member")], { perms: [perm("global", null)] }), brain(), true],
+    // the arm decides on the key alone: only the owner's bundle carries it (uiGrantable:false), but a holder is a holder
+    ["the key held at T1 by any principal (the permission arm)", principal([co("member")], { perms: [perm()] }), brain(), true],
+    ["the key held globally, a company in the principal's tenants and root", principal([co("owner")], { perms: [perm("global", null)] }), brain(), true],
     // DENY: everyone else sees Auto, Fast and Strong only
+    ["company_admin @T1 (AIP-D5 holders: no rule, no bundle key)", principal([co("company_admin")]), brain(), false],
     ["a plain member @T1", principal([co("member")]), brain(), false],
     ["a manager @T1", principal([co("manager")]), brain(), false],
     ["a viewer @T1", principal([co("viewer")]), brain(), false],
@@ -178,15 +176,11 @@ describe.skipIf(!live)("AIP-08b Cerbos matrix — assistant_brain · choose_prov
     ["owner @T1 WITHOUT the bundle key (owner has no rule of its own)", principal([co("owner")]), brain(), false],
     ["no grants at all", principal([]), brain(), false],
     // the tenant boundary
-    ["company_admin of T2 only, T1's brain", principal([co("company_admin", T2)], { companies: [T2] }), brain(), false],
-    ["company_admin @T1, T2's brain (T2 not in its companies)", principal([co("company_admin")]), brain(T2), false],
-    ["company_admin @T2 while a member of both: T1's brain", principal([co("company_admin", T2)], { companies: [T1, T2] }), brain(), false],
-    ["the key held at T2, T1's brain", principal([co("member")], { perms: [perm("company", T2)], companies: [T1, T2] }), brain(), false],
-    ["the key held at T1, T2's brain", principal([co("member")], { perms: [perm()] }), brain(T2), false],
-    ["the key held at T1 but T1 outside the principal's root (inRoot)", principal([co("member")], { perms: [perm()], rootCompanies: [T2] }), brain(), false],
+    ["owner @T2 holding the key at T2, T1's brain", principal([co("owner", T2)], { perms: [perm("company", T2)], companies: [T1, T2] }), brain(), false],
+    ["owner @T1 holding the key at T1, T2's brain", principal([co("owner")], { perms: [perm()] }), brain(T2), false],
+    ["the key held at T1 but T1 outside the principal's root (inRoot)", principal([co("owner")], { perms: [perm()], rootCompanies: [T2] }), brain(), false],
     // the assurance floor
-    ["company_admin @T1 at LOW assurance (notLow)", principal([co("company_admin")], { assurance: "low" }), brain(), false],
-    ["the permission arm at LOW assurance", principal([co("member")], { perms: [perm()], assurance: "low" }), brain(), false],
+    ["owner @T1 with the key at LOW assurance (notLow)", principal([co("owner")], { perms: [perm()], assurance: "low" }), brain(), false],
   ];
 
   for (const [label, p, r, expected] of table) {
@@ -196,7 +190,7 @@ describe.skipIf(!live)("AIP-08b Cerbos matrix — assistant_brain · choose_prov
   }
 
   it("an unlisted action is a deny (only platform_admin holds '*')", async () => {
-    expect((await check(principal([co("company_admin")]), brain(), "read")).allow).toBe(false);
+    expect((await check(principal([co("owner")], { perms: [perm()] }), brain(), "read")).allow).toBe(false);
     expect((await check(principal([glob("platform_admin")]), brain(), "read")).allow).toBe(true);
   });
 
@@ -207,5 +201,13 @@ describe.skipIf(!live)("AIP-08b Cerbos matrix — assistant_brain · choose_prov
     });
     expect(await allow(ownerP)).toBe(true);
     expect(await allow(ownerP, brain(T2))).toBe(false);
+  });
+
+  it("the generated company_admin bundle, as assemblePrincipal() would hand it over, does NOT allow choose_provider (AIP-D5 holders)", async () => {
+    const bundles = JSON.parse(readFileSync(join(__dirname, "role-permission-bundles.json"), "utf8")) as { roles: Record<string, string[]> };
+    const adminP = principal([co("company_admin")], {
+      perms: bundles.roles.company_admin.map((key) => ({ key, scopeType: "company" as const, scopeId: T1 })),
+    });
+    expect(await allow(adminP)).toBe(false);
   });
 });

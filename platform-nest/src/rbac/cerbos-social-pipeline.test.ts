@@ -203,8 +203,11 @@ describe("SCP-1b static pins — the content pipeline's policies (PERMISSION-CON
     }
   });
 
-  it("the generator's OWNER_EXTENSION is exactly the five keys, each mirrored, uiGrantable:false and absent from company_admin's bundle", () => {
+  // AIP-D5 holders (2026-10-29, §55.1) added a sixth key, assistant.brain.choose_provider, on the same four terms; the loop below
+  // holds it to them too, and cerbos-assistant-brain.test.ts pins its own kind.
+  it("the generator's OWNER_EXTENSION is exactly the five keys (+ AIP-D5's one), each mirrored, uiGrantable:false and absent from company_admin's bundle", () => {
     expect([...OWNER_EXTENSION].sort()).toEqual([
+      "assistant.brain.choose_provider",
       "social.engagement.budget", "social.engagement.plan", "social.post.approve", "social.report.approve", "social.report.deliver",
     ]);
     for (const key of OWNER_EXTENSION) {

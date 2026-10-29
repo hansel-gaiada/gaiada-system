@@ -2037,7 +2037,7 @@
       "key": "assistant_choose_provider",
       "name": "Assistant: choose AI provider",
       "domain": "assistant",
-      "description": "Pick a named AI provider (openai, claude, hermes and so on) for your own assistant threads, instead of only Auto, Fast or Strong. AIP-08b (owner ruling AIP-D5): a cost lever, not data access; company_admin and owner hold it by default, anyone else through a role edit. It never opens another person's thread.",
+      "description": "Pick a named AI provider (openai, claude, hermes and so on) for your own assistant threads, instead of only Auto, Fast or Strong. AIP-08b (owner ruling AIP-D5): a cost lever, not data access. Only the superadmin (platform_admin) and owner hold it (AIP-D5 holders, 2026-10-29); it is not UI-grantable, so no role edit or position hands it to anyone else. It never opens another person's thread.",
       "permissions": [
         "assistant.brain.choose_provider"
       ],

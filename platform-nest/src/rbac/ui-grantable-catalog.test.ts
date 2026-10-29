@@ -115,6 +115,7 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // SCP-1b (2026-10-26): +11 grantable / +11 total on EXISTING kinds (7 uiGrantable TRUE; FALSE: social.post.approve, social.engagement.plan/budget, portal.approve_spend). 486 -> 497 / 471 -> 482.
     // M5-W1q (2026-10-27): +1 grantable / +1 total on the existing webdesk_media_asset kind (`review`; uiGrantable TRUE). 497 -> 498 / 482 -> 483.
     // AIP-08b (2026-10-28, AIP-D5): +1 grantable / +1 total on the NEW assistant_brain kind (`choose_provider`; uiGrantable TRUE: a role edit grants it). 498 -> 499 / 483 -> 484.
+    // AIP-D5 holders (2026-10-29, §55.1): `assistant.brain.choose_provider` flips uiGrantable TRUE -> FALSE (superadmin and owner only). No count change.
     expect(permissions.length).toBe(499);
     expect(permissions.filter((p) => p.class === "grantable").length).toBe(484);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);

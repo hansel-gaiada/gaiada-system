@@ -103,9 +103,11 @@ describe.skipIf(!TEST_URL)("IAM Phase 2 (P2-03) — permissions.ui_grantable + p
     // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.11): 26 -> 32. portal.approve_spend (the 10th portal.* key) and the five
     // approver-only social keys (social.post.approve, social.engagement.plan, social.engagement.budget, and social.report.approve
     // and .deliver, flipped true -> false), so no custom role or position can carry a social approver's authority.
-    it("exactly 32 rows are ui_grantable=false (15 relationship + 10 portal.* + core.contract.countersign + finance.config.set_bank_details + the 5 social approver keys)", async () => {
+    // AIP-D5 holders (2026-10-29, PERMISSION-CONTRACT §55.1, migration 202610291200): 32 -> 33. assistant.brain.choose_provider flips
+    // true -> false: the owner ruled "only superadmin and owner", so no custom role or position may carry it. Deliberate pin update.
+    it("exactly 33 rows are ui_grantable=false (15 relationship + 10 portal.* + core.contract.countersign + finance.config.set_bank_details + the 5 social approver keys + assistant.brain.choose_provider)", async () => {
       const { rows } = await withGlobal((c) => c.query<{ n: string }>(`SELECT count(*)::text AS n FROM permissions WHERE ui_grantable = false`));
-      expect(Number(rows[0].n)).toBe(32);
+      expect(Number(rows[0].n)).toBe(33);
     });
   });
 

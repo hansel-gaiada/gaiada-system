@@ -3217,4 +3217,32 @@ DO-block self-assertion (exactly three holders, owner ≡ company_admin on the k
 assistant module declares the key in `ModuleContract.permissions`.
 
 **Counts:** 113 kinds, 499 pairs, 484 grantable, 15 relationship, 218 sensitive; 175 groups; bundles 2182 pairs
-(`platform_admin` 484, `company_admin` 434, `owner` 439).
+(`platform_admin` 484, `company_admin` 434, `owner` 439). Superseded by §55.1 for the holders and the bundle counts.
+
+### 55.1 AIP-D16 — the holders: the superadmin and the owner only (2026-10-29, BUILT, PROTOTYPED)
+
+Owner ruling **AIP-D16** (`docs/plans/2026-10-27-ai-plan.md` §9), verbatim: **"only superadmin and owner".** The holders above
+(company_admin and owner by default, anyone else through a role edit) were AIP-08b's interpretation of AIP-D5; this replaces them.
+
+- **Policy:** `resource_assistant_brain.yaml` loses its `company_admin` rule. Two rules remain: the `platform_admin` wildcard (the
+  superadmin) and the permission arm (`perm_assistant_brain_choose_provider`, `inTenant && notLow && inRoot`), which is how `owner`
+  reaches the action.
+- **Catalog:** the key flips to **`uiGrantable: false`**, so no role edit, position or override request can carry it
+  (`position_roles_guard()` clause (b) and `assertRoleUiGrantable()` both read it). It stays grantable and not sensitive. The group
+  `assistant_choose_provider` stays (description only), like the SCP-1b groups whose keys are all `uiGrantable: false`.
+- **Bundles:** `platform_admin` and `owner` only. `owner` holds it through **`OWNER_EXTENSION`** in
+  `scripts/generate-role-bundles.mjs`, beside the five §53.11 social approver keys, on the same four terms: a perm_* mirror,
+  `uiGrantable: false`, named by no real role's rule, absent from `company_admin`'s bundle. `owner-role.db.test.ts`'s
+  "owner == company_admin + OWNER_EXTENSION" holds unchanged.
+- **Migration `202610291200_assistant_brain_owner_only.sql`:** deletes `company_admin`'s row and any custom (per-company) role's row,
+  flips `ui_grantable`, and asserts exactly two holders (`platform_admin`, `owner`), nothing self-scoped.
+- **Enforcement is unchanged** (`assistant.controller.ts`): a company_admin's non-null `brainProvider` is now 403
+  `brain_provider_forbidden`, `GET assistant/brains` answers `canChooseProvider: false` and `brains: []`, and a thread a company_admin
+  had already pinned to a provider is sent with no hint (Auto) from the next reply on, the stored value kept.
+- **Tests:** `cerbos-assistant-brain.test.ts` (two rules; company_admin DENY, with and without its generated bundle; the owner SMOKE),
+  `cerbos-social-pipeline.test.ts` (`OWNER_EXTENSION` = the five + this key), `iam-phase2-ui-grantable-guard.test.ts` (32 -> 33
+  `ui_grantable = false` rows), `assistant.test.ts` (company_admin 403 and `canChooseProvider: false`; an `owner`-role holder and a
+  global `platform_admin` true).
+
+**Counts:** catalog unchanged (113 kinds, 499 pairs, 484 grantable, 15 relationship, 218 sensitive; 175 groups); 33 keys
+`uiGrantable: false`; bundles 2181 pairs (`platform_admin` 484, `company_admin` 433, `owner` 439).

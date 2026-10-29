@@ -33,7 +33,9 @@ const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
 
 // AIP-08b (AIP-D5): picking a NAMED provider needs `assistant.brain.choose_provider`. The thread owner in this file picks named
-// providers, so they get it the way a non-admin really would: a tenant role holding the key (a role edit), granted at company scope.
+// providers, so they hold the key through a tenant role granted at company scope: the same permission arm the `owner` role rides.
+// Since AIP-D5 holders (2026-10-29, "only superadmin and owner") the key is uiGrantable:false, so no role edit can build this role;
+// the direct insert is a fixture that keeps this file's thread owner a plain member everywhere else.
 async function grantChooseProvider(userId: string, tenantId: string): Promise<void> {
   const roleId = randomUUID();
   const pool = adminPool();

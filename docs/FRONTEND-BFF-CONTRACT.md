@@ -2332,7 +2332,7 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   that ticket, not this one, for per-brain dispatch. **AIP-08a:** `brainTier` is `'fast'|'standard'|'strong'|null`
   (anything else is 400); a non-null `brainTier` together with a non-null `brainProvider` is 400 (`brain_conflict`).
   **AIP-08b (BUILT, PROTOTYPED; ruling AIP-D5):** a non-null `brainProvider` needs `assistant.brain.choose_provider`
-  (`can()` on the `assistant_brain` kind for `:t`; company_admin and owner by default, anyone else through a role edit) or the
+  (`can()` on the `assistant_brain` kind for `:t`; held by the superadmin and the owner only, AIP-D16 2026-10-29) or the
   call is **403** `brain_provider_forbidden: ...` and no thread is created. A tier, Auto and a blank provider need no grant.
 - ✅ `GET /api/:t/assistant/threads/:id` — thread + paged messages (`messageLimit` default 200/max
   500, `beforeSeq` cursor for older pages), returned oldest→newest. Response
