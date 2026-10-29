@@ -155,7 +155,7 @@ export function followUpRefusalText(r: FollowUpRefusal): string {
 /** What a "Needs you" row of the pipeline asks of the person, in words (`GET needs-you` `kind`). An unknown kind is shown as it came, never dropped. */
 export const NEEDS_KIND_WORDS: Readonly<Record<string, string>> = {
   draft_to_send: "A draft to send", fix_asked: "A fix was asked", ready_to_schedule: "Ready to schedule", metrics_missing: "Metrics missing",
-  report_due: "A monthly report is due", report_check: "A report to check", report_send: "A report to send",
+  report_due: "A monthly report is due", report_check: "A report to check", report_send: "A report to send", boost_start: "A boost to start",
   proofread: "To proofread", hod_approval: "Head approval", final_check: "Final check", design: "A design to make", design_revision: "A design to revise",
 };
 export const needsKindWords = (kind: string): string => NEEDS_KIND_WORDS[kind] ?? kind;

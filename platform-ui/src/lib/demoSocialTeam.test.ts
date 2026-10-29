@@ -13,6 +13,7 @@ import { demoBoosts, type BoostRec } from "./demoSocialBoosts";
 import { PIPE_POSTS, CREATIVES_DESIGNER } from "./demoSocialPipeline";
 import { asTeamDashboard, type TeamDashboard } from "./socialTeam";
 import { socialDemo } from "./demoSocial";
+import { demoReportsFor } from "./demoSocialReports";
 
 const FOUR = ["u-pm", "u-gm", "demo-owner", "demo-hansel"] as const;
 const NOT_APPROVERS = ["u-social", "u-social-2", "u-copy", "u-creative", "u-social-design", "u-dev", "demo-client", "demo-client-viewer", "someone-else"];
@@ -175,38 +176,46 @@ describe("boosts come from the boosts store, never invented from reach", () => {
   });
 });
 
-describe("report rows (invented, on the real rule: BFF §63.18)", () => {
+describe("report rows (from the monthly report demo, on the server's rules: BFF §63.18, §63.19)", () => {
   const reports = (d: TeamDashboard) => d.needsAttention.filter((i) => i.kind === "report_due" || i.kind === "report_to_check");
+  const dueClients = (month?: string) => reports(dashboard("u-pm", month)).filter((i) => i.kind === "report_due").map((i) => i.clientName).sort();
 
-  it("a report due: since the first of the month, no report id when none exists, and it opens the reports list", () => {
+  it("a report due is last month's: since the first of this month, titled for its period, the report's id when one exists and none when it does not", () => {
+    const sep = demoReportsFor("2026-09");
     const due = reports(dashboard("u-pm")).filter((i) => i.kind === "report_due");
-    expect(due.length).toBeGreaterThan(0);
+    expect(due.length).toBe(3);
     for (const r of due) {
       expect(r.since).toBe("2026-10-01");
-      expect(r.reportId).toBeNull();
+      expect(r.title).toBe("Monthly report 2026-09");
       expect(r.postId).toBeNull();
+      const row = sep.find((x) => x.engagementId === r.engagementId);
+      expect(r.reportId, r.clientName).toBe(row ? row.id : null);
+    }
+    // Saltmarsh has no report for September yet: due, with no id, so the row opens the list to draft it.
+    expect(due.find((r) => r.clientName === "Saltmarsh Day Spa")!.reportId).toBeNull();
+  });
+
+  it("a report to check is every report in the HoD check, today, whatever month is shown", () => {
+    for (const month of ["2026-09", "2026-10", "2026-11"]) {
+      const check = reports(dashboard("u-pm", month)).filter((i) => i.kind === "report_to_check");
+      expect(check.map((r) => r.clientName), month).toEqual(["Harborlight Hotel"]);
+      for (const r of check) expect(r.reportId).toMatch(/\S/);
     }
   });
 
-  it("a report to check has an id", () => {
-    const check = reports(dashboard("u-pm")).filter((i) => i.kind === "report_to_check");
-    expect(check.length).toBeGreaterThan(0);
-    for (const r of check) expect(r.reportId).toMatch(/\S/);
-  });
-
-  it("is due only once the client's report day of the month is reached: Saltmarsh's is the 10th", () => {
-    const dueClients = () => reports(dashboard("u-pm")).filter((i) => i.kind === "report_due").map((i) => i.clientName);
-    vi.setSystemTime(new Date("2026-10-09T04:00:00Z"));
+  it("is due only once the client's report day of the month is reached (Northwind the 5th, Harborlight the 7th, Saltmarsh the 10th), and a Sent report is never due", () => {
+    vi.setSystemTime(new Date("2026-10-04T04:00:00Z"));
     expect(dueClients()).toEqual([]);
+    vi.setSystemTime(new Date("2026-10-09T04:00:00Z"));
+    expect(dueClients()).toEqual(["Harborlight Hotel", "Northwind Traders"]);
     vi.setSystemTime(new Date("2026-10-10T04:00:00Z"));
-    expect(dueClients()).toEqual(["Saltmarsh Day Spa"]);
-    vi.setSystemTime(new Date("2026-10-28T04:00:00Z"));
-    expect(dueClients()).toEqual(["Saltmarsh Day Spa"]);
+    expect(dueClients()).toEqual(["Harborlight Hotel", "Northwind Traders", "Saltmarsh Day Spa"]);
+    // September's view looks at August: Northwind's August report was Sent, so only the other two are due.
+    expect(dueClients("2026-09")).toEqual(["Harborlight Hotel", "Saltmarsh Day Spa"]);
   });
 
-  it("an earlier month's report day has passed, and a later month has no report rows", () => {
-    expect(reports(dashboard("u-pm", "2026-09")).some((i) => i.kind === "report_due" && i.since === "2026-09-01")).toBe(true);
-    expect(reports(dashboard("u-pm", "2026-11"))).toEqual([]);
+  it("a later month has no report due yet", () => {
+    expect(dueClients("2026-11")).toEqual([]);
   });
 });
 

@@ -16,7 +16,7 @@ vi.mock("@/lib/platform", async (orig) => ({
 }));
 vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "co-a") }));
 vi.mock("@/lib/companyContext", () => ({ activeCompany: vi.fn(() => ({ id: "co-a", vertical: "agency" })) }));
-vi.mock("@/lib/departments", () => ({ getDepartment: vi.fn() }));
+vi.mock("@/lib/departments", () => ({ getDepartmentNode: vi.fn() }));
 vi.mock("@/lib/socialReports-data", () => ({ getSocialReport: vi.fn() }));
 vi.mock("@/lib/socialAllocation-data", () => ({ getAllocation: vi.fn() }));
 vi.mock("@/lib/socialReportsActions", () => ({
@@ -24,7 +24,7 @@ vi.mock("@/lib/socialReportsActions", () => ({
 }));
 
 import { getSessionUserId } from "@/lib/session-server";
-import { getDepartment } from "@/lib/departments";
+import { getDepartmentNode } from "@/lib/departments";
 import { getSocialReport } from "@/lib/socialReports-data";
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { asReportDetail, CHECK_SEND_REASON, type SocialReportDetail } from "@/lib/socialReports";
@@ -45,7 +45,7 @@ const mount = async (reportId = "r1", deptId = "d-soc") => render(await SocialRe
 
 beforeEach(() => {
   vi.mocked(getSessionUserId).mockReset().mockResolvedValue("u-1");
-  vi.mocked(getDepartment).mockReset().mockResolvedValue({ id: "d-soc", name: "Social Media" } as never);
+  vi.mocked(getDepartmentNode).mockReset().mockResolvedValue({ id: "d-soc", name: "Social Media" } as never);
   vi.mocked(getSocialReport).mockReset().mockResolvedValue(ok(detail()));
   vi.mocked(getAllocation).mockReset().mockResolvedValue({ kind: "ok", data: [{ engagementId: "e1", clientId: "cl-1", clientName: "Northwind Traders" }] as never });
 });
@@ -59,9 +59,9 @@ describe("what is asked of the platform", () => {
     vi.mocked(getSessionUserId).mockResolvedValue(null as never);
     await expect(mount()).rejects.toThrow("redirect:/login");
     vi.mocked(getSessionUserId).mockResolvedValue("u-1");
-    vi.mocked(getDepartment).mockResolvedValue({ id: "d-web", name: "Web Dev" } as never);
+    vi.mocked(getDepartmentNode).mockResolvedValue({ id: "d-web", name: "Web Dev" } as never);
     await expect(mount("r1", "d-web")).rejects.toThrow("notFound");
-    vi.mocked(getDepartment).mockResolvedValue({ id: "d-soc", name: "Social Media" } as never);
+    vi.mocked(getDepartmentNode).mockResolvedValue({ id: "d-soc", name: "Social Media" } as never);
     vi.mocked(getSocialReport).mockResolvedValue(ok(null));
     await expect(mount("gone")).rejects.toThrow("notFound");
   });
