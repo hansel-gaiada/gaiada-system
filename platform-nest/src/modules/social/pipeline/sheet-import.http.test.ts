@@ -18,6 +18,7 @@
 // Expected deadlines come from a plain Monday-to-Friday walk written here (the company has no holiday calendar), never from the code under test.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
+import ExcelJS from "exceljs";
 import { config } from "../../../config";
 import { withGlobal, withTenants, newId } from "../../../db";
 import { buildApp } from "../../../main";
@@ -251,7 +252,6 @@ describe.skipIf(!TEST_URL)("social sheet import (SCP-6a)", () => {
     const pasted = await imp(U.smHead, "parse", { text: "Client\tCaption\r\nMock Bakery\t\"Line one\nLine two\"\r\n" });
     expect(pasted.json()).toEqual({ tabs: [{ name: "Pasted", rows: [["Client", "Caption"], ["Mock Bakery", "Line one\nLine two"]] }] });
 
-    const { default: ExcelJS } = await import("exceljs");
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Plan");
     ws.getCell("A1").value = "Date";
