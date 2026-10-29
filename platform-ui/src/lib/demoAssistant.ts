@@ -249,7 +249,7 @@ interface DemoHandoff {
 // why the live backend never hardcodes this) — demo mode has no runner process to ask.
 const DEMO_ROSTER_AGENTS = [
   { name: "status-reporter", tools: ["projects.list", "tasks.list"], maxSteps: 8, maxToolCalls: 6, writeCapable: false, evaledProviders: [] as string[], departments: [] as string[] },
-  { name: "approvals-chaser", tools: ["agency.pendingApprovals"], maxSteps: 4, maxToolCalls: 2, writeCapable: false, evaledProviders: [] as string[], departments: ["social-media", "creatives"] },
+  { name: "approvals-chaser", tools: ["agency.pendingApprovals"], maxSteps: 4, maxToolCalls: 2, writeCapable: false, evaledProviders: [] as string[], departments: [] as string[] },
   { name: "task-triager", tools: ["tasks.list", "tasks.update"], maxSteps: 10, maxToolCalls: 6, writeCapable: true, evaledProviders: ["openai"], departments: [] as string[] },
 ];
 

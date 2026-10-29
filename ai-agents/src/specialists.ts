@@ -24,9 +24,8 @@ export const approvalsChaser: AgentDef = {
   },
   maxSteps: 4,
   maxToolCalls: 2,
-  // AIP-14 (display only): agency.pendingApprovals is the agency module's campaign-approval queue, which the
-  // social and creative workspaces own.
-  departments: ["social-media", "creatives"],
+  // AIP-14 (display only): general on purpose. agency.pendingApprovals is the campaign-approval queue, and campaigns are the
+  // agency pack's cross-department work (every department's Overview has a Campaigns block), so no one workspace owns it.
 };
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
