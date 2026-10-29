@@ -12,6 +12,7 @@ import { PIPE_POSTS, demoCalendar, demoFeed, demoOverview } from "./demoSocialPi
 import { scpEngineStatusOf } from "./scpStageMachine";
 import { asOverview } from "./socialOverview";
 import { socialDemo } from "./demoSocial";
+import { demoBoosts } from "./demoSocialBoosts";
 
 type Card = { id: string; phase: string | null; health: { state: string } | null; pipelineStatus: string };
 const allCards = (): Card[] => {
@@ -27,6 +28,18 @@ describe("demoOverview", () => {
     const o = asOverview(r.json);
     expect(o.tiles.boostsWaiting).toBeGreaterThanOrEqual(1);
     expect(Object.keys((r.json as { tiles: object }).tiles).sort()).toEqual(["boostsWaiting", "failedPosts", "inProduction", "late", "scheduledThisWeek", "withClient"]);
+  });
+
+  it("the Boosts waiting tile is the boost store's own count (requested, plus approved and not started), never a fixed number", () => {
+    const waiting = () => demoBoosts.store.boosts.filter((b) => b.status === "requested" || (b.status === "approved" && b.startedAt === null));
+    expect(asOverview(demoOverview("u-social", 0).json).tiles.boostsWaiting).toBe(waiting().length);
+    expect(waiting().length).toBe(3); // the seed: Northwind's over-budget one, Northwind's approved one not yet started, and the hotel's simulated one
+    // a boost that waits for the client and then is cancelled stops being counted
+    const first = demoBoosts.store.boosts.find((b) => b.status === "requested")!;
+    const was = first.status;
+    first.status = "cancelled";
+    try { expect(asOverview(demoOverview("u-social", 0).json).tiles.boostsWaiting).toBe(2); } finally { first.status = was; }
+    expect(asOverview(demoOverview("u-social", 0).json).tiles.boostsWaiting).toBe(3);
   });
 
   it("counts the phases and the late posts the feed's own cards show", () => {
