@@ -114,6 +114,11 @@ describe("the creative source, batch and report format readers", () => {
     for (const c of ["In team", "In-team", "In house", "in-house", "Social designer", "Own designer"]) expect(readCreativeSource(c), c).toBe("in_team");
     expect(readCreativeSource("agency")).toBeUndefined();
   });
+  it("the Indonesian forms the dress rehearsal's sheet used: Tim Creative, Tim Kreatif, Kreatif; Internal, Tim Sosmed", () => {
+    for (const c of ["Tim Creative", "tim creatives", "Tim Kreatif", "Kreatif", "Divisi Creative"]) expect(readCreativeSource(c), c).toBe("creatives");
+    for (const c of ["Internal", "Desainer internal", "Tim Sosmed", "Designer Sosmed", "In-house designer"]) expect(readCreativeSource(c), c).toBe("in_team");
+    expect(readCreativeSource("Tim")).toBeUndefined();
+  });
   it("batch A or B, case ignored, also as Batch A", () => {
     expect(readBatch("A")).toBe("A");
     expect(readBatch("b")).toBe("B");
@@ -126,6 +131,8 @@ describe("the creative source, batch and report format readers", () => {
     for (const c of ["Email", "E-mail", "e mail"]) expect(readReportFormat(c), c).toBe("email");
     for (const c of ["Meeting", "Call", "Zoom", "Meet"]) expect(readReportFormat(c), c).toBe("meeting");
     expect(readReportFormat("Post")).toBeUndefined();
+    for (const c of ["Via email", "lewat email"]) expect(readReportFormat(c), c).toBe("email");
+    for (const c of ["Rapat", "Google Meet", "GMeet", "Online meeting", "Meeting online", "via Zoom", "Video call"]) expect(readReportFormat(c), c).toBe("meeting");
   });
 });
 
@@ -144,6 +151,14 @@ describe("the network list reader", () => {
     expect(readNetworks("IG, Snapchat")).toBeUndefined();
     expect(readNetworks(" , ; ")).toBeUndefined();
   });
+  it("a network written with its format or a filler (IG Story, Instagram Feed, FB Post) is the network; a format alone is not a network", () => {
+    expect(readNetworks("IG Story")).toEqual(["instagram"]);
+    expect(readNetworks("Instagram Feed & FB Post")).toEqual(["instagram", "facebook"]);
+    expect(readNetworks("IG Reels, Tik Tok video")).toEqual(["instagram", "tiktok"]);
+    expect(readNetworks("IG FB")).toEqual(["instagram", "facebook"]);
+    expect(readNetworks("Story")).toBeUndefined();
+    expect(readNetworks("IG Snapchat")).toBeUndefined();
+  });
 });
 
 describe("the format readers", () => {
@@ -159,6 +174,26 @@ describe("the format readers", () => {
     expect(readFormat("Carousel")).toBe("carousel");
     expect(readFormat("IGS")).toBe("story");
     expect(readFormat("feed, reel")).toBeUndefined();
+  });
+  it("a format written with a network or a filler is the format: the rehearsal sheet's Carousel Post, IG Story, Single Post, Feed Post, Video Reels", () => {
+    expect(readFormat("Carousel Post")).toBe("carousel");
+    expect(readFormat("IG Story")).toBe("story");
+    expect(readFormat("Single Post")).toBe("feed");
+    expect(readFormat("Feed Post")).toBe("feed");
+    expect(readFormat("Video Reels")).toBe("reel");
+    expect(readFormat("Reels IG")).toBe("reel");
+    expect(readFormat("Instagram Story")).toBe("story");
+    expect(readFormat("IG Post")).toBe("feed");
+    expect(readFormat("Konten carousel")).toBe("carousel");
+    expect(readFormats("Single Post, Carousel, Reel, IG Story")).toEqual(["feed", "carousel", "reel", "story"]);
+  });
+  it("a network alone, an unknown word, or two formats in one plan cell stay unreadable", () => {
+    expect(readFormat("Instagram")).toBeUndefined();
+    expect(readFormat("IG")).toBeUndefined();
+    expect(readFormat("Story highlight")).toBeUndefined();
+    expect(readFormat("Feed Reels")).toBeUndefined();
+    expect(readFormats("Feed Reels")).toEqual(["feed", "reel"]);
+    expect(readFormat("Content")).toBeUndefined();
   });
 });
 

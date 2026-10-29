@@ -13328,14 +13328,16 @@ Fields: `client` (required), `officer`, `postsPerCycle`, `creativeSource`, `deli
 - `creativeSource`:
   - `creatives` from "Creatives", "Creative team" or "Creatives dept";
   - `in_team` from "In team", "In-team", "In house", "In-house", "Social designer" or "Own designer".
+  - In Indonesian (added after the SCP-6 dress rehearsal): `creatives` also from "Tim Creative", "Tim Kreatif", "Kreatif" or "Divisi Creative"; `in_team` also from "Internal", "Desainer internal", "Tim Sosmed" or "Designer Sosmed".
 - `deliveryBatch`: `A` or `B`, case ignored, also as "Batch A".
-- `reportFormat`: `email` from "Email" or "E-mail"; `meeting` from "Meeting", "Call", "Zoom" or "Meet".
+- `reportFormat`: `email` from "Email", "E-mail" or "Via email"; `meeting` from "Meeting", "Call", "Zoom", "Meet", "Rapat", "Google Meet", "Online meeting" or "Video call".
 - `platforms` (and the plan's `placement`): a list split on `,` `/` `+` `&` `;` and new lines. Each item is mapped by the `NETWORKS` keys of `brand-book.ts`, by the networks' names, and by the short forms `IG` (instagram), `FB` (facebook), `TT` (tiktok), `LI` (linkedin), `YT` (youtube) and `Twitter` (x). An unknown item is `invalid_field`.
 - `formats` (and the plan's `format`):
   - `feed` from "Feed", "Post", "Single", "Image" or "Static";
   - `carousel` from "Carousel", "Slide", "Slides" or "Album";
   - `reel` from "Reel", "Reels" or "Video";
   - `story` from "Story", "Stories" or "IGS".
+- **A format and a network written together** (added after the SCP-6 dress rehearsal, where 6 of 22 mock plan rows were refused for them). An item that is not a known name as a whole is read word by word. The format reader ignores network words and the fillers "post", "posting", "konten", "content" and "upload", so "IG Story" is `story`, "Carousel Post" `carousel`, "Single Post" and "Feed Post" `feed`, "Video Reels" `reel`, and "IG Post" (a post on its own) `feed`. The network reader ignores format words and the fillers, so "IG Story" is `instagram` and "IG FB" is both. Every word left must be known, and a plan cell that still names two formats stays `invalid_field`.
 - `defaultPostTime` (and the plan's `time`): `HH:MM`, `H:MM`, `H.MM`, `9am`, `9 am` or `7:30 pm`.
 - **An empty cell leaves the field as it is. The import never clears a value.**
 - A row is `unchanged` when every value it carries already equals the engagement's. A client named on two rows refuses both, with `duplicate_client`.

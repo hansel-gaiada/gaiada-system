@@ -100,6 +100,10 @@ const CREATIVE_SOURCES: Record<string, "creatives" | "in_team"> = {
   creatives: "creatives", creative: "creatives", "creative team": "creatives", "creatives team": "creatives", "creatives dept": "creatives",
   "creative dept": "creatives", "creatives department": "creatives", "creative department": "creatives",
   "in team": "in_team", "in house": "in_team", inhouse: "in_team", "social designer": "in_team", "own designer": "in_team",
+  // Indonesian, as the SCP-6 dress rehearsal's mock sheet wrote them ("Tim Creative" for the Creatives team; an internal or sosmed designer).
+  "tim creative": "creatives", "tim creatives": "creatives", "tim kreatif": "creatives", kreatif: "creatives", "divisi creative": "creatives",
+  "divisi kreatif": "creatives", internal: "in_team", "desainer internal": "in_team", "designer internal": "in_team", "tim sosmed": "in_team",
+  "desainer sosmed": "in_team", "designer sosmed": "in_team", "in house designer": "in_team", "inhouse designer": "in_team",
 };
 export function readCreativeSource(cell: string): "creatives" | "in_team" | undefined {
   return CREATIVE_SOURCES[normalizeName(cell)];
@@ -113,6 +117,8 @@ export function readBatch(cell: string): "A" | "B" | undefined {
 
 const REPORT_FORMATS: Record<string, "email" | "meeting"> = {
   email: "email", "e mail": "email", meeting: "meeting", call: "meeting", zoom: "meeting", meet: "meeting",
+  "via email": "email", "lewat email": "email", rapat: "meeting", "google meet": "meeting", gmeet: "meeting", "online meeting": "meeting",
+  "meeting online": "meeting", "via zoom": "meeting", "video call": "meeting",
 };
 export function readReportFormat(cell: string): "email" | "meeting" | undefined {
   return REPORT_FORMATS[normalizeName(cell)];
@@ -132,21 +138,51 @@ function listItems(cell: string): string[] {
   return cell.split(LIST_SPLIT).map((s) => s.trim()).filter((s) => s !== "");
 }
 
-function readMappedList(cell: string, table: Record<string, string>): string[] | undefined {
+/** A list cell's items, each read by `readItem` (one or more values), each value once, in the order written. One unreadable item refuses all. */
+function readMappedList(cell: string, readItem: (item: string) => string[] | undefined): string[] | undefined {
   const items = listItems(cell);
   if (items.length === 0) return undefined; // a list of nothing would clear a field: not a value
   const out: string[] = [];
   for (const item of items) {
-    const v = table[normalizeName(item)];
+    const vs = readItem(item);
+    if (vs === undefined) return undefined;
+    for (const v of vs) if (!out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
+// People write a format and a network together in one cell ("IG Story", "Carousel Post", "Reels IG", "Instagram Feed"), in either column.
+// So an item that is not a known name as a whole is read word by word: each reader ignores the other reader's words and these fillers,
+// and every word left must be its own. (SCP-6 dress rehearsal, 2026-10-29: 6 of 22 mock plan rows were refused for exactly these forms.)
+const FILLER_WORDS = new Set(["post", "posts", "posting", "konten", "content", "upload", "unggahan"]);
+const NETWORK_PHRASES: ReadonlyArray<[RegExp, string]> = [[/\btik tok\b/g, "tiktok"], [/\blinked in\b/g, "linkedin"], [/\byou tube\b/g, "youtube"]];
+
+function itemWords(item: string): string[] {
+  let n = normalizeName(item);
+  for (const [re, w] of NETWORK_PHRASES) n = n.replace(re, w);
+  return n.split(" ").filter((w) => w !== "");
+}
+
+function wordValues(words: readonly string[], table: Record<string, string>): string[] | undefined {
+  if (words.length === 0) return undefined;
+  const out: string[] = [];
+  for (const w of words) {
+    const v = table[w];
     if (v === undefined) return undefined;
     if (!out.includes(v)) out.push(v);
   }
   return out;
 }
 
-/** A network list (`IG, FB`, `Instagram / TikTok`), mapped to the `NETWORKS` keys, each once, in the order written. */
+function readNetworkItem(item: string): string[] | undefined {
+  const whole = NETWORK_ALIASES[normalizeName(item)];
+  if (whole !== undefined) return [whole];
+  return wordValues(itemWords(item).filter((w) => FORMAT_ALIASES[w] === undefined && !FILLER_WORDS.has(w)), NETWORK_ALIASES);
+}
+
+/** A network list (`IG, FB`, `Instagram / TikTok`, `IG Story & FB`), mapped to the `NETWORKS` keys, each once, in the order written. */
 export function readNetworks(cell: string): string[] | undefined {
-  return readMappedList(cell, NETWORK_ALIASES);
+  return readMappedList(cell, readNetworkItem);
 }
 
 const FORMAT_ALIASES: Record<string, string> = {
@@ -155,9 +191,20 @@ const FORMAT_ALIASES: Record<string, string> = {
   reel: "reel", reels: "reel", video: "reel",
   story: "story", stories: "story", igs: "story",
 };
-/** A format list (the allocation's `formats`). */
+
+function readFormatItem(item: string): string[] | undefined {
+  const whole = FORMAT_ALIASES[normalizeName(item)];
+  if (whole !== undefined) return [whole];
+  const words = itemWords(item).filter((w) => NETWORK_ALIASES[w] === undefined);
+  const kept = words.filter((w) => !FILLER_WORDS.has(w));
+  // "IG Post": only a network and a filler are left, and a post on its own is the feed.
+  if (kept.length === 0) return words.some((w) => w === "post" || w === "posts") ? ["feed"] : undefined;
+  return wordValues(kept, FORMAT_ALIASES);
+}
+
+/** A format list (the allocation's `formats`; `Single Post, Carousel, IG Story`). */
 export function readFormats(cell: string): string[] | undefined {
-  return readMappedList(cell, FORMAT_ALIASES);
+  return readMappedList(cell, readFormatItem);
 }
 /** One format (the plan's `format`): a cell naming two is not a value. */
 export function readFormat(cell: string): string | undefined {
