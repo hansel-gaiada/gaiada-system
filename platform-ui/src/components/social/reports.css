@@ -1,0 +1,28 @@
+/* SCP-5a (BFF §63.18) — the Social Media monthly report pages: the list, the draft bar and one report. Tokens only (the tokens guard); the look of the rest is cycles.css and post-page.css. */
+.scp-reports { display: grid; gap: 16px; }
+.scp-reports__filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.scp-reports__filter { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font: 600 11px var(--font-body); color: var(--erp-ink-60); }
+.scp-reports__chip { padding: 2px 10px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); font: 600 12px var(--font-body); color: var(--text-primary); text-decoration: none; }
+.scp-reports__chip[aria-current="true"] { background: var(--status-ok-bg); color: var(--status-ok-fg); }
+.scp-reports__table { width: 100%; border-collapse: collapse; font: 400 13px var(--font-body); }
+.scp-reports__table th { text-align: left; font: 600 11px var(--font-body); color: var(--erp-ink-60); padding: 6px 8px; border-bottom: 0.5px solid var(--erp-hairline); }
+.scp-reports__table td { padding: 8px; border-bottom: 0.5px solid var(--erp-hairline); vertical-align: middle; }
+.scp-reports__state { display: inline-flex; padding: 2px 8px; border-radius: var(--radius-md); font: 700 11px var(--font-body); border: 0.5px solid var(--erp-hairline); }
+.scp-reports__state--in_review { background: var(--status-warning-bg); color: var(--status-warning-fg); }
+.scp-reports__state--approved { background: var(--status-ok-bg); color: var(--status-ok-fg); }
+.scp-reports__state--delivered { color: var(--erp-ink-60); }
+.scp-reports__draft { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.scp-report { display: grid; gap: 16px; }
+.scp-report__head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.scp-report__title { margin: 0; font: 700 18px var(--font-body); color: var(--text-primary); }
+.scp-report__area { display: grid; gap: 8px; padding: 12px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); }
+.scp-report__area h4 { margin: 0; font: 700 13px var(--font-body); color: var(--text-primary); }
+.scp-report__areas { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.scp-report__count { font: 400 11px var(--font-body); color: var(--erp-ink-60); }
+.scp-report__count--over { color: var(--status-critical-fg); }
+.scp-report__plan { display: grid; gap: 8px; }
+.scp-report__action { display: grid; gap: 8px; grid-template-columns: minmax(200px, 3fr) minmax(110px, 1fr) minmax(130px, 1fr) auto; align-items: start; }
+.scp-report__buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.scp-report__numbers { overflow-x: auto; }
+.scp-report__watermark { border-left: 3px solid var(--status-warning); padding: 6px 10px; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+@media (max-width: 720px) { .scp-report__action { grid-template-columns: 1fr; } }

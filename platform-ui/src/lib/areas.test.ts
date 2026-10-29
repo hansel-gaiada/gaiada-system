@@ -253,3 +253,21 @@ describe.each(SKIN_PERSONAS)("the Social skin keeps every page in one area: $nam
     for (const ws of soc.workspaces) expect(ws.skin === "social", ws.key).toBe(ws.key === "social-media");
   });
 });
+
+// SCP-5a (BFF §63.17): the two Social reports pages sit in exactly one area each, the department's own, and the department's /reports page (SEO's) is not either of them.
+describe("the Social reports pages' areas (SCP-5a)", () => {
+  it("each page has exactly one rule, and it is the department's workspace area", () => {
+    for (const segs of [["departments", "[deptId]", "social-reports"], ["departments", "[deptId]", "social-reports", "[reportId]"]]) {
+      const rules = bestRules(segs);
+      expect(rules, segs.join("/")).toHaveLength(1);
+      expect(rules[0].kind, segs.join("/")).toBe("workspace");
+    }
+    expect(areaFor("/departments/d-x/social-reports")).toMatchObject({ kind: "workspace", deptId: "d-x" });
+    expect(areaFor("/departments/d-x/social-reports/r-1")).toMatchObject({ kind: "workspace", deptId: "d-x" });
+  });
+  it("the list and a report are the same area, and /reports is its own page with its own rule", () => {
+    expect(areaFor("/departments/d-x/social-reports")).toEqual(areaFor("/departments/d-x/social-reports/r-1"));
+    expect(bestRules(["departments", "[deptId]", "reports"])).toHaveLength(1);
+    expect(bestRules(["departments", "[deptId]", "reports"])[0].path).not.toMatch(/social-reports/);
+  });
+});

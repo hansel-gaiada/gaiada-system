@@ -593,7 +593,12 @@ const SOCIAL_MEDIA: Workspace = {
       }],
     },
   ],
-  reports: [],
+  // SCP-5a (BFF §63.17, §63.18): the "Social reports" tab of the shared Reports row (the key `social` is the one the Social skin's Reports pin names). It opens `{D}/social-reports`, never
+  // `{D}/reports`, which is SEO's. No gate: the whole team reads the list, and the server decides each write. The report page `{D}/social-reports/[reportId]` is opened from it and lights this tab.
+  reports: [{
+    key: "social", label: "Social reports", href: deptPath("social-reports"), icon: "chart",
+    blurb: "Each client's monthly report: the numbers, an insight and a suggestion per area, the action plan, the HoD check and sending.",
+  }],
   analytics: [fromToolkit("social-media", "analytics", { key: "reach", label: "Reach and engagement" })],
   tools: launchersOf("social-media"),
   connections: [CONN.socialAccounts, CONN.drive, CONN.claudeSeats],
