@@ -3,7 +3,7 @@
 .ag-state { margin: 0; font: 400 14px/1.6 var(--font-body); color: var(--text-primary); }
 .ag-state strong { font-weight: 600; }
 .ag-state--own strong { color: var(--accent); }
-.ag-off { margin: 0; padding: 10px 12px; border: 0.5px solid var(--status-warning); border-radius: 8px; background: color-mix(in srgb, var(--status-warning) 10%, transparent); font: 400 13px/1.55 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
+.ag-off { margin: 0; padding: 10px 12px; border: 0.5px solid var(--status-warning); border-radius: var(--radius-md); background: color-mix(in srgb, var(--status-warning) 10%, transparent); font: 400 13px/1.55 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
 .ag-form { display: flex; flex-direction: column; gap: 10px; }
 .ag-form .lux-field__control--textarea { min-height: 160px; line-height: 1.55; }
 .ag-count { margin: 0; font: 500 12px/1.5 var(--font-body); color: var(--ink-muted); }
@@ -17,7 +17,7 @@
 .ag-preview-wrap { display: flex; flex-direction: column; gap: 8px; padding-top: 6px; border-top: 0.5px solid var(--erp-hairline); }
 .ag-h { margin: 12px 0 0; font: 600 14px/1.4 var(--font-body); color: var(--text-primary); }
 /* The block the assistant reads: plain text, line breaks kept, long words wrapped so a phone never scrolls the page sideways. */
-.ag-preview { margin: 0; padding: 12px 14px; border: 0.5px solid var(--line); border-radius: 8px; background: var(--surface-sunken); font: 400 13px/1.6 var(--font-body); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+.ag-preview { margin: 0; padding: 12px 14px; border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--surface-sunken); font: 400 13px/1.6 var(--font-body); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
 .ag-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ag-meta { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-subtle); }
 .ag-gone { margin: 0; font: 400 14px/1.6 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
