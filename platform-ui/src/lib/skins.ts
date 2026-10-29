@@ -62,8 +62,8 @@ const SOCIAL_PINNED: readonly PinnedItem[] = [
   { kind: "row", key: "saved", row: "publish", tab: "assets", label: "Saved", icon: "bookmark" },
   { kind: "row", key: "profile", row: "profile", label: "Profile", icon: "user" },
   { kind: "row", key: "assistant", row: "assistant", label: "AI Assistant" },
-  // A future Social page ({D}/dashboard, for the four Social approvers).
-  { kind: "row", key: "dashboard", row: "dashboard", label: "Dashboard", icon: "dashboard", ticket: "SCP-5d" },
+  // The Team dashboard ({D}/dashboard, SCP-5d), for the four Social approvers: the registry row gates on `canLeadSocial`.
+  { kind: "row", key: "dashboard", row: "dashboard", label: "Dashboard", icon: "dashboard" },
   { kind: "row", key: "settings", row: "settings", label: "Settings", icon: "settings" },
 ];
 
@@ -78,8 +78,7 @@ export const SKINS: Readonly<Record<SkinKey, Skin>> = {
 };
 
 /** The skins drawn for everyone. Standard always; Social since SCP-Kg, switched on by the owner on 2026-10-27 ahead of SCP-1d, 1e and 1k (plan §8
- *  had it wait for them). No pinned entry points at a page that does not exist: Dashboard keeps its `ticket` (SCP-5d) and stays
- *  hidden until its page lands. Anyone may still choose the Standard look for themselves (More › Appearance). */
+ *  had it wait for them). No pinned entry points at a page that does not exist (the Dashboard's `ticket` went with SCP-5d). Anyone may still choose the Standard look for themselves (More › Appearance). */
 export const SKINS_ON: readonly SkinKey[] = ["standard", "social"];
 
 /** The skins switched on: `SKINS_ON`, plus the comma-separated keys of `SHELL_SKIN_PREVIEW` (a dev or test box; unknown keys ignored). */
