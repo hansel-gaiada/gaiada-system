@@ -69,14 +69,21 @@ export async function readFailedPosts(c: PoolClient, tenantId: string, includeSi
 
 export interface BoostWaitingRow { boostId: string; postId: string; engagementId: string; clientName: string; title: string; since: string }
 
-/** The boosts `GET overview` counts in `boostsWaiting`: requested, plus approved and not started, on undeleted, unarchived posts. */
-export async function readBoostsWaiting(c: PoolClient, tenantId: string, includeSimulated: boolean): Promise<BoostWaitingRow[]> {
+/**
+ * The boosts that wait, for the dashboard's month. Orchestrator ruling for `GET team?month=M` (the contract left it open; the UI and demo follow it):
+ * only the boosts whose CYCLE is M's (`social_boosts.cycle_id` -> the cycle whose `month` is M, which is the month the boost starts in, BFF §63.11), with
+ * status `requested`, or `approved` and not started. A boost with no cycle belongs to no month and is listed in none. The rest of the rule is
+ * `GET overview`'s `boostsWaiting` (undeleted, unarchived posts; simulated boosts only while the switch is on), which counts the whole company, so the
+ * overview's number is the sum of the months' lists plus the boosts that have no cycle.
+ */
+export async function readBoostsWaiting(c: PoolClient, tenantId: string, includeSimulated: boolean, month: string): Promise<BoostWaitingRow[]> {
   await declareSocialModuleScope(c);
   const { rows } = await c.query<{ id: string; post_id: string; engagement_id: string; client_name: string; title: string | null; since: Date }>(
     tagged(`
     SELECT b.id::text AS id, b.post_id::text AS post_id, p.engagement_id::text AS engagement_id, cl.name AS client_name, p.title,
            CASE WHEN b.status = 'approved' THEN coalesce(b.approved_at, b.requested_at) ELSE b.requested_at END AS since
       FROM social_boosts b
+      JOIN social_cycles cy ON cy.id = b.cycle_id AND cy.tenant_id = b.tenant_id AND cy.deleted_at IS NULL AND cy.month = $3::date
       JOIN social_posts p ON p.id = b.post_id AND p.tenant_id = b.tenant_id AND p.deleted_at IS NULL AND p.archived_at IS NULL
       JOIN social_engagements e ON e.id = p.engagement_id AND e.tenant_id = p.tenant_id
       JOIN clients cl ON cl.id = e.client_id AND cl.tenant_id = e.tenant_id
@@ -84,7 +91,7 @@ export async function readBoostsWaiting(c: PoolClient, tenantId: string, include
        AND (b.status = 'requested' OR (b.status = 'approved' AND b.started_at IS NULL))
      ORDER BY 6, b.id
      LIMIT ${TEAM_ROW_CAP + 1}`),
-    [tenantId, includeSimulated],
+    [tenantId, includeSimulated, `${month}-01`],
   );
   return rows.map((r) => ({
     boostId: r.id, postId: r.post_id, engagementId: r.engagement_id, clientName: r.client_name, title: r.title ?? "Untitled post", since: iso(r.since),
@@ -98,8 +105,9 @@ export interface ReportToCheckRow { reportId: string; engagementId: string; clie
 
 /**
  * Report due: every engagement of the company that is not closed, has a `report_due_day`, and whose client is not the internal sentinel
- * (no report is ever delivered for it, SMM-23), where the MONTHLY report of `period` is not `delivered` (or does not exist). `reportId` is the
- * row when there is one (draft, in review or ready). Report to check: reports `in_review`, of any kind. Only the existing `social_reports` columns.
+ * (no report is ever delivered for it, SMM-23), where the MONTHLY report of `period` (the month BEFORE the dashboard's) is not `delivered` (or does not
+ * exist). `reportId` is the row when there is one (draft, in review or ready). Whether the due DAY has been reached is `reportAttention`'s (team.ts).
+ * Report to check: reports `in_review`, of any kind. Only the existing `social_reports` columns.
  */
 export async function readReportFacts(c: PoolClient, tenantId: string, period: string): Promise<{ due: ReportDueRow[]; toCheck: ReportToCheckRow[] }> {
   await declareSocialModuleScope(c);

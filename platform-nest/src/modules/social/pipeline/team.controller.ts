@@ -126,14 +126,14 @@ export class SocialTeamController {
       attention.push(...failedAttention(rows.slice(0, TEAM_ROW_CAP)));
     } catch (e) { fail("needsAttention", e); }
     try {
-      const rows = await withTenants([tenantId], (c) => readBoostsWaiting(c, tenantId, includeSimulated), SOCIAL);
+      const rows = await withTenants([tenantId], (c) => readBoostsWaiting(c, tenantId, includeSimulated, month), SOCIAL);
       if (rows.length > TEAM_ROW_CAP) partial.add("needsAttention");
       attention.push(...boostAttention(rows.slice(0, TEAM_ROW_CAP)));
     } catch (e) { fail("needsAttention", e); }
     try {
       const facts = await withTenants([tenantId], (c) => readReportFacts(c, tenantId, previousMonth(month)), SOCIAL);
       if (facts.due.length > TEAM_ROW_CAP || facts.toCheck.length > TEAM_ROW_CAP) partial.add("needsAttention");
-      attention.push(...reportAttention(month, { due: facts.due.slice(0, TEAM_ROW_CAP), toCheck: facts.toCheck.slice(0, TEAM_ROW_CAP) }));
+      attention.push(...reportAttention(month, { due: facts.due.slice(0, TEAM_ROW_CAP), toCheck: facts.toCheck.slice(0, TEAM_ROW_CAP) }, today));
     } catch (e) { fail("needsAttention", e); }
 
     // ── clients (the month's deadline table, the table `GET cycles` answers) ──
