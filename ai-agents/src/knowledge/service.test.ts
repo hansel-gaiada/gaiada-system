@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { Pool } from "pg";
-import { KnowledgeStore } from "./store";
+import { KnowledgeStore, parseDepartmentBoost, type Hit, type IngestDoc, type SearchCtx } from "./store";
 import { KnowledgeGraph } from "./graph";
 import { PgEpisodicStore } from "../memory/episodic-pg";
 import { buildKnowledgeApp, GatewayBudgetError, knowledgeConfig } from "./service";
@@ -219,5 +219,113 @@ describe.skipIf(!dbUp)("knowledge service: embedding budget refusal", () => {
     expect(unchanged.statusCode).toBe(200);
     expect(unchanged.json()).toEqual({ written: 1, embedded: 0, reused: 1 });
     refuse = false;
+  });
+});
+
+// AIP-11 / AIP-12 at the HTTP edge. A recording stub stands in for the store, so these run without a database: what is
+// proved here is what the service passes DOWN (and what it refuses to), and the store's own behaviour is proved in store.test.ts.
+describe("knowledge service: department on /ingest and /search (AIP-11/12)", () => {
+  const svc = { authorization: "Bearer know-token" };
+  const member = { ...svc, "x-obo-provider": "telegram", "x-obo-external-id": "tg:555" };
+  const DEPT_TENANT = "bbbbbbbb-0000-4000-8000-0000000000d1";
+  const ingested: IngestDoc[] = [];
+  const searched: Array<{ query: string; ctx: SearchCtx }> = [];
+  let hitsToReturn: Hit[] = [];
+  let app: ReturnType<typeof buildKnowledgeApp>;
+  let savedBoost: number;
+  let savedToken: string;
+
+  beforeAll(() => {
+    savedToken = knowledgeConfig.serviceToken;
+    savedBoost = knowledgeConfig.departmentBoost;
+    knowledgeConfig.serviceToken = "know-token";
+    const stub = {
+      ingestDetailed: async (doc: IngestDoc) => {
+        ingested.push(doc);
+        return { written: doc.chunks.length, embedded: doc.chunks.length, reused: 0 };
+      },
+      search: async (query: string, ctx: SearchCtx) => {
+        searched.push({ query, ctx });
+        return hitsToReturn;
+      },
+    } as unknown as KnowledgeStore;
+    app = buildKnowledgeApp(stub, async () => ({ tenantSet: [T_A], crossCompany: false }));
+  });
+  beforeEach(() => {
+    ingested.length = 0;
+    searched.length = 0;
+    hitsToReturn = [];
+    knowledgeConfig.departmentBoost = savedBoost;
+  });
+  afterAll(async () => {
+    knowledgeConfig.serviceToken = savedToken;
+    knowledgeConfig.departmentBoost = savedBoost;
+    await app.close();
+  });
+
+  const ingest = (extra: Record<string, unknown>) =>
+    app.inject({
+      method: "POST", url: "/ingest", headers: svc,
+      payload: { tenantId: T_A, sourceRef: "dept-svc", acl: [], kind: "doc", chunks: ["a paragraph"], provenance: "human", trust: "trusted", ...extra },
+    });
+  const search = (extra: Record<string, unknown>) =>
+    app.inject({ method: "POST", url: "/search", headers: member, payload: { query: "diesel", scope: "s", ...extra } });
+
+  it("/ingest passes a valid departmentId down, trimmed", async () => {
+    expect((await ingest({ departmentId: "d-seo" })).statusCode).toBe(200);
+    expect((await ingest({ departmentId: "  d-seo  " })).statusCode).toBe(200);
+    expect(ingested.map((d) => d.departmentId)).toEqual(["d-seo", "d-seo"]);
+  });
+
+  it("/ingest coerces a missing, wrong-typed, blank or over-long departmentId to null and never answers 400", async () => {
+    for (const bad of [undefined, null, "", "   ", 7, true, {}, ["d-seo"], "x".repeat(101)]) {
+      const r = await ingest(bad === undefined ? {} : { departmentId: bad });
+      expect(r.statusCode).toBe(200);
+    }
+    expect(ingested).toHaveLength(9);
+    for (const d of ingested) expect(d.departmentId).toBeNull();
+  });
+
+  it("/search passes a valid department and the configured boost through", async () => {
+    knowledgeConfig.departmentBoost = 1.5;
+    expect((await search({ department: { tenantId: DEPT_TENANT, nodeId: "d-seo" } })).statusCode).toBe(200);
+    expect(searched).toHaveLength(1);
+    expect(searched[0].ctx.department).toEqual({ tenantId: DEPT_TENANT, nodeId: "d-seo" });
+    expect(searched[0].ctx.departmentBoost).toBe(1.5);
+    expect(searched[0].ctx.tenantSet).toEqual([T_A]); // the tenant set is still the resolved envelope's, never the department's
+  });
+
+  it("/search IGNORES an invalid department: no boost, never an error", async () => {
+    const bad: unknown[] = [
+      "d-seo", 5, [], null,
+      { tenantId: "not-a-uuid", nodeId: "d-seo" },
+      { tenantId: DEPT_TENANT },
+      { tenantId: DEPT_TENANT, nodeId: "" },
+      { tenantId: DEPT_TENANT, nodeId: "x".repeat(101) },
+      { tenantId: 9, nodeId: "d-seo" },
+      { tenantId: DEPT_TENANT, nodeId: 9 },
+    ];
+    for (const department of bad) expect((await search({ department })).statusCode).toBe(200);
+    expect((await search({})).statusCode).toBe(200); // and no department at all is today's call
+    expect(searched).toHaveLength(bad.length + 1);
+    for (const s of searched) expect(s.ctx.department).toBeUndefined();
+  });
+
+  it("/search returns departmentId on every hit", async () => {
+    hitsToReturn = [
+      { tenantId: T_A, sourceRef: "erp:project:1", kind: "doc", text: "t", provenance: "human", confidence: 1, score: 0.9, audience: "internal", departmentId: "d-seo" },
+      { tenantId: T_A, sourceRef: "erp:client:1", kind: "doc", text: "t", provenance: "human", confidence: 1, score: 0.8, audience: "internal", departmentId: null },
+    ];
+    const r = await search({});
+    expect((r.json() as { hits: Hit[] }).hits.map((h) => h.departmentId)).toEqual(["d-seo", null]);
+  });
+
+  it("the boost env: KNOWLEDGE_DEPARTMENT_BOOST is read through the clamp (default 1.25, NaN or missing 1.25, [1, 2])", () => {
+    expect(knowledgeConfig.departmentBoost).toBe(parseDepartmentBoost(process.env.KNOWLEDGE_DEPARTMENT_BOOST));
+    expect(parseDepartmentBoost(undefined)).toBe(1.25);
+    expect(parseDepartmentBoost("not a number")).toBe(1.25);
+    expect(parseDepartmentBoost("1.6")).toBe(1.6);
+    expect(parseDepartmentBoost("0.2")).toBe(1);
+    expect(parseDepartmentBoost("7")).toBe(2);
   });
 });

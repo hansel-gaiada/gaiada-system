@@ -54,6 +54,38 @@ meaningless; `"Task: Migrate DNS / Status: blocked / Project: Acme Rebuild"` is 
 Only the **latest revision** of a report document is indexed. Indexing superseded revisions makes the
 RAG argue with itself.
 
+## Department column and ranking boost (AIP-11, AIP-12)
+
+`knowledge_chunks.department_id` (text, NULL) holds the **org node id** of the department that owns the record, the same shape
+as `projects.department_id` (`d-seo`). The store's own `init()` adds it in place with `ADD COLUMN IF NOT EXISTS`, plus an index
+on `(tenant_id, department_id)`, exactly as it added `audience`. `/ingest` takes `departmentId` and is fail-soft about it: a
+wrong type, a blank or a value over 100 characters becomes `null`, never a 400.
+
+The ERP source sets it per record:
+
+| Record | `departmentId` |
+|---|---|
+| project | its own `department_id` |
+| `tasks`, `pm_tasks`, `deliverables`, `pm_docs` | its project's |
+| meeting | its own `department_id`, else its project's |
+| file | the parent project's, or the project of the parent task (core or PM) or deliverable; any other target none |
+| clients, reports, org, people | none |
+
+**The chunk text does not carry it.** The store keeps a stored chunk's vector when its text is byte-identical, so a
+"Department:" line in the rendered text would re-embed the whole corpus (about 2 hours on the live 2-vCPU box). The department
+travels beside the chunks, and the store's reuse path rewrites it on the rows it keeps: **the next sweep is the backfill**
+(about 3 minutes, zero embedding calls). A record that leaves its department is cleared the same way.
+
+**It ranks; it never gates (plan section 3.3).** `/search` takes an optional `department: { tenantId, nodeId }` (a uuid and a
+non-empty string of at most 100 characters; anything else is ignored, no boost, no error). The authorization pre-filter is
+unchanged and never mentions the department. After it, a chunk that is `internal`, of that tenant and of that node has its score
+multiplied by `KNOWLEDGE_DEPARTMENT_BOOST` (default `1.25`, NaN or missing gives the default, clamped to `[1, 2]`); results are
+ordered by the boosted score and the boosted score is the one returned. The `score > 0` cut stays on the base score. So the boost
+cannot add a row, cannot rescue a chunk with no similarity, does not touch the public tier, and does not cross companies (node
+ids repeat across companies, which is why the tenant is part of the match). Hits carry `departmentId`. With no department the
+results and their order are exactly what they were. Per-record read checks (`filterReadableHits`) still run in platform-nest on
+whatever comes back.
+
 ## Freshness
 
 `ingest/scheduler.ts` runs a full sweep on an interval (`KNOWLEDGE_INGEST_INTERVAL_MS`, default 6h),
