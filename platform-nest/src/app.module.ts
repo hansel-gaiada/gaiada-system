@@ -164,6 +164,8 @@ import { SocialFeedPreviewController } from "./modules/social/pipeline/feed-prev
 // SCP-Sg: the client's accounts read back, followers, 30-day reach and "Last synced" (BFF §63.10), on its own controller under the same prefix.
 import { SocialAccountsSummaryController } from "./modules/social/pipeline/accounts-summary.controller";
 import { SocialAllocationController } from "./modules/social/pipeline/allocation.controller";
+// SCP-6a: the one-off sheet import (BFF §63.23), on its own controller under the same prefix.
+import { SocialSheetImportController } from "./modules/social/pipeline/sheet-import.controller";
 import { SocialSimulatedAccountsController } from "./modules/social/simulated-accounts.controller";
 import { SocialFeedController } from "./modules/social/pipeline/feed.controller";
 // SCP-1h: the designer's queue (`GET design-queue`), on its own controller under the same route prefix.
@@ -288,6 +290,8 @@ import { AiUsageIngestController } from "./modules/ai-usage/ingest.controller";
     // SCP-1c: settings + cycles (BFF §63.4, §63.5), own controller class, same prefix.
     SocialCyclesController,
     SocialAllocationController,
+    // SCP-6a: `POST import/parse`, `import/allocation`, `import/plan` (BFF §63.23).
+    SocialSheetImportController,
     SocialSimulatedAccountsController,
     SocialFeedController,
     // SCP-1k: the client calendar read (BFF §63.10 `GET calendar`).

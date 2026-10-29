@@ -32,6 +32,8 @@ import type { FastifyInstance } from "fastify";
 import { MAX_ATTACHMENT_TOTAL_BYTES } from "./conversation-core";
 import { MAX_PROOF_BYTES } from "./portal-commerce.controller";
 import { MAX_BYTES as MAX_STAFF_FILE_BYTES } from "./files.controller";
+import { MAX_SHEET_BYTES } from "../modules/social/pipeline/sheet-parse";
+import { MAX_IMPORT_BODY_BYTES } from "../modules/social/pipeline/sheet-import.controller";
 
 /** Room for everything in the JSON request that is NOT file content: the message body (<= 10,000 chars,
  *  at most 3 UTF-8 bytes each = 30 KB), the subject (200 chars), up to 5 attachments' filename (<= 200
@@ -77,6 +79,11 @@ export const UPLOAD_ROUTES: readonly UploadRoute[] = [
   // DW-8h (§45.2): the staff file upload takes `{content}` as base64 up to its own 25 MB cap; without this entry Fastify's 1 MiB
   // default 413'd any upload over ~750 KB before the handler ran.
   { method: "POST", url: "/api/:tenantId/files", capBytes: MAX_STAFF_FILE_BYTES, label: "staff file upload" },
+  // SCP-6a (BFF §63.23.1): the Social sheet import. `parse` takes an .xlsx or .csv as base64 up to 2 MiB decoded; the two writing routes take the
+  // sheet's cells back as JSON (the cap is the body's own, 4 MiB, not a file's).
+  { method: "POST", url: "/api/:tenantId/modules/social/import/parse", capBytes: MAX_SHEET_BYTES, label: "social sheet import: parse" },
+  { method: "POST", url: "/api/:tenantId/modules/social/import/allocation", capBytes: MAX_IMPORT_BODY_BYTES, label: "social sheet import: allocation" },
+  { method: "POST", url: "/api/:tenantId/modules/social/import/plan", capBytes: MAX_IMPORT_BODY_BYTES, label: "social sheet import: plan" },
 ];
 
 /** One boot-log line per table entry: `POST /api/... (label): cap N B -> bodyLimit M B`. The match itself is

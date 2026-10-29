@@ -296,7 +296,7 @@ describe.skipIf(!TEST_URL)("PV4-03b: per-route body limits for the inline-upload
     it("the real table matches every registered route exactly once (this very app booted through the guard)", () => {
       // buildApp() in beforeAll already ran assertAllMatched(); reaching here is the proof. Pin the count so
       // adding a route to the table without a controller (or the reverse) is a deliberate, reviewed change.
-      expect(UPLOAD_ROUTES).toHaveLength(6);
+      expect(UPLOAD_ROUTES).toHaveLength(9);
     });
   });
 });
