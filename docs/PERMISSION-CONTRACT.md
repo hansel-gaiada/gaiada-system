@@ -2952,7 +2952,7 @@ The handler answers a refusal with 403 `not_a_social_approver`. The unattended-a
 
 `PATCH engagements/:engagementId` (§19) stops accepting `ownerId` (409 `officer_set_by_allocation`), so the officer can no longer be set through `update`.
 
-### 53.7 The report check: `social_report` · `approve` and `deliver` (SCP-5a, SCP-Q20)
+### 53.7 The report check: `social_report` · `approve` and `deliver` (SCP-5a, SCP-Q20) — policy and IAM built by SCP-1b (`202610271001`); the monthly report's routes honour it since SCP-5a (2026-10-29), with no further migration or policy change
 
 The owner (SCP-Q20): a client's monthly report is approved (the HoD check) and sent only by the four approvers. The officer writes it and submits it for the HoD check, but does not send it.
 
