@@ -48,7 +48,11 @@ const holdersOf = (p: PipePost, role: Role): string[] => {
   if (role === "approver") return [...SEAT_APPROVERS.filter((u) => u !== "demo-hansel")];
   return [];
 };
-const ROLE_LABEL: Record<string, string> = { officer: "Officer", copywriter: "Copywriter", approver: "Approvers", designer: "Designer", client: "Client", external: "Outside party" };
+/** The server's holder words (platform-nest `pipeline/pipeline-read.ts` HOLDER_LABELS): a role, never a person, so the team-level list is the same
+ *  for every reader and never names someone whose own row is withheld (BFF §63.19). */
+const HOLDER_WORDS: Record<string, string> = {
+  officer: "The officer", copywriter: "A copywriter", approver: "The HoD or the GM", designer: "The designer", client: "The client", external: "Someone outside the team",
+};
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
 /** §63.7 `boostsWaiting`: `requested`, plus `approved` but not started. */
@@ -84,8 +88,7 @@ export function demoTeamDashboard(month: string, userId: string, opts: DemoTeamO
   const holderOf = (p: PipePost) => {
     const role = holderRoleOf(p);
     if (role === null) return undefined;
-    const ids = holdersOf(p, role);
-    return { role, label: ids.length === 1 ? nameOf(ids[0]) : ROLE_LABEL[role] };
+    return { role, label: HOLDER_WORDS[role] ?? role };
   };
   for (const p of posts) {
     const h = demoPostHealth(p);
@@ -101,11 +104,9 @@ export function demoTeamDashboard(month: string, userId: string, opts: DemoTeamO
     const post = PIPE_POSTS.find((p) => p.id === b.postId);
     if (!post || post.archivedAt) continue;
     const requested = b.status === "requested";
-    const officer = allocStore.byEngagement[b.engagementId]?.officerId ?? null;
     needsAttention.push({
       kind: "boost_waiting", boostId: b.id, engagementId: b.engagementId, clientName: PIPE_ENGAGEMENTS.find((e) => e.id === b.engagementId)?.clientName ?? "", title: post.title,
-      since: dayOf(requested ? b.requestedAt : b.approvedAt ?? b.requestedAt),
-      holder: requested ? { role: "client", label: ROLE_LABEL.client } : officer ? { role: "officer", label: nameOf(officer) } : undefined,
+      since: dayOf(requested ? b.requestedAt : b.approvedAt ?? b.requestedAt)
     });
   }
 
@@ -116,13 +117,15 @@ export function demoTeamDashboard(month: string, userId: string, opts: DemoTeamO
       const day = allocStore.byEngagement[engagementId]?.reportDueDay ?? null;
       return day !== null && today >= `${month}-${String(day).padStart(2, "0")}`;
     };
-    const officerHolder = (engagementId: string) => ({ role: "officer", label: nameOf(allocStore.byEngagement[engagementId]?.officerId ?? "") });
+    // The report is the previous month's (period M-1), titled as the server titles it; like the server, report rows carry no holder.
+    const [y, m] = month.split("-").map(Number);
+    const period = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
     // the second client's report has not been drafted (no id); the third's is in the HoD check.
     if (engs[1] && reportDayReached(engs[1].id)) {
-      needsAttention.push({ kind: "report_due", engagementId: engs[1].id, clientName: engs[1].clientName, since: `${month}-01`, holder: officerHolder(engs[1].id) });
+      needsAttention.push({ kind: "report_due", engagementId: engs[1].id, clientName: engs[1].clientName, title: `Monthly report ${period}`, since: `${month}-01` });
     }
     if (engs[2]) {
-      needsAttention.push({ kind: "report_to_check", reportId: `rep-demo-${engs[2].id}-${month}`, engagementId: engs[2].id, clientName: engs[2].clientName, since: `${month}-01`, holder: { role: "approver", label: ROLE_LABEL.approver } });
+      needsAttention.push({ kind: "report_to_check", reportId: `rep-demo-${engs[2].id}-${period}`, engagementId: engs[2].id, clientName: engs[2].clientName, title: `Monthly report ${period}`, since: `${month}-01` });
     }
   }
 

@@ -125,10 +125,13 @@ export function sinceText(iso: string | null): string {
   return `Since ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
 }
 
-/** The holder as words: "Citra Maheswari (copywriter)"; the label is the server's (a person or a role), shown as sent. */
+/** The holder in words, to follow "With": the server's label, which names a role and never a person ("The designer", "The HoD or the
+ *  GM": BFF §63.19's needs attention is team-level and the same for every reader), with its first letter lowered ("With the designer").
+ *  A label the server left empty falls back to the role key. */
 export function holderText(h: AttentionItem["holder"]): string | null {
   if (!h) return null;
-  return h.label ? `${h.label} (${h.role})` : h.role;
+  const words = h.label || h.role;
+  return words ? words.charAt(0).toLowerCase() + words.slice(1) : null;
 }
 
 // ── Links ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────

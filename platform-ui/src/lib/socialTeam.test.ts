@@ -150,7 +150,9 @@ describe("the words", () => {
     expect(sinceText(null)).toBe("No date");
     expect(sinceText("garbage")).toBe("No date");
     expect(holderText(null)).toBeNull();
-    expect(holderText({ role: "designer", label: "Kadek Surya" })).toBe("Kadek Surya (designer)");
+    // The server's label is a role in words, never a person (BFF §63.19): shown as sent, first letter lowered to follow "With".
+    expect(holderText({ role: "designer", label: "The designer" })).toBe("the designer");
+    expect(holderText({ role: "approver", label: "The HoD or the GM" })).toBe("the HoD or the GM");
     expect(holderText({ role: "client", label: "" })).toBe("client");
     expect(stepLabel("hod")).toBe("HoD approval");
     expect(stepLabel("custom_step")).toBe("custom_step");

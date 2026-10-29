@@ -31,9 +31,9 @@ const body = (over: Record<string, unknown> = {}) => ({
 });
 const FULL = body({
   needsAttention: [
-    { kind: "late", postId: "p-1", engagementId: "e-1", clientName: "Northwind Traders", title: "Five ways to style a scarf", since: "2026-10-13", holder: { role: "designer", label: "Kadek Surya" } },
+    { kind: "late", postId: "p-1", engagementId: "e-1", clientName: "Northwind Traders", title: "Five ways to style a scarf", since: "2026-10-13", holder: { role: "designer", label: "The designer" } },
     { kind: "boost_waiting", boostId: "b-1", engagementId: "e-1", clientName: "Northwind Traders", title: "Harvest collection arrives", since: "2026-10-13" },
-    { kind: "report_due", engagementId: "e-2", clientName: "Saltmarsh Day Spa", since: "2026-10-01", holder: { role: "officer", label: "Wayan Sudira" } },
+    { kind: "report_due", engagementId: "e-2", clientName: "Saltmarsh Day Spa", since: "2026-10-01" },
     { kind: "report_to_check", reportId: "r-1", engagementId: "e-3", clientName: "Harborlight Hotel", since: "2026-10-01" },
   ],
   clients: [
@@ -115,7 +115,7 @@ describe("an answer", () => {
     expect(att.getByRole("link", { name: /Saltmarsh Day Spa/ })).toHaveAttribute("href", "/departments/d-soc/social-reports");
     expect(att.getByRole("link", { name: /Harborlight Hotel/ })).toHaveAttribute("href", "/departments/d-soc/social-reports/r-1");
     for (const a of att.getAllByRole("link")) expect(a.getAttribute("href"), a.textContent ?? "").not.toContain("/profile/");
-    expect(att.getByText(/Since 13 Oct · With Kadek Surya \(designer\)/)).toBeInTheDocument();
+    expect(att.getByText(/Since 13 Oct · With the designer/)).toBeInTheDocument();
   });
 
   it("draws the clients with their health and officer, worst first, and a client with no cycle says so", async () => {
