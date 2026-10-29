@@ -1,0 +1,99 @@
+# AIP-13b (docs/plans/2026-10-27-ai-plan.md §6.2 item 7, owner ruling AIP-D10: each department head edits their own department's
+# assistant preamble; docs/PERMISSION-CONTRACT.md §56; docs/FRONTEND-BFF-CONTRACT.md §65) — authz for the NEW `dept_assistant_preamble`
+# resource kind (core, no module): ONE department's assistant preamble, the text the assistant adds to a turn that was sent from
+# that department (modules/assistant/department-context.ts `resolvePreamble`). One resource is one org unit of one company. Three
+# actions:
+#   read      — see a unit's preamble (the custom text, the default, the preview). company_admin; and an `org_unit_lead` of the unit
+#               or an enclosing one (its own rule, `unitAncestors`).
+#   edit      — write or reset a unit's preamble. company_admin; and an `org_unit_lead` of the unit or an enclosing one (its own rule,
+#               `unitAncestors`).
+#   manage    — the COMPANY TIER, named: read and write ANY unit's preamble. company_admin, and the permission-native `owner` through
+#               the permission arm below. The handler asks `manage` first and falls back to the per-unit action (`read` for the GET,
+#               `edit` for the PUT), so `manage` carries both the read and the write of the company tier (see "THE OWNER" below).
+# NOBODY ELSE reads or edits: a member does not need to, because the assistant applies the text on the SERVER at turn time and makes
+# no Cerbos call for it (plan §3.3: a department is a label that narrows, never an authority that widens). `manager`, `member`, `viewer`
+# and the HR read tier hold nothing here (every head's lead position also carries `manager` company-wide, so `manager` cannot mean "the
+# head of this department").
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── EVERY ATTRIBUTE-DEPENDENT RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
+# `org_unit_lead` is its own rule on `read` and on `edit`, never mixed with a scope role and never with another action. Containment is
+# the derived role's: the grant's scopeId must be in `resource.attr.unitAncestors` (the unit and every ancestor of it,
+# `loadUnitAncestors`), fed by the HANDLER from the route's `:unitNodeId`. An id that is not in the org tree has no closure rows, so
+# its ancestors are [] and no lead grant matches: a head is refused (403) before anything says whether the unit exists.
+#
+# ── THE TENANT TRAP ─────────────────────────────────────────────────────────────────────────────
+# An `org_unit` grant carries NO tenant, and node ids are unique only per company (seed ids such as `d-webdev` repeat across
+# companies). So EVERY rule keeps `variables.inTenant` (the resource's tenant must be in the principal's companies), and the handler
+# always computes `unitAncestors` WITH the tenant (the closure is per tenant). The head of company A's `d-webdev` therefore cannot
+# read or edit company B's `d-webdev` preamble: B is not in that head's companies. No new resource attribute: `tenantId` and
+# `unitAncestors` are already carried by `resourcePayload()`.
+#
+# ── NO AUTOMATION OR BOT PRINCIPAL EDITS (after the dept_notice / work_request precedent) ────────
+# The DENY is shaped exactly like resource_dept_notice.yaml's: `roles: ["user"]`, which every principal carries, so under
+# deny-overrides it beats every ALLOW below, the platform_admin wildcard and the perm mirror included. It reads
+# `principal.attr.kind` (users.kind, sent by principalPayload()); `has()` makes a raw caller that omits the attribute evaluate to
+# false. It lists `edit` and `manage`: a preamble is prompt text the head owns, and an agent never rewrites its own instructions.
+# `read` is deliberately NOT listed.
+#
+# ── THE OWNER ───────────────────────────────────────────────────────────────────────────────────
+# `owner` is permission-native (IAM-04c §3: ZERO policy rules; its reach is its bundle through a `perm_*` mirror). A flat mirror on
+# `read` or `edit` would be wrong: both are also reached by `org_unit_lead` through an attribute-dependent rule, org_unit_lead holds
+# both keys in its bundle, and a flat `perms` mirror cannot tell "holds the key through company_admin" from "holds it through a lead grant
+# over ONE unit" (iam-04-reg1-mirror-reach-invariant; the same reason dept_notice's `post` has no mirror, and the reason a
+# permission-native owner cannot post a notice without also being company_admin). The estate's answer for a company tier that a
+# lead-reachable action cannot carry is IAM-14c's: the KEY SPLIT, a distinct action held only by the company tier. `manage` is that
+# action: company_admin holds it by role rule, the owner by the mirror, nobody else holds the key, so the mirror grants exactly what the
+# role arm does. The lead keeps `read` and `edit` on its own subtree through its own rules and has NO mirror to widen it.
+#
+# ── THE PERMISSION ARM COVERS `manage` ONLY ─────────────────────────────────────────────────────
+# `read` and `edit` are reachable by `org_unit_lead` through an attribute-dependent rule: no mirror (permission-arm-hazard-scan, the
+# iam-04-reg1 mirror-reach invariant: the lead holds both keys in its bundle). `manage` is reached only through the scope-only
+# company_admin rule, so its mirror grants no more than the role arm.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: dept_assistant_preamble
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # company_admin reads and edits every unit's preamble, and holds the company-tier action by role rule.
+    - actions: ["read", "edit", "manage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Department head of the unit or an enclosing one — OWN rule per action, never mixed (HIER-2 §1.4). The unit's subtree only:
+    # an unfed `unitAncestors` contains nothing, so an unfed resource denies.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["edit"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════ automation and bot principals never edit ══════════════
+    # Same `roles: ["user"]` DENY shape as resource_dept_notice.yaml, so it beats the platform_admin wildcard and every ALLOW (the
+    # perm mirror too) under deny-overrides. `read` is deliberately NOT listed.
+    - actions: ["edit", "manage"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # =========== permission-matching arm: manage ONLY (see the header) =====================================
+    # Generic global-or-company mirror. The platform_admin wildcard is deliberately NOT mirrored (IAM-04c: the tier bypass never
+    # enters the permission catalog).
+    - actions: ["manage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_dept_assistant_preamble_manage"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

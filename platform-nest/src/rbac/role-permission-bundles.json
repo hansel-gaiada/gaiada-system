@@ -15,14 +15,14 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 30,
-      "totalPairs": 2181,
+      "totalPairs": 2192,
       "perRole": {
-        "platform_admin": 484,
-        "company_admin": 433,
+        "platform_admin": 487,
+        "company_admin": 436,
         "manager": 222,
         "member": 126,
         "viewer": 41,
-        "org_unit_lead": 25,
+        "org_unit_lead": 27,
         "client": 10,
         "it_admin": 8,
         "it_manager": 8,
@@ -46,7 +46,7 @@
         "lms_manager": 11,
         "social_copywriter": 3,
         "social_designer": 3,
-        "owner": 439
+        "owner": 442
       },
       "selfScopedPairs": 58
     }
@@ -141,6 +141,9 @@
       "core.deliverable.delete",
       "core.deliverable.read",
       "core.deliverable.update",
+      "core.dept_assistant_preamble.edit",
+      "core.dept_assistant_preamble.manage",
+      "core.dept_assistant_preamble.read",
       "core.dept_notice.edit",
       "core.dept_notice.post",
       "core.dept_notice.read",
@@ -625,6 +628,9 @@
       "core.deliverable.delete",
       "core.deliverable.read",
       "core.deliverable.update",
+      "core.dept_assistant_preamble.edit",
+      "core.dept_assistant_preamble.manage",
+      "core.dept_assistant_preamble.read",
       "core.dept_notice.edit",
       "core.dept_notice.post",
       "core.dept_notice.read",
@@ -1371,6 +1377,8 @@
     "org_unit_lead": [
       "agency.campaign_part.update",
       "core.creative_asset.decide_review",
+      "core.dept_assistant_preamble.edit",
+      "core.dept_assistant_preamble.read",
       "core.dept_notice.edit",
       "core.dept_notice.post",
       "core.dept_notice.withdraw",
@@ -1940,6 +1948,9 @@
       "core.deliverable.delete",
       "core.deliverable.read",
       "core.deliverable.update",
+      "core.dept_assistant_preamble.edit",
+      "core.dept_assistant_preamble.manage",
+      "core.dept_assistant_preamble.read",
       "core.dept_notice.edit",
       "core.dept_notice.post",
       "core.dept_notice.read",

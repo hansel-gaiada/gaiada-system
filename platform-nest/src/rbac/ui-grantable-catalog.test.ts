@@ -116,8 +116,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // M5-W1q (2026-10-27): +1 grantable / +1 total on the existing webdesk_media_asset kind (`review`; uiGrantable TRUE). 497 -> 498 / 482 -> 483.
     // AIP-08b (2026-10-28, AIP-D5): +1 grantable / +1 total on the NEW assistant_brain kind (`choose_provider`; uiGrantable TRUE: a role edit grants it). 498 -> 499 / 483 -> 484.
     // AIP-D5 holders (2026-10-29, §55.1): `assistant.brain.choose_provider` flips uiGrantable TRUE -> FALSE (superadmin and owner only). No count change.
-    expect(permissions.length).toBe(499);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(484);
+    // AIP-13b (2026-10-29, AIP-D10): +3 grantable / +3 total on the NEW core dept_assistant_preamble kind (`read`, `edit`, `manage`; all uiGrantable TRUE). 499 -> 502 / 484 -> 487.
+    expect(permissions.length).toBe(502);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(487);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

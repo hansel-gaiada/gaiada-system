@@ -3246,3 +3246,76 @@ Owner ruling **AIP-D16** (`docs/plans/2026-10-27-ai-plan.md` §9), verbatim: **"
 
 **Counts:** catalog unchanged (113 kinds, 499 pairs, 484 grantable, 15 relationship, 218 sensitive; 175 groups); 33 keys
 `uiGrantable: false`; bundles 2181 pairs (`platform_admin` 484, `company_admin` 433, `owner` 439).
+
+## 56. AIP-13b — the `dept_assistant_preamble` kind: who edits a department's assistant preamble (2026-10-29, BUILT, PROTOTYPED)
+
+Owner ruling **AIP-D10**: "each department head edits their own department's assistant preamble"; plan `docs/plans/2026-10-27-ai-plan.md`
+§6.2 item 7. BFF rows: `docs/FRONTEND-BFF-CONTRACT.md` §65. Status: **BUILT, PROTOTYPED.** The policy, the derived role, catalog, group,
+bundles, migrations `202610291500_assistant_dept_preambles.sql` (the table) and `202610291510_iam_dept_assistant_preamble_permissions.sql`
+(the seed), the routes and the static and unit suites are in the repo. The live Cerbos matrix (`cerbos-dept-assistant-preamble.test.ts`), the
+HTTP suite (`dept-assistant-preamble.test.ts`) and the migration suite (`assistant-dept-preambles-migration.db.test.ts`) run on the Linux CI
+gate and skip without Postgres and Cerbos. **Restart Cerbos at the deploy** (a new policy file is not hot-reloaded) and probe it: a head of
+`d-web` `edit` allowed on `d-web`'s preamble and refused on a sibling's; the owner `manage` allowed.
+
+**A new core kind, `dept_assistant_preamble` (no module), with three actions.** One resource is one unit's preamble: `tenantId` is the route's
+`:tenantId` and `unitAncestors` is `loadUnitAncestors(c, tenantId, unitNodeId)` of the route's `:unitNodeId`, computed WITH the tenant. No new
+resource attribute, so no `resourcePayload()` change (`unitAncestors` is already in the allow-list; `cerbos.ts` gets a comment only). Keys
+`core.dept_assistant_preamble.{read,edit,manage}`, the `dept_notice` naming.
+
+| Action | Reach | What it is |
+|---|---|---|
+| `read` | `company_admin`; **its own rule** for `org_unit_lead` (the grant's scopeId in `unitAncestors`). `inTenant && notLow` | see a unit's preamble (own text, default, preview) |
+| `edit` | as `read` | write or reset a unit's preamble |
+| `manage` | `company_admin`; the permission arm (`perm_dept_assistant_preamble_manage`, `inTenant && notLow && inRoot`) | **the company tier**: read and edit ANY unit's preamble |
+
+Nobody else holds anything: `manager`, `member`, `viewer`, the HR tier, `client` and the module tiers are named by no rule. A member needs no
+screen: the assistant applies the text on the server at turn time (`resolvePreamble`) and makes no Cerbos call for it (plan §3.3: a department
+is a label that narrows, never an authority that widens).
+
+**Authoring rules:**
+- Each attribute-dependent rule stands alone (HIER-2): the `org_unit_lead` rules for `read` and `edit` are separate rules, never mixed with a scope role.
+- **`EFFECT_DENY` on `edit` and `manage`** for `principal.attr.kind in ["automation","bot"]`, shaped like `resource_dept_notice.yaml`'s (`roles: ["user"]`, `has()`-guarded). `read` stays allowed. An agent never rewrites its own instructions.
+- **`platform_admin`** keeps the house wildcard.
+- The tenant trap: every rule keeps `variables.inTenant`; an `org_unit` grant carries no tenant and node ids repeat across companies.
+
+**The owner, and why there is a third action.** The ruling is that the company admin AND the owner edit every unit's preamble. `owner` is
+permission-native (IAM-04c §3: zero role rules), so it reaches a kind only through a `perm_*` mirror. A mirror on `read` or `edit` would let a
+department head reach every unit: both are also reached by the `org_unit_lead` rules, the head holds both keys in its bundle, and a flat
+`perms` mirror cannot tell "holds the key through company_admin" from "holds it through a lead grant over ONE unit"
+(`iam-04-reg1-mirror-reach-invariant`, the reason `dept_notice`'s `post` has no mirror and a permission-native owner cannot post a notice
+without also holding `company_admin`). The estate's existing answer for a company tier a lead-reachable action cannot carry is
+**IAM-14c's key split** (`integration_connection.manage`): a distinct action, `manage`, held only by the company tier, so its mirror grants
+exactly the role arm's reach. The head holds no `manage` key and no mirror to widen it. **Handler:** both routes ask `manage` first (a bare
+`check`, no audit row) and, when it is not allowed, the per-unit `read` (GET) or `edit` (PUT) through `authorize()`, so a denial, its audit row
+and the delegation intersection are the house ones. A bot or automation owner is denied `manage` and falls through to the per-unit action.
+This is not a new pattern.
+
+**The permission arm covers `manage` ONLY.** No `read` or `edit` mirror (above). `permission-arm-hazard-scan` and the iam-04-reg1 invariant pass
+unchanged: every holder of the `manage` key (`company_admin`, `owner`, `platform_admin`) has a role arm at least as wide as the mirror
+(`owner` is exempt by construction, `platform_admin` by IAM-04c).
+
+**Bundles:**
+
+| Role | Holds |
+|---|---|
+| `company_admin`, `owner`, `platform_admin` | `read`, `edit`, `manage` (`owner` mirrors `company_admin`, `owner-role.db.test.ts`) |
+| `org_unit_lead` | `read`, `edit`, unit-scoped (resolved at `org_unit` scope; the mirror matches `global` and `company` scopes only) |
+| everyone else | nothing |
+
+No key is `sensitive` (a preamble is the department's description of its work, no money, no client, HR or finance data) and none is
+self-scoped. All three are `uiGrantable: true` (a custom role may carry them; `read` and `edit` have no permission arm, so a custom role that
+holds only them reaches nothing: the same as `dept_notice`'s `post`).
+
+**The six artifacts** (the §36 template): the policy (+ `perm_dept_assistant_preamble_manage` in `derived_roles.yaml`); `cerbos.ts` (a comment
+only); the catalog (+3 entries); the groups (+1 group `assistant_dept_preamble`); the migration `202610291510` with its DO-block self-assertion
+(four holders, `manage` never held by the head, `owner` ≡ `company_admin` in both directions, nothing self-scoped, 11 rows in all); the
+bundles, regenerated (the generator needed no resolver change: the kind names only `platform_admin`, `company_admin` and `org_unit_lead`, which
+`DIRECT` maps).
+
+**Counts:** 114 kinds, 502 pairs, 487 grantable, 15 relationship, 218 sensitive; 176 groups; bundles 2192 pairs (`platform_admin` 487,
+`company_admin` 436, `owner` 442, `org_unit_lead` 27).
+
+**Proof:** `cerbos-dept-assistant-preamble.test.ts` (static pin of the rules, the mirror, the bundles and the catalog; the live matrix: company_admin,
+the head of the unit, of an enclosing unit and of the root, a head of a sibling or only below, another company with the same node id, manager,
+member, viewer, HR, client, bot and automation, low assurance, an unfed resource, and the permission-native owner through `manage`);
+`dept-assistant-preamble.test.ts` (the routes); `assistant-dept-preambles-migration.db.test.ts` (the table and the seed).

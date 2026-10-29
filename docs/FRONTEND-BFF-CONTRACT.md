@@ -13472,3 +13472,73 @@ What each caller knows and sends:
 Tokens and cost are the gateway's `usage` (AIP-02): `tokens_source = provider`, and `cost_source = provider` when it carried `costUsd`. No usage is `none` (these services estimate nothing). Outcome, at every site: HTTP 429 `blocked_budget`, 503 `blocked_dlp`, any other failure (or no answer) `error`, otherwise `ok`; a failed call carries no tokens or cost. A call with no company writes no row.
 
 Known gaps: a public-tier or several-company knowledge search has no single company, so it writes no row; an n8n workflow that calls an AI tool without `tenantId` (today's pipeline workflows) writes no row until it passes one; the gateway's `/complete` still does not name the serving model, so these rows have `provider` but a NULL `model` and the price table cannot cost them (the provider's own cost still does).
+
+## 65. A department's own assistant preamble (AIP-13b, 2026-10-29; plan `docs/plans/2026-10-27-ai-plan.md` §6.2 item 7, AIP-D10) — `platform-nest/src/core/dept-assistant-preamble.{controller,service}.ts` (new), `modules/assistant/department-context.ts` (`resolvePreamble`, `previewText`); migration `202610291500_assistant_dept_preambles.sql` — **STATUS: BUILT, PROTOTYPED (server only: the pure suites `dept-assistant-preamble.service.test.ts` and `department-preamble.test.ts` ran locally; the HTTP, migration and live-Cerbos suites `dept-assistant-preamble.test.ts`, `assistant-dept-preambles-migration.db.test.ts` and `cerbos-dept-assistant-preamble.test.ts` run on the Linux CI gate). The edit screen in the head's workspace is a later lane. The authorization is PERMISSION-CONTRACT §56**
+
+The assistant adds a short preamble to a turn that was sent from a department (`ASSISTANT_DEPT_CONTEXT`, AIP-10 to AIP-13). The registry gives every workspace a default. A
+department head (or a company admin, or the owner) can replace the default with the department's own text; with no text the default stands. The text is a prompt input, so it is
+capped at 1,000 characters and shown to the head exactly as the assistant will read it.
+
+### 65.1 The answer of both routes
+
+```
+{
+  "unitNodeId": "d-seo",
+  "department": { "name": "SEO", "key": "seo" },        // from the org row, never the request; null is reserved, today a department always resolves (404 otherwise)
+  "custom": "…" | null,                                  // the head's own text; null = the department uses the default
+  "defaultText": "…" | null,                             // the registry default for the key; null for a department with none (a custom one)
+  "effective": "…" | null,                               // custom ?? defaultText: what the assistant uses
+  "updatedAt": "2026-10-29T10:00:00.000Z" | null,       // when the custom text was last written; null without custom text
+  "updatedBy": { "id": "<uuid>", "name": "…" } | null,   // the last editor; null without custom text, or after that person's erasure
+  "preview": "…" | null                                  // the department block of the prompt, EXACTLY as the assistant reads it
+}
+```
+
+`preview` is `previewText(department, effective)`: the context line (`You are helping someone in the SEO department.`, with no page clause: a preview is not on a page), a
+blank line, then `Department guidance:` and a newline and the effective text. With no effective text it is the context line alone. The same functions the prompt builder uses
+(`contextLine`, the guidance heading); `department-preamble.test.ts` pins the preview as a substring of the prompt `assembleContext` builds. The prompt also holds the page
+label when the turn carried one, which a preview does not.
+
+### 65.2 `GET /api/:tenantId/departments/:unitNodeId/assistant-preamble`
+
+200 with 65.1. The order of checks (the `dept_notice` trap, §57.3): (1) the unit's ancestry from the closure, WITH the tenant; (2) authorization: the company tier's `manage`, else the
+per-unit `read` (company_admin, the owner, a head of the unit or of an enclosing one); (3) the department itself, an ACTIVE department of this company (`resolveDepartment`).
+
+| Status | When |
+|---|---|
+| 200 | the department resolves and the caller may read it |
+| 401 | no credentials |
+| 403 | the caller holds no right on the unit: a plain member, a viewer, a manager, the HR tier, a client contact, a head of a sibling or only of a unit below, another company's people. **Before** anything says whether the unit exists: an id that is not in the org tree has no ancestry, so an unknown unit is 403 for a head |
+| 404 `department_not_found` | an authorized caller (a company admin, the owner, an enclosing head) names a unit that is not an active department of this company: unknown, a division, the root |
+
+A bot or automation principal that is a company admin may read.
+
+### 65.3 `PUT /api/:tenantId/departments/:unitNodeId/assistant-preamble`
+
+Body `{ "body": string }` and nothing else. 200 with 65.1 (the new state). Checks in order: (1) ancestry, (2) authorization: `manage`, else the per-unit `edit`, (3) the body, (4) the
+department, (5) the write in one transaction.
+
+- The text is trimmed (CRLF becomes LF, a NUL is dropped, and e-mail addresses and card or national-id numbers are scrubbed as a notice's text is, BEFORE the length is measured).
+- **1 to 1,000 characters** (code points, as the table counts them) upserts the one row of (company, unit); `updatedBy` becomes the caller.
+- **An empty or whitespace-only text deletes the row**: the department goes back to the default (`custom: null`).
+- Anything else is **400** naming the field: more than 1,000 characters, a missing or non-string `body`, an unknown key, a non-object body. A refused caller always gets 403, never a 400.
+- **403** as 65.2 for every caller who may not edit the unit, and for **bot and automation principals even as company admin or owner** (they may read, never edit).
+- **404 `department_not_found`** after the body check, as 65.2.
+- **One activity per edit**: verb `edited` (a write) or `reset` (a delete that found a row), entity type `dept_assistant_preamble`, no entity id, payload `{ unitNodeId, length }` (`length` 0 for
+  a reset). **Never the text.** A reset with nothing to delete changes nothing and files no activity.
+
+### 65.4 What reads it
+
+`resolvePreamble(tenantId, nodeId, key)` (`modules/assistant/department-context.ts`; callers unchanged): the company's row for (tenant, node) REPLACES the default; with no row, the default
+for the key; with neither, null. It reads under `withTenants([tenantId])`, and **any read failure answers the default**: a preamble is additive and never fails a turn. A whitespace-only
+row counts as no row, and a text is cut at 1,000 code points whatever the row held.
+
+### 65.5 Table `assistant_dept_preambles`
+
+`(tenant_id uuid NOT NULL → companies, unit_node_id text NOT NULL, body text NOT NULL CHECK (char_length BETWEEN 1 AND 1000), updated_by uuid → users ON DELETE SET NULL, created_at,
+updated_at, PRIMARY KEY (tenant_id, unit_node_id))`. FORCE RLS on `tenant_id = ANY(app_current_tenants())`, the `dept_notices` pattern. Erasing the last editor nulls `updated_by` and keeps the
+text. `unit_node_id` is an org-blob node id (no FK; the application validates it against the company's tree).
+
+### 65.6 Capability inventory and tools
+
+Two routes under `/api/:tenantId/departments/:unitNodeId/`, no MCP tool, no module tool, no n8n flow.

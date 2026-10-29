@@ -781,6 +781,21 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.dept_notice.read" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_dept_assistant_preamble_manage — AIP-13b (2026-10-29, docs/PERMISSION-CONTRACT.md §56, docs/FRONTEND-BFF-CONTRACT.md §65). One
+    # generic global-or-company mirror for `manage` ONLY: the company tier's own action (read and edit ANY unit's assistant preamble),
+    # added by the IAM-14c key split so the permission-native `owner` reaches the kind. NO read / edit mirror, on purpose: both are
+    # reachable by an org_unit_lead rule (attribute-dependent: the grant's one unit, via unitAncestors), org_unit_lead holds both keys in
+    # its bundle, and a flat `perms` mirror cannot tell "holds the key through company_admin" from "holds it through a lead grant over
+    # ONE unit" (permission-arm-hazard-scan Pattern B, iam-04-reg1-mirror-reach-invariant). `manage` is held by company_admin,
+    # owner and platform_admin only, so its mirror grants exactly the role arm's reach.
+    - name: perm_dept_assistant_preamble_manage
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.dept_assistant_preamble.manage" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_creative_asset_* — DW-6h (2026-10-13, docs/FRONTEND-BFF-CONTRACT.md §35.4). One generic global-or-company
     # mirror for read and request_review. NO decide_review / withdraw_review mirror, on purpose: decide_review is
     # reachable by an org_unit_lead rule (attribute-dependent) and a requester rule (self-scoped), and withdraw_review by

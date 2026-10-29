@@ -27,10 +27,11 @@
 // ── THE PREAMBLE (AIP-13, AIP-13b) ──────────────────────────────────────────────────────────────────────────────────
 // The defaults below describe each department's work and vocabulary from the workspace registry's mission line. They INVENT
 // NO RULES: a rule belongs to the department's head, who edits the text in AIP-13b (a table row that `resolvePreamble` will
-// prefer over the default). The text lives on the server, not in `workspaces.ts`, because a rule the browser sends is a rule
-// the browser can leave out.
+// prefer over the default: `resolvePreamble`, below, built in AIP-13b). The text lives on the server, not in `workspaces.ts`,
+// because a rule the browser sends is a rule the browser can leave out.
 import type { PoolClient } from "pg";
 import { config } from "../../config";
+import { withTenants } from "../../db";
 
 // ── the flag ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -228,12 +229,56 @@ export const DEFAULT_DEPT_PREAMBLES: Readonly<Record<string, string>> = {
     "topology, sign-in, threat alert, block, account request, workflow, UniFi, Google Admin, n8n, uptime.",
 };
 
-/** The preamble for a department: today the default for its registry key. This is the seam AIP-13b widens (the company's own
- *  row for that unit replaces the default); it is async and takes the tenant and node id so that change touches no caller.
- *  `null` for a department with no preamble. Never longer than `PREAMBLE_MAX_CHARS`. */
-export async function resolvePreamble(_tenantId: string, _nodeId: string, key: string): Promise<string | null> {
+/** `text` cut to at most `PREAMBLE_MAX_CHARS` CODE POINTS (what the table's `char_length` CHECK counts), never mid-surrogate. */
+export function capPreamble(text: string): string {
+  const cps = Array.from(text);
+  return cps.length <= PREAMBLE_MAX_CHARS ? text : cps.slice(0, PREAMBLE_MAX_CHARS).join("");
+}
+
+/** The registry default for a workspace key, or `null` (a department with no entry, a key that is not an own property). */
+export function defaultPreamble(key: string): string | null {
   const text = Object.prototype.hasOwnProperty.call(DEFAULT_DEPT_PREAMBLES, key) ? DEFAULT_DEPT_PREAMBLES[key] : undefined;
-  return text ? text.slice(0, PREAMBLE_MAX_CHARS) : null;
+  return text ? capPreamble(text) : null;
+}
+
+/** A head's own text for (company, unit), or `null` when there is none. `c` must already be a `withTenants([tenantId])` client; the
+ *  query still names `tenant_id`, so another company's node id (ids repeat across companies) matches nothing. Whitespace only is none. */
+export async function loadCustomPreamble(c: PoolClient, tenantId: string, nodeId: string): Promise<string | null> {
+  const { rows } = await c.query<{ body: string }>(
+    `SELECT body FROM assistant_dept_preambles WHERE tenant_id = $1 AND unit_node_id = $2`,
+    [tenantId, nodeId],
+  );
+  const body = rows[0]?.body;
+  return typeof body === "string" && body.trim() ? capPreamble(body) : null;
+}
+
+/** The preamble for a department (AIP-13b): the company's own row for that unit REPLACES the default; with no row, the default for
+ *  its registry key; `null` for a department with neither. ANY read failure (no database, the table missing, a timeout) answers the
+ *  default, never an error: a preamble is additive and must never fail a turn. Read under `withTenants([tenantId])`. Never longer
+ *  than `PREAMBLE_MAX_CHARS`. */
+export async function resolvePreamble(tenantId: string, nodeId: string, key: string): Promise<string | null> {
+  try {
+    const custom = await withTenants([tenantId], (c) => loadCustomPreamble(c, tenantId, nodeId));
+    if (custom) return custom;
+  } catch {
+    /* fall through to the default */
+  }
+  return defaultPreamble(key);
+}
+
+/** The heading the prompt puts above a department's preamble. context.ts writes the same words inline; `previewText` uses this one, and
+ *  dept-assistant-preamble.test.ts pins the two together against the assembled prompt. */
+export const GUIDANCE_HEADING = "Department guidance:";
+
+/** The department block of the prompt exactly as the assistant reads it: the context line (no page: a preview is not on a page), a
+ *  blank line, then the guidance section when there is a preamble. `null` when there is nothing at all. The sections are joined by a
+ *  blank line as in `assembleContext`. */
+export function previewText(department: Pick<TurnDepartment, "name"> | null, preamble: string | null): string | null {
+  const sections: string[] = [];
+  const line = contextLine(department, null);
+  if (line) sections.push(line);
+  if (preamble) sections.push(`${GUIDANCE_HEADING}\n${preamble}`);
+  return sections.length ? sections.join("\n\n") : null;
 }
 
 // ── the sentence ──────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -162,9 +162,14 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     // DW-10a (2026-10-16) added `core.dept_notice.{post,edit,withdraw}`: a department head posts, edits and withdraws their own
     // unit's notices (FRONTEND-BFF-CONTRACT §57.3, PERMISSION-CONTRACT §47). Unit-bounded like the rest; `read` is held through the
     // member grant at company scope, and a company-wide notice stays company_admin's.
+    //
+    // AIP-13b (2026-10-29) added `core.dept_assistant_preamble.{read,edit}`: a department head reads and edits their own unit's assistant
+    // preamble (PERMISSION-CONTRACT §56). Unit-bounded like the rest; `manage` (the company tier's, how the owner reaches every unit) is
+    // not in this bundle.
     expect(keys).toEqual([
       "agency.campaign_part.update",
       "core.creative_asset.decide_review",
+      "core.dept_assistant_preamble.edit", "core.dept_assistant_preamble.read",
       "core.dept_notice.edit", "core.dept_notice.post", "core.dept_notice.withdraw",
       "core.position.assign", "core.position.read", "core.position.unassign",
       "core.role_grant.create", "core.role_grant.read", "core.role_grant.revoke",
@@ -196,6 +201,7 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     expect(keys).not.toContain("reports.dept_kpi_target.reject");
     expect(keys).not.toContain("reports.dept_kpi_target.appraisal_assess");
     expect(keys).not.toContain("core.dept_notice.read");
+    expect(keys).not.toContain("core.dept_assistant_preamble.manage");
   });
 
   it("ACCEPTANCE: a legitimate client@company grant is completely unaffected", async () => {

@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 175,
-      "grantablePermissionsInCatalog": 484,
-      "permissionsCoveredByGroups": 445,
+      "groups": 176,
+      "grantablePermissionsInCatalog": 487,
+      "permissionsCoveredByGroups": 448,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 117
@@ -2040,6 +2040,18 @@
       "description": "Pick a named AI provider (openai, claude, hermes and so on) for your own assistant threads, instead of only Auto, Fast or Strong. AIP-08b (owner ruling AIP-D5): a cost lever, not data access. Only the superadmin (platform_admin) and owner hold it (AIP-D5 holders, 2026-10-29); it is not UI-grantable, so no role edit or position hands it to anyone else. It never opens another person's thread.",
       "permissions": [
         "assistant.brain.choose_provider"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "assistant_dept_preamble",
+      "name": "Assistant: department preamble",
+      "domain": "core",
+      "description": "A department's assistant preamble: the short text the assistant adds to a turn sent from that department (AIP-13b, owner ruling AIP-D10). A department head reads and edits their own unit's preamble through their lead rules (company admins any unit's); the manage permission is the company tier's own action, how the owner reaches every unit. Members need nothing: the assistant applies the text on the server. Agents and automation never edit it.",
+      "permissions": [
+        "core.dept_assistant_preamble.read",
+        "core.dept_assistant_preamble.edit",
+        "core.dept_assistant_preamble.manage"
       ],
       "sensitive": false
     }
