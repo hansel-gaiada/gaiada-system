@@ -143,7 +143,9 @@ describe("SCP-Sc · the post page", () => {
     fireEvent.click(bar().getByRole("button", { name: /Publish now \(simulated\)/ }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(SIMULATED_PUBLISH_WORDS.simulation_disabled);
-    expect(bar().getByRole("button", { name: /Publish now \(simulated\)/ })).toBeEnabled();
+    // The alert can commit while the press's transition is still pending (the button is `disabled={pending}`), so wait for the transition to end:
+    // asserting at once failed under CI load on the SCP-6a train (2026-10-29).
+    await waitFor(() => expect(bar().getByRole("button", { name: /Publish now \(simulated\)/ })).toBeEnabled());
   });
 
   it("a failed publish says so: the post stays scheduled, each failed network is named with the server's recorded reason, and who can act", () => {
