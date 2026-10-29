@@ -131,6 +131,9 @@ export interface ReportDocument {
   tables: ReportTable[];
   highlights: ReportHighlight[];
   narrative: ReportNarrative;
+  // SCP-5a (BFF §63.18): the numbers include simulated rows (a social monthly report built while the simulator was on), so the
+  // page and the PDF draw the SIMULATED watermark. Absent means not simulated; no other builder sets it.
+  simulated?: boolean;
 }
 
 // =====================================================================

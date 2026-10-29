@@ -58,8 +58,15 @@ import { queryBrandKnowledge } from "./knowledge-client";
 import { buildReportNarrativePrompt, parseReportNarrativeDraft, type ReportNarrativeGroundingFacts } from "./ai-drafts";
 import {
   periodDateRange, buildSocialReportSnapshot, buildSocialReportDocument,
-  type ReportKind, type FrozenSocialReportMetrics, type DailyMetricInput, type PostMetricInput, type KpiTargetInput,
+  type ReportKind, type FrozenSocialReportMetrics,
 } from "./reports";
+import { readReportInputs } from "./report-data";
+import {
+  buildMonthlyReportDraftPrompt, notesComplete, parseMonthlyReportDraft, readStoredActionPlan, readStoredNotes, validateActionPlan, validateNotes,
+  type ReportAction, type ReportNotes,
+} from "./report-notes";
+import { isSocialSimulationEnabled } from "./publisher/simulation";
+import { check } from "../../rbac/cerbos";
 import { PdfRendererNotConfiguredError, mintPrintJobToken, renderPdfViaSidecar } from "../reports/report-pdf-export";
 // SCP-1b / SCP-5a (PERMISSION-CONTRACT §53.7, BFF §63.18): every social_report call site sends `module: "social"` and the
 // company's seat approvers (`approverIds`), because `approve` and `deliver` belong to the four social approvers only.
@@ -81,8 +88,42 @@ function assertUuid(value: string, label: string): void {
 function refuse(reason: string): never {
   throw new BadRequestException({ message: reason });
 }
+/** SCP-5a (BFF §63.0): a 400 that names the bad input. */
+function invalidField(field: string): never {
+  throw new BadRequestException({ message: "invalid_field", field });
+}
 
 const REPORT_KINDS = new Set<ReportKind>(["monthly", "campaign", "adhoc"]);
+const PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+const REPORT_STATUSES = new Set(["draft", "in_review", "approved", "delivered"]);
+
+/** SCP-5a (§63.18): the HoD check's notes rule binds the MONTHLY report only; a campaign or ad hoc report has no notes to complete,
+ *  so its check passes this rule (and `notesComplete` reads true for it, so the list's flag means "the check may pass"). */
+function checkNotesComplete(kind: string, notes: unknown): boolean {
+  return kind !== "monthly" || notesComplete(notes);
+}
+
+/** The snapshot's numbers, as the ONLY numbers a drafted narrative or insight may state (ai-drafts.ts's numeric guard). The
+ *  client's own ad spend (SCP-5a) is among them, in major units of its currency. */
+function groundingFactsOf(
+  frozen: FrozenSocialReportMetrics, names: { engagementName: string; clientName: string },
+  knowledgeHits: Array<{ sourceRef: string; text: string }>,
+): ReportNarrativeGroundingFacts {
+  const spend = (frozen.adSpend ?? []).flatMap((s) => [
+    { label: `Paid boosts (${s.currency})`, value: s.boosts, unit: "count" },
+    ...(s.spendMinor === null ? [] : [{ label: `Client's own ad spend (${s.currency})`, value: s.spendMinor / 10 ** s.minorUnit, unit: s.currency }]),
+  ]);
+  return {
+    engagementName: names.engagementName, clientName: names.clientName,
+    periodLabel: `${frozen.rangeStart} – ${frozen.rangeEnd}`,
+    kpis: [...frozen.kpis.map((k) => ({ label: k.label, value: k.value, unit: k.unit })), ...spend],
+    topPosts: (frozen.tables.find((t) => t.key === "top_posts")?.rows ?? []).map((r) => ({
+      network: String(r.network ?? ""), publishedAt: r.publishedAt === null ? null : String(r.publishedAt),
+      impressions: typeof r.impressions === "number" ? r.impressions : null,
+    })),
+    knowledgeHits: knowledgeHits.map((h) => ({ sourceRef: h.sourceRef, text: h.text })),
+  };
+}
 
 interface ReportRow {
   id: string;
@@ -100,6 +141,11 @@ interface ReportRow {
   metrics: FrozenSocialReportMetrics;
   narrativeMd: string;
   createdAt: string;
+  /** SCP-5a: the notes and the action plan as stored (read leniently), and the SIMULATED mark. */
+  notes: ReportNotes;
+  rawNotes: unknown;
+  actionPlan: ReportAction[];
+  simulated: boolean;
 }
 
 /** SCP-1b: the company's Social Media and GM lead-seat holders, read in the company's own scope (pipeline-authz.ts). */
@@ -112,10 +158,11 @@ async function loadReport(c: PoolClient, id: string): Promise<ReportRow | null> 
     id: string; tenant_id: string; engagement_id: string; client_id: string; client_name: string; client_is_internal: boolean;
     engagement_name: string; project_id: string | null; period: string | null; kind: string;
     status: string; metrics: FrozenSocialReportMetrics; narrative_md: string | null; created_at: string;
+    notes: unknown; action_plan: unknown; simulated: boolean;
   }>(
     `SELECT sr.id, sr.tenant_id, sr.engagement_id, se.client_id, cl.name AS client_name, cl.is_internal AS client_is_internal,
             se.name AS engagement_name, se.project_id, sr.period, sr.kind, sr.status,
-            sr.metrics, sr.narrative_md, sr.created_at
+            sr.metrics, sr.narrative_md, sr.created_at, sr.notes, sr.action_plan, sr.simulated
        FROM social_reports sr
        JOIN social_engagements se ON se.id = sr.engagement_id AND se.tenant_id = sr.tenant_id
        JOIN clients cl ON cl.id = se.client_id
@@ -130,6 +177,34 @@ async function loadReport(c: PoolClient, id: string): Promise<ReportRow | null> 
     period: row.period, kind: row.kind as ReportKind, status: row.status,
     metrics: row.metrics ?? { rangeStart: "", rangeEnd: "", kpis: [], series: [], tables: [], highlights: [] },
     narrativeMd: row.narrative_md ?? "", createdAt: row.created_at,
+    notes: readStoredNotes(row.notes), rawNotes: row.notes, actionPlan: readStoredActionPlan(row.action_plan), simulated: row.simulated === true,
+  };
+}
+
+/** The document a report renders (the page and the PDF): the frozen numbers, the narrative, the notes and the action plan as
+ *  tables, and the SIMULATED mark. */
+function documentOf(tenantId: string, report: ReportRow, frozenStatus = report.status) {
+  return buildSocialReportDocument({
+    tenantId, engagementId: report.engagementId, clientName: report.clientName, kind: report.kind,
+    period: report.period, status: frozenStatus, frozen: report.metrics, narrativeText: report.narrativeMd,
+    generatedAt: new Date().toISOString(), notes: report.notes, actionPlan: report.actionPlan, simulated: report.simulated,
+  });
+}
+
+/** SCP-5a (§63.18): one monthly report per engagement and period. The newest undeleted one, or null. */
+async function loadMonthlyFor(c: PoolClient, engagementId: string, period: string): Promise<ReportRow | null> {
+  const r = await c.query<{ id: string }>(
+    `SELECT id FROM social_reports WHERE engagement_id = $1 AND kind = 'monthly' AND period = $2 AND deleted_at IS NULL
+      ORDER BY created_at DESC, id LIMIT 1`,
+    [engagementId, period],
+  );
+  return r.rows[0] ? loadReport(c, r.rows[0].id) : null;
+}
+
+function existingAnswer(r: ReportRow) {
+  return {
+    id: r.id, status: r.status, metrics: r.metrics, narrativeMd: r.narrativeMd, notes: r.notes, actionPlan: r.actionPlan,
+    simulated: r.simulated, draftedVia: "existing" as const,
   };
 }
 
@@ -162,9 +237,7 @@ export class SocialReportsController {
     // EXISTING frozen row untouched — never a re-snapshot, and never a second gateway call spent on
     // a retry (mirrors createEngagement/createPost's own idempotency shape).
     const existing = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
-    if (existing && existing.engagementId === engagementId) {
-      return { id: existing.id, status: existing.status, metrics: existing.metrics, narrativeMd: existing.narrativeMd, draftedVia: "existing" as const };
-    }
+    if (existing && existing.engagementId === engagementId) return existingAnswer(existing);
 
     const eng = await withTenants(
       [tenantId],
@@ -181,71 +254,27 @@ export class SocialReportsController {
     // M5-G0b (WSK-D36): no client-facing report is generated for the internal sentinel client.
     if (engRow.is_internal) refuse("internal_client_no_reports");
 
+    // SCP-5a (§63.18): one monthly report per engagement and month. An existing one for the period is returned as it is
+    // (`draftedVia: 'existing'`), before any gateway call is spent; the insert below re-checks under a lock.
+    const monthlyPeriod = kind === "monthly" && period !== null ? period : null;
+    if (monthlyPeriod) {
+      const prior = await withTenants([tenantId], (c) => loadMonthlyFor(c, engagementId, monthlyPeriod), { modules: ["social"] });
+      if (prior) return existingAnswer(prior);
+    }
+
     const { start, end } = periodDateRange(period, new Date());
 
-    const snapshotInput = await withTenants(
+    // SCP-5a: the snapshot counts manual and simulated metric rows and the period's boosts (the client's own ad spend), and
+    // simulated rows only while the simulator switch is on, as GET overview counts them (report-data.ts's header).
+    const inputs = await withTenants(
       [tenantId],
-      async (c) => {
-        const dailyRes = await c.query<{
-          account_id: string; network: string; date: string; followers: number | null;
-          impressions: number | null; reach: number | null; engagements: number | null;
-          link_clicks: number | null; video_views: number | null;
-        }>(
-          `SELECT m.account_id, a.network, m.date::text AS date, m.followers, m.impressions,
-                  m.reach, m.engagements, m.link_clicks, m.video_views
-             FROM social_metrics_daily m
-             JOIN social_accounts a ON a.id = m.account_id AND a.tenant_id = m.tenant_id
-            WHERE a.client_id = $1 AND m.date >= $2::date AND m.date <= $3::date AND a.deleted_at IS NULL
-            ORDER BY m.account_id, m.date`,
-          [engRow.client_id, start, end],
-        );
-        const daily: DailyMetricInput[] = dailyRes.rows.map((r) => ({
-          accountId: r.account_id, network: r.network, date: r.date,
-          followers: r.followers, impressions: r.impressions, reach: r.reach,
-          engagements: r.engagements, linkClicks: r.link_clicks, videoViews: r.video_views,
-        }));
-
-        const publishedRes = await c.query<{
-          variant_id: string; network: string; published_at: string | null;
-          impressions: number | null; likes: number | null; comments: number | null;
-          shares: number | null; saves: number | null; video_views: number | null; clicks: number | null;
-        }>(
-          `SELECT DISTINCT ON (v.id)
-                  v.id AS variant_id, a.network, v.published_at::text AS published_at,
-                  pm.impressions, pm.likes, pm.comments, pm.shares, pm.saves, pm.video_views, pm.clicks
-             FROM social_post_variants v
-             JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
-             JOIN social_accounts a ON a.id = v.account_id AND a.tenant_id = v.tenant_id
-             LEFT JOIN LATERAL (
-               SELECT * FROM social_post_metrics pm2
-                WHERE pm2.variant_id = v.id ORDER BY pm2.fetched_at DESC LIMIT 1
-             ) pm ON true
-            WHERE p.engagement_id = $1 AND v.status = 'published' AND v.deleted_at IS NULL
-              AND v.published_at >= $2::date AND v.published_at < ($3::date + interval '1 day')`,
-          [engagementId, start, end],
-        );
-        const posts: PostMetricInput[] = publishedRes.rows.map((r) => ({
-          variantId: r.variant_id, network: r.network, publishedAt: r.published_at,
-          impressions: r.impressions, likes: r.likes, comments: r.comments, shares: r.shares,
-          saves: r.saves, videoViews: r.video_views, clicks: r.clicks,
-        }));
-
-        const kpiTargetsRes = await c.query<{ metric_key: string; target_value: string; direction: string; due_period: string | null }>(
-          `SELECT metric_key, target_value, direction, due_period
-             FROM social_kpi_targets WHERE engagement_id = $1 AND deleted_at IS NULL`,
-          [engagementId],
-        );
-        const kpiTargets: KpiTargetInput[] = kpiTargetsRes.rows.map((r) => ({
-          metricKey: r.metric_key, targetValue: Number(r.target_value),
-          direction: r.direction as "up" | "down", duePeriod: r.due_period,
-        }));
-
-        return { daily, posts, postsPublishedInPeriod: posts.length, kpiTargets };
-      },
+      (c) => readReportInputs(c, { tenantId, engagementId, clientId: engRow.client_id, start, end, includeSimulated: isSocialSimulationEnabled() }),
       { modules: ["social"] },
     );
-
-    const frozen = buildSocialReportSnapshot({ rangeStart: start, rangeEnd: end, ...snapshotInput });
+    const frozen = buildSocialReportSnapshot({
+      rangeStart: start, rangeEnd: end, daily: inputs.daily, posts: inputs.posts, postsPublishedInPeriod: inputs.posts.length,
+      kpiTargets: inputs.kpiTargets, boosts: inputs.boosts,
+    });
 
     // ── AI narrative, grounded in THIS client's own brand corpus (SMM-19's path — never a second
     //    route to the gateway). `clientId` comes from the engagement row this handler already
@@ -255,39 +284,59 @@ export class SocialReportsController {
       req.principal.userId, tenantId, engRow.client_id,
       `${engRow.name} performance report ${period ?? ""}`.trim(), REPORT_KNOWLEDGE_HITS,
     );
-    const narrativeFacts: ReportNarrativeGroundingFacts = {
-      engagementName: engRow.name, clientName: engRow.client_name,
-      periodLabel: `${start} – ${end}`,
-      kpis: frozen.kpis.map((k) => ({ label: k.label, value: k.value, unit: k.unit })),
-      topPosts: (frozen.tables.find((t) => t.key === "top_posts")?.rows ?? []).map((r) => ({
-        network: String(r.network ?? ""), publishedAt: r.publishedAt === null ? null : String(r.publishedAt),
-        impressions: typeof r.impressions === "number" ? r.impressions : null,
-      })),
-      knowledgeHits: knowledgeHits.map((h) => ({ sourceRef: h.sourceRef, text: h.text })),
-    };
-    const prompt = buildReportNarrativePrompt(narrativeFacts);
+    const narrativeFacts = groundingFactsOf(frozen, { engagementName: engRow.name, clientName: engRow.client_name }, knowledgeHits);
+    // SCP-5a: a monthly report also drafts its notes and action plan, in the same one gateway call (report-notes.ts).
+    const prompt = kind === "monthly" ? buildMonthlyReportDraftPrompt(narrativeFacts) : buildReportNarrativePrompt(narrativeFacts);
     let raw: string | null = null;
     try {
       raw = (await completeViaGateway(prompt, { attribution: aiAttribution(req.principal, tenantId, "other", { task: "social.report_narrative" }) })).text;
     } catch {
       raw = null; // fail-soft: a gateway hiccup drafts the deterministic fallback, never blocks report creation
     }
-    const { text: narrativeText, draftedVia, rejectedNumbers } = parseReportNarrativeDraft(raw, narrativeFacts);
+    let narrativeText: string;
+    let draftedVia: "ai" | "fallback";
+    let rejectedNumbers: string[] | undefined;
+    let notes: ReportNotes = {};
+    let actionPlan: ReportAction[] = [];
+    if (kind === "monthly") {
+      const draft = parseMonthlyReportDraft(raw, narrativeFacts);
+      narrativeText = draft.narrativeMd;
+      draftedVia = draft.draftedVia === "ai" ? "ai" : "fallback";
+      rejectedNumbers = draft.rejected?.numbers;
+      notes = draft.notes;
+      actionPlan = draft.actionPlan;
+    } else {
+      const parsed = parseReportNarrativeDraft(raw, narrativeFacts);
+      narrativeText = parsed.text;
+      draftedVia = parsed.draftedVia;
+      rejectedNumbers = parsed.rejectedNumbers;
+    }
     // Frozen alongside the numbers (reports.ts's own header on `narrativeSource`) so a later read
     // never claims an AI narrative that a gateway hiccup actually fell back from.
     frozen.narrativeSource = draftedVia === "ai" ? "ai" : "deterministic";
 
-    await withTenants(
+    const raced = await withTenants(
       [tenantId],
-      (c) => c.query(
-        `INSERT INTO social_reports (id, tenant_id, engagement_id, period, kind, status, metrics, narrative_md, origin_site)
-         VALUES ($1,$2,$3,$4,$5,'draft',$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-        [id, tenantId, engagementId, period, kind, JSON.stringify(frozen), narrativeText, config.originSite],
-      ),
+      async (c) => {
+        if (monthlyPeriod) {
+          // Two creates for the same month at once: the second waits here, then finds the first and returns it.
+          await c.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`social_report:${engagementId}:monthly:${monthlyPeriod}`]);
+          const prior = await loadMonthlyFor(c, engagementId, monthlyPeriod);
+          if (prior) return prior;
+        }
+        await c.query(
+          `INSERT INTO social_reports (id, tenant_id, engagement_id, period, kind, status, metrics, narrative_md, notes, action_plan, simulated, origin_site)
+           VALUES ($1,$2,$3,$4,$5,'draft',$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
+          [id, tenantId, engagementId, period, kind, JSON.stringify(frozen), narrativeText, JSON.stringify(notes), JSON.stringify(actionPlan),
+            inputs.simulated, config.originSite],
+        );
+        return null;
+      },
       { modules: ["social"] },
     );
+    if (raced) return existingAnswer(raced);
     await writeActivity(tenantId, req.principal.userId, "created", "social_report", id, {
-      engagementId, kind, period, draftedVia, groundedOn: knowledgeHits.map((h) => h.sourceRef),
+      engagementId, kind, period, draftedVia, groundedOn: knowledgeHits.map((h) => h.sourceRef), simulated: inputs.simulated,
       // Recorded so a REJECTED narrative is distinguishable from a gateway hiccup: both land as
       // draftedVia:'fallback', but only one means the model stated a number nothing grounded.
       // Absent (not `[]`) when nothing was rejected — an empty array would read as "checked and
@@ -295,25 +344,37 @@ export class SocialReportsController {
       // the absent-vs-zero conflation this module refuses.
       ...(rejectedNumbers && rejectedNumbers.length > 0 ? { narrativeRejectedNumbers: rejectedNumbers } : {}),
     });
-    return { id, status: "draft", metrics: frozen, narrativeMd: narrativeText, draftedVia, groundedOn: knowledgeHits.map((h) => h.sourceRef) };
+    return {
+      id, status: "draft", metrics: frozen, narrativeMd: narrativeText, notes, actionPlan, simulated: inputs.simulated, draftedVia,
+      groundedOn: knowledgeHits.map((h) => h.sourceRef),
+    };
   }
 
   // ==================================================================== LIST / DETAIL ============
+  // SCP-5a (§63.18): each row gains `notesComplete` (the HoD check's notes rule would pass) and `simulated`; `period` filters.
   @Get("reports")
   async listReports(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
-    @Query("engagementId") engagementId?: string, @Query("status") status?: string,
+    @Query("engagementId") engagementId?: string, @Query("status") status?: string, @Query("period") period?: string,
   ) {
     await authorize(req.principal, socialReportResource(tenantId, "", await approverIdsOf(tenantId)), "read");
+    if (engagementId !== undefined && (typeof engagementId !== "string" || !UUID_RE.test(engagementId))) invalidField("engagementId");
+    if (status !== undefined && (typeof status !== "string" || !REPORT_STATUSES.has(status))) invalidField("status");
+    if (period !== undefined && (typeof period !== "string" || !PERIOD_RE.test(period))) invalidField("period");
     const params: unknown[] = [];
     const where: string[] = ["sr.deleted_at IS NULL"];
     if (engagementId) { params.push(engagementId); where.push(`sr.engagement_id = $${params.length}`); }
     if (status) { params.push(status); where.push(`sr.status = $${params.length}`); }
+    if (period) { params.push(period); where.push(`sr.period = $${params.length}`); }
     const { rows } = await withTenants(
       [tenantId],
-      (c) => c.query(
+      (c) => c.query<{
+        id: string; engagementId: string; clientName: string; period: string | null; kind: string; status: string;
+        createdAt: string; approvedAt: string | null; deliveredAt: string | null; notes: unknown; simulated: boolean;
+      }>(
         `SELECT sr.id, sr.engagement_id AS "engagementId", cl.name AS "clientName", sr.period, sr.kind,
-                sr.status, sr.created_at AS "createdAt", sr.approved_at AS "approvedAt", sr.delivered_at AS "deliveredAt"
+                sr.status, sr.created_at AS "createdAt", sr.approved_at AS "approvedAt", sr.delivered_at AS "deliveredAt",
+                sr.notes, sr.simulated
            FROM social_reports sr
            JOIN social_engagements se ON se.id = sr.engagement_id AND se.tenant_id = sr.tenant_id
            JOIN clients cl ON cl.id = se.client_id
@@ -323,7 +384,9 @@ export class SocialReportsController {
       ),
       { modules: ["social"] },
     );
-    return { reports: rows };
+    return {
+      reports: rows.map(({ notes, ...r }) => ({ ...r, notesComplete: checkNotesComplete(r.kind, notes), simulated: r.simulated === true })),
+    };
   }
 
   @Get("reports/:id")
@@ -331,13 +394,20 @@ export class SocialReportsController {
     assertUuid(id, "id");
     const report = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
     if (!report) throw new NotFoundException("report not found");
-    await authorize(req.principal, socialReportResource(tenantId, id, await approverIdsOf(tenantId)), "read");
-    const document = buildSocialReportDocument({
-      tenantId, engagementId: report.engagementId, clientName: report.clientName, kind: report.kind,
-      period: report.period, status: report.status, frozen: report.metrics, narrativeText: report.narrativeMd,
-      generatedAt: new Date().toISOString(),
-    });
-    return { id: report.id, status: report.status, engagementId: report.engagementId, document };
+    const resource = socialReportResource(tenantId, id, await approverIdsOf(tenantId));
+    await authorize(req.principal, resource, "read");
+    // SCP-5a (§63.18): what the caller may do here, asked as plain checks (never a throw): the page shows the HoD check's and
+    // the send's buttons only to the four.
+    const [canApprove, canDeliver] = await Promise.all([
+      check(req.principal, resource, "approve").then((d) => d.allow),
+      check(req.principal, resource, "deliver").then((d) => d.allow),
+    ]);
+    return {
+      id: report.id, status: report.status, engagementId: report.engagementId, kind: report.kind, period: report.period,
+      notes: report.notes, actionPlan: report.actionPlan, simulated: report.simulated,
+      notesComplete: checkNotesComplete(report.kind, report.rawNotes), canApprove, canDeliver,
+      document: documentOf(tenantId, report),
+    };
   }
 
   // ==================================================================== EDIT / SUBMIT / SEND BACK
@@ -345,21 +415,38 @@ export class SocialReportsController {
   @HttpCode(200)
   async updateReport(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
-    @Body() body: { narrativeMd?: string; status?: string } = {},
+    @Body() body: { narrativeMd?: string; notes?: unknown; actionPlan?: unknown; status?: string } = {},
   ) {
     assertUuid(id, "id");
     const report = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
     if (!report) throw new NotFoundException("report not found");
     // SCP-5a (§53.7, BFF §63.18): sending a report BACK from the HoD check (in_review -> draft) is the other answer of that
-    // check, so it authorizes as `approve` (the four social approvers), not `update`. A narrative edit in the same call also
-    // needs `update`. Decided from the requested move before any validation, so a refused caller gets 403, never 400.
+    // check, so it authorizes as `approve` (the four social approvers), not `update`. An edit in the same call (the narrative,
+    // the notes or the action plan) also needs `update`. Decided from the requested move before any validation, so a refused
+    // caller gets 403, never 400.
     const reportResource = socialReportResource(tenantId, id, await approverIdsOf(tenantId));
     const sendingBack = body.status === "draft";
+    const editing = body.narrativeMd !== undefined || body.notes !== undefined || body.actionPlan !== undefined;
     if (sendingBack) {
       await authorize(req.principal, reportResource, "approve");
-      if (typeof body.narrativeMd === "string") await authorize(req.principal, reportResource, "update");
+      if (editing) await authorize(req.principal, reportResource, "update");
     } else {
       await authorize(req.principal, reportResource, "update");
+    }
+
+    // SCP-5a: the shapes of 63.1 file 9 (400 {field}).
+    if (body.narrativeMd !== undefined && typeof body.narrativeMd !== "string") invalidField("narrativeMd");
+    let notes: ReportNotes | undefined;
+    if (body.notes !== undefined) {
+      const v = validateNotes(body.notes);
+      if (!v.ok) invalidField("notes");
+      notes = v.value;
+    }
+    let actionPlan: ReportAction[] | undefined;
+    if (body.actionPlan !== undefined) {
+      const v = validateActionPlan(body.actionPlan);
+      if (!v.ok) invalidField("actionPlan");
+      actionPlan = v.value;
     }
 
     let targetStatus = report.status;
@@ -385,6 +472,8 @@ export class SocialReportsController {
         const sets: string[] = ["updated_at = now()", "status = $2"];
         const params: unknown[] = [id, targetStatus];
         if (narrativeMd !== undefined) { params.push(narrativeMd); sets.push(`narrative_md = $${params.length}`); }
+        if (notes !== undefined) { params.push(JSON.stringify(notes)); sets.push(`notes = $${params.length}::jsonb`); }
+        if (actionPlan !== undefined) { params.push(JSON.stringify(actionPlan)); sets.push(`action_plan = $${params.length}::jsonb`); }
         params.push(report.status); // compare-and-swap against the status this handler read
         const guardIdx = params.length;
         const r = await c.query(
@@ -400,14 +489,49 @@ export class SocialReportsController {
       },
       { modules: ["social"] },
     );
-    await writeActivity(tenantId, req.principal.userId, "updated", "social_report", id, { status: targetStatus, narrativeMdEdited: narrativeMd !== undefined });
+    await writeActivity(tenantId, req.principal.userId, "updated", "social_report", id, {
+      status: targetStatus, narrativeMdEdited: narrativeMd !== undefined, notesEdited: notes !== undefined, actionPlanEdited: actionPlan !== undefined,
+    });
     return { id, status: targetStatus };
+  }
+
+  // ==================================================================== DRAFT WITH AI (SCP-5a) ====
+  // A PROPOSAL, never a write (§63.18): the narrative, the three notes and the action plan drafted from the report's FROZEN
+  // snapshot and the client's own brand corpus (`queryBrandKnowledge`, DW-D31). Nothing is saved: the page shows it and the
+  // officer saves what they keep with a PATCH. The gateway down, or an answer that fails any check, gives the plain template
+  // (`draftedVia: 'template'`). Only while the report can still be edited (400 `report_not_editable`).
+  @Post("reports/:id/ai-draft")
+  @HttpCode(200)
+  async aiDraftReport(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    assertUuid(id, "id");
+    const report = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
+    if (!report) throw new NotFoundException("report not found");
+    await authorize(req.principal, socialReportResource(tenantId, id, await approverIdsOf(tenantId)), "update");
+    if (report.status !== "draft" && report.status !== "in_review") refuse("report_not_editable");
+
+    const knowledgeHits = await queryBrandKnowledge(
+      req.principal.userId, tenantId, report.clientId,
+      `${report.engagementName} performance report ${report.period ?? ""}`.trim(), REPORT_KNOWLEDGE_HITS,
+    );
+    const facts = groundingFactsOf(report.metrics, { engagementName: report.engagementName, clientName: report.clientName }, knowledgeHits);
+    let raw: string | null = null;
+    try {
+      raw = (await completeViaGateway(buildMonthlyReportDraftPrompt(facts), {
+        attribution: aiAttribution(req.principal, tenantId, "other", { task: "social.report_narrative" }),
+      })).text;
+    } catch {
+      raw = null; // the gateway down: the template, never a failed request
+    }
+    const draft = parseMonthlyReportDraft(raw, facts);
+    return { narrativeMd: draft.narrativeMd, notes: draft.notes, actionPlan: draft.actionPlan, draftedVia: draft.draftedVia };
   }
 
   // ==================================================================== APPROVE ===================
   // Base design §07: "Low-impact artifacts (reports, campaign plans) approve in-console via module
   // permissions" — this IS that approval. See the file header for why neither the D14 registry nor
-  // SMM-31's client-review stage fits.
+  // SMM-31's client-review stage fits. SCP-5a (§63.18): the HoD check, the four social approvers only; a monthly report needs
+  // an insight and a suggestion in every area (400 `notes_incomplete`). No maker/checker rule (SCP-Q22): one of the four may
+  // approve a report they wrote.
   @Post("reports/:id/approve")
   @HttpCode(200)
   async approveReport(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
@@ -416,15 +540,26 @@ export class SocialReportsController {
     if (!report) throw new NotFoundException("report not found");
     await authorize(req.principal, socialReportResource(tenantId, id, await approverIdsOf(tenantId)), "approve");
     if (report.status !== "in_review") refuse("cannot_approve_from_this_status");
-    await withTenants(
+    if (!checkNotesComplete(report.kind, report.rawNotes)) refuse("notes_incomplete");
+    // The notes rule is re-checked in the UPDATE itself, so an edit that blanks a note between the read above and this write
+    // cannot slip through: the row is then left alone and the refusal re-read.
+    const r = await withTenants(
       [tenantId],
       (c) => c.query(
         `UPDATE social_reports SET status = 'approved', approved_by = $2, approved_at = now(), updated_at = now()
-           WHERE id = $1 AND status = 'in_review' AND deleted_at IS NULL`,
+           WHERE id = $1 AND status = 'in_review' AND deleted_at IS NULL
+             AND (kind <> 'monthly' OR NOT EXISTS (
+                   SELECT 1 FROM unnest(ARRAY['followers', 'engagement', 'audience']) AS a(area)
+                    WHERE coalesce(notes -> a.area ->> 'insight', '') !~ '\\S' OR coalesce(notes -> a.area ->> 'suggestion', '') !~ '\\S'))`,
         [id, req.principal.userId],
       ),
       { modules: ["social"] },
     );
+    if (r.rowCount === 0) {
+      const now = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
+      if (!now || now.status !== "in_review") refuse("cannot_approve_from_this_status");
+      refuse("notes_incomplete");
+    }
     await writeActivity(tenantId, req.principal.userId, "approved", "social_report", id, {});
     return { id, status: "approved" };
   }
@@ -448,11 +583,8 @@ export class SocialReportsController {
     if (report.clientIsInternal) refuse("internal_client_not_deliverable");
     if (report.status !== "approved") refuse("cannot_deliver_from_this_status");
 
-    const document = buildSocialReportDocument({
-      tenantId, engagementId: report.engagementId, clientName: report.clientName, kind: report.kind,
-      period: report.period, status: report.status, frozen: report.metrics, narrativeText: report.narrativeMd,
-      generatedAt: new Date().toISOString(),
-    });
+    // SCP-5a: the PDF carries the notes and the action plan (as tables) and the SIMULATED mark (`document.simulated`).
+    const document = documentOf(tenantId, report);
 
     const { url, token, platformUiInternalUrl, timeoutMs } = config.reportRenderer;
     if (!url || !token || !platformUiInternalUrl) {

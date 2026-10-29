@@ -156,6 +156,9 @@ export const socialModule: ModuleContract = {
     // SCP-4a (BFF §63.1 file 7, §63.11) — boosts and the monthly boost budget: social_boost_budgets and social_boosts, both on
     // the PLAIN tenant wall (the portal writes them, as social_post_client_reviews).
     "202610281300_social_boosts.sql",
+    // SCP-5a (BFF §63.1 file 9, §63.18) — the monthly report's notes (an insight and a suggestion per area), its action plan
+    // and its SIMULATED mark, on the existing social_reports (third wall unchanged).
+    "202610291300_social_reports_monthly.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
@@ -1248,8 +1251,11 @@ export const socialModule: ModuleContract = {
     {
       name: "social.editReport",
       description:
-        "Edit a report's narrative and/or submit it for review (draft->in_review) or send it back "
-        + "(in_review->draft). Cerbos update action.",
+        "Edit a report's narrative, its notes (one insight and one suggestion per area: followers, "
+        + "engagement, audience) and its action plan, and/or submit it for the HoD check "
+        + "(draft->in_review, Cerbos update) or send it back (in_review->draft, Cerbos approve: the "
+        + "four social approvers only). Editing is allowed while draft or in_review. An agent drafts "
+        + "the text with its own model and saves it here.",
       minAssurance: "low",
       write: true,
       impact: "low",
@@ -1261,7 +1267,33 @@ export const socialModule: ModuleContract = {
           tenantId: { type: "string", description: "Company id (route scope)." },
           id: { type: "string", description: "The report." },
           narrativeMd: { type: "string", description: "Replace the narrative text." },
-          status: { type: "string", enum: ["draft", "in_review"], description: "Submit for review or send back." },
+          notes: {
+            type: "object",
+            description: "Replace the notes: one insight and one suggestion (each at most 500 characters) per area. "
+              + "All three areas need both before the HoD check can approve a monthly report.",
+            properties: {
+              followers: { type: "object", properties: { insight: { type: "string", maxLength: 500 }, suggestion: { type: "string", maxLength: 500 } }, additionalProperties: false },
+              engagement: { type: "object", properties: { insight: { type: "string", maxLength: 500 }, suggestion: { type: "string", maxLength: 500 } }, additionalProperties: false },
+              audience: { type: "object", properties: { insight: { type: "string", maxLength: 500 }, suggestion: { type: "string", maxLength: 500 } }, additionalProperties: false },
+            },
+            additionalProperties: false,
+          },
+          actionPlan: {
+            type: "array",
+            maxItems: 10,
+            description: "Replace the action plan: at most 10 actions, each with who does it and an optional due date.",
+            items: {
+              type: "object",
+              properties: {
+                action: { type: "string", minLength: 1, maxLength: 300 },
+                owner: { type: "string", enum: ["agency", "client"] },
+                due: { type: "string", description: "YYYY-MM-DD (optional)." },
+              },
+              required: ["action", "owner"],
+              additionalProperties: false,
+            },
+          },
+          status: { type: "string", enum: ["draft", "in_review"], description: "Submit for the HoD check, or send it back (approvers only)." },
         },
         required: ["tenantId", "id"],
       },
@@ -1273,7 +1305,8 @@ export const socialModule: ModuleContract = {
         + "in-console module-permission approval base smm-design.md §07 specifies for low-impact "
         + "artifacts, not the D14 registry (nothing here re-executes a suspended write) and not "
         + "SMM-31's client-review stage (a report is staff-authored and staff-approved; a client "
-        + "never touches this kind). Cerbos approve action, module_manager and up.",
+        + "never touches this kind). Cerbos approve action: the four social approvers only (the HoD and GM "
+        + "seats, the owner, the superadmin; SCP-Q20). A monthly report needs all its notes first (400 notes_incomplete).",
       minAssurance: "low",
       write: true,
       impact: "low",
@@ -1293,7 +1326,7 @@ export const socialModule: ModuleContract = {
         + "second renderer), persists it as a files row (mirrored to Shared Drive), best-effort links "
         + "a deliverable when the engagement carries a project, and emits social.report.delivered. "
         + "impact:'medium' — outward-facing and unretractable, the same classification ground "
-        + "search.deliverReport uses. Cerbos deliver action, module_manager and up.",
+        + "search.deliverReport uses. Cerbos deliver action: the four social approvers only (SCP-Q20).",
       minAssurance: "low",
       write: true,
       impact: "medium",
