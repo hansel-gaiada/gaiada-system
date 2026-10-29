@@ -13389,6 +13389,24 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
   - another company's engagement id in `clientMatches` refused 400.
 - The page's tests in platform-ui.
 
+#### 63.23.8 As built (SCP-6a server half, 2026-10-29; written for the Linux CI gate, a skip is not a pass)
+
+`sheet-parse.ts`, `sheet-import.ts` and `sheet-import.controller.ts` are in; the proofs are `sheet-import.test.ts` and `sheet-parse.test.ts` (pure, run anywhere) and `sheet-import.http.test.ts` (real Postgres and Cerbos). Where the build reads the text more closely than it says, it does this:
+- **Routes answer 200** (`@HttpCode(200)`), not Nest's 201 for a POST. `dryRun` and `headerRow` are required booleans; a body that omits one is 400 `invalid_field` with that `field`. A bad `columns` entry is `columns.<name>` (an unknown name, an index outside 0 to 59, a column given to two fields, a missing `client` or `date`); `rows` too many is `rows`; a row or a cell that is not text is `rows[i]`; a bad `skip` is `skip`.
+- **The header row is not an answer row.** With `headerRow: true`, `rows[0]` is left out of the answer's `rows` and of `summary.rows`; each answer row's `row` is still its index into the `rows` sent.
+- **A blank row** (every mapped cell empty) is `skipped`, not refused: a sheet's spacer rows need no unticking.
+- **Two sheet names that normalize alike are one name** in `unmatched` (the first spelling is shown, `rows` lists every row). A client named on two rows is `duplicate_client` on both, also while it is still unmatched (picking one client for it would write that client twice); an unticked row does not count.
+- **`client_ambiguous`** is listed in `unmatched.clients` too, its `suggestions` the engagements it could be.
+- **Only the fields that differ are written.** An allocation row's PATCH body, the event's `fields` and the activity's `allocation` name the changed fields only; `changes.officer` is `{from: {id, name} | null, to: {id, name}}`. A list is equal when it holds the same values in the same order.
+- **An Excel time-only cell** (a date on 1899-12-30 in the file) is parsed as `HH:MM`, not as a date; a cell with a time part is `YYYY-MM-DD HH:MM`, rounded to the minute.
+- **Hashtags** also split at a `#`: `#one#two` is two tags.
+- **`isExtra`** reads `no`, `n`, `tidak`, `false`, `0` and `-` as no; any other text is `invalid_field` (never a silent no).
+- **A plan row's `cycle.created`** is true for every row of a client whose month has no cycle yet (preview and apply); apply fills `cycleId`. A replayed row whose post exists is `unchanged` even when its date has since passed (`date_in_past` is not raised for a post the import already wrote), and its `no_cycle_deadline` is not raised either.
+- **The same client, date and title twice in one sheet** is one post (one id): the later row is `unchanged` with `same_title_in_cycle`.
+- **Cerbos** is asked once per distinct officer before the transaction, in apply only; a stale answer (the officer changed in between) is 409 `status_changed`. A denial of the machine's `create` is its own 403, which rolls the import back.
+- **The activity rows** are written after the commit, one per changed engagement (`updated`, `{allocation, via: "sheet_import", importId}`) and one per new post (`create`, the create's metadata with `via` and `importId`); a failed write is logged and never undoes the import.
+
+
 ## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
 
 ### 64.1 Who writes a row, and how a caller cannot forget

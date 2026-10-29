@@ -77,7 +77,7 @@ export function matchOfficer(
   const picked = picks.get(norm);
   if (picked) return { kind: "matched", id: picked };
   const email = sheetName.trim().toLowerCase();
-  const byEmail = members.filter((m) => m.email.toLowerCase() === email);
+  const byEmail = members.filter((m) => m.email !== "" && m.email.toLowerCase() === email);
   if (byEmail.length === 1) return { kind: "matched", id: byEmail[0].id };
   const byName = members.filter((m) => normalizeName(m.name) === norm);
   if (byName.length === 1) return { kind: "matched", id: byName[0].id };

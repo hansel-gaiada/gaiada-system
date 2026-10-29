@@ -67,7 +67,7 @@ const toAllocationEngagement = (r: AllocationRow): AllocationEngagement => ({
 /** The company's active employee members (the allocation's officer test, BFF §63.4): an active membership held by an active `employee` user. */
 async function readMembers(c: PoolClient, tenantId: string): Promise<Member[]> {
   const { rows } = await c.query<{ id: string; name: string; email: string }>(
-    `SELECT u.id::text AS id, u.name, u.email
+    `SELECT u.id::text AS id, u.name, COALESCE(u.email, '') AS email
        FROM company_memberships m JOIN users u ON u.id = m.user_id
       WHERE m.tenant_id = $1 AND m.deleted_at IS NULL AND m.status = 'active'
         AND u.deleted_at IS NULL AND u.status = 'active' AND u.kind = 'employee'
