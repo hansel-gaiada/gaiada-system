@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **285** capabilities across **17** owners
-- **149** writes · 136 reads
-- Writes by impact: **high 28** · medium 41 · low 80
+- **288** capabilities across **17** owners
+- **151** writes · 137 reads
+- Writes by impact: **high 28** · medium 43 · low 80
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | pm | `pm` | 17 |
 | reports | `checkins` · `reports` | 24 |
 | search | `search` | 30 |
-| social | `social` | 36 |
+| social | `social` | 37 |
 | webdev | `webdev` | 41 |
 
 ## Capabilities
@@ -270,8 +270,11 @@ unfalsifiable after.
 | social | `social.publishPostMetered` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish-metered` | write | `high` |
 | social | `social.requestBoost` | `POST` | `/api/:tenantId/modules/social/posts/:postId/boosts` | write | `high` |
 | social | `social.requestClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | write | `medium` |
+| social | `social.resetRules` | `POST` | `/api/:tenantId/modules/social/rules/:section/reset` | write | `medium` |
+| social | `social.rules` | `GET` | `/api/:tenantId/modules/social/rules` | read | — |
 | social | `social.sendReply` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send` | write | `high` |
 | social | `social.setEngagementScope` | `PATCH` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | write | `medium` |
+| social | `social.setRules` | `PUT` | `/api/:tenantId/modules/social/rules/:section` | write | `medium` |
 | social | `social.syncConnectorRegistry` | `POST` | `/api/:tenantId/modules/social/publisher-orgs/:clientId/sync` | write | `low` |
 | social | `social.teamDashboard` | `GET` | `/api/:tenantId/modules/social/team` | read | — |
 | social | `social.updateReplyDraft` | `PATCH` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId` | write | `low` |
