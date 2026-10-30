@@ -75,6 +75,7 @@ import { todayIsoInTz } from "../reports/person-scope";
 import { loadWorkingCalendar } from "../reports/dept-kpi-readers/functional/working-calendar";
 import { addDays } from "../hr/working-days";
 import { check } from "../../rbac/cerbos";
+import type { Principal } from "../../rbac/principal";
 import { PdfRendererNotConfiguredError, mintPrintJobToken, renderPdfViaSidecar } from "../reports/report-pdf-export";
 // SCP-1b / SCP-5a (PERMISSION-CONTRACT §53.7, BFF §63.18): every social_report call site sends `module: "social"` and the
 // company's seat approvers (`approverIds`), because `approve` and `deliver` belong to the four social approvers only.
@@ -316,6 +317,205 @@ function shortDraftContext(report: Pick<ReportRow, "kind">, frozen: FrozenSocial
   };
 }
 
+/** SCP-5 W5-A3 (BFF §63.24.5): what a run passes along with one client's create. Absent for the one-client route. */
+export interface CreateReportOptions {
+  /** The run the draft belongs to: its gateway call's usage row and the report's `created` activity carry it (SCP-Q40). */
+  runId?: string | null;
+  /** The company's rules the run was made under (`rules_ref`), so each of its reports records the same; else the rules in force. */
+  rulesRef?: string | null;
+  /** `metadata.via` of the report's activity row when no request carries it (a run in the background: the agent, or the schedule). */
+  via?: Record<string, unknown> | null;
+}
+
+/** The create route's answer: a new draft, or the existing report of the client, kind and period (`draftedVia: 'existing'`). */
+export type CreateReportAnswer = ReturnType<typeof existingAnswer> | {
+  id: string; status: "draft"; metrics: FrozenSocialReportMetrics; narrativeMd: string; notes: ReportNotes; actionPlan: ReportAction[];
+  nextPeriod: string | null; simulated: boolean; draftedVia: "ai" | "fallback" | "none"; groundedOn: string[];
+};
+
+/**
+ * `POST engagements/:engagementId/reports`, as `principal` (see the route below for the rules). SCP-5 W5-A3: the ONE create path, the route's
+ * and each client's of a "Generate with AI" run (§63.24.5: "each client goes through the create route's own path, as the person who asked"),
+ * so a run's draft is authorized, validated, deduplicated, drafted and recorded exactly as a person's one-client create is.
+ */
+export async function createSocialReport(
+  principal: Principal, tenantId: string, engagementId: string, body: { id?: string; kind?: string; period?: string } = {},
+  opts: CreateReportOptions = {},
+): Promise<CreateReportAnswer> {
+  assertUuid(engagementId, "engagement_id");
+  if (body.id) assertUuid(body.id, "id");
+  const kind = (body.kind ?? "monthly") as ReportKind;
+  if (!isReportKind(kind)) refuse("invalid_kind");
+  const period = body.period ?? null;
+  await authorize(principal, socialReportResource(tenantId, "", await approverIdsOf(tenantId)), "create");
+
+  const id = body.id ?? newId();
+
+  // Idempotent (agentic criterion 3): a caller-supplied id that already exists returns the
+  // EXISTING frozen row untouched — never a re-snapshot, and never a second gateway call spent on
+  // a retry (mirrors createEngagement/createPost's own idempotency shape).
+  const existing = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
+  if (existing && existing.engagementId === engagementId) return existingAnswer(existing);
+
+  const eng = await withTenants(
+    [tenantId],
+    (c) => c.query<{ client_id: string; client_name: string; name: string; is_internal: boolean }>(
+      `SELECT se.client_id, cl.name AS client_name, cl.is_internal, se.name
+         FROM social_engagements se JOIN clients cl ON cl.id = se.client_id
+        WHERE se.id = $1 AND se.deleted_at IS NULL`,
+      [engagementId],
+    ),
+    { modules: ["social"] },
+  );
+  const engRow = eng.rows[0];
+  if (!engRow) throw new NotFoundException("engagement not found");
+  // M5-G0b (WSK-D36): no client-facing report is generated for the internal sentinel client.
+  if (engRow.is_internal) refuse("internal_client_no_reports");
+
+  // The company's rules decide which kinds are on and how this one is made (BFF §63.30). Campaign and ad hoc are SMM-23's own.
+  // W5-A3: a run's clients are made under the rules the run was made under (its `rules_ref`), so every report of the run records the same.
+  const company = isPeriodicKind(kind)
+    ? await withTenants([tenantId], (c) => (opts.rulesRef ? rulesByRef(c, tenantId, opts.rulesRef) : socialRules(c, tenantId)), SOCIAL)
+    : null;
+  const kindRules = company && isPeriodicKind(kind) ? reportKindRules(company.rules, kind) : null;
+  const content = contentOf(kind, kindRules);
+  const fiscal = company?.rules.reports.fiscalYearStartMonth ?? 1;
+  let newKindRange: { start: string; end: string } | null = null;
+  if (company && isPeriodicKind(kind) && kind !== "monthly") {
+    const r = resolvePeriod(kind, period, fiscal, todayIsoInTz(config.reportsTz), content.freezeAt === "create");
+    if (!r.ok) return r.code === "period_not_over" ? refuse("period_not_over") : invalidField("period");
+    newKindRange = r.range;
+  }
+  if (kindRules && !kindRules.enabled) throw new ConflictException({ message: "report_kind_off" });
+
+  // SCP-5a (§63.18): one monthly report per engagement and month; W5-A2: and one per client, kind and period for the others. An
+  // existing one for the period is returned as it is (`draftedVia: 'existing'`), before any gateway call is spent; the insert
+  // below re-checks under a lock. A monthly create with no `period` keeps SMM-23's behaviour (no period, no deduplication).
+  const dedupePeriod = period !== null && (kind === "monthly" || newKindRange !== null) ? period : null;
+  if (dedupePeriod) {
+    const prior = await withTenants([tenantId], (c) => loadExistingFor(c, engagementId, kind, dedupePeriod), { modules: ["social"] });
+    if (prior) return existingAnswer(prior);
+  }
+
+  const { start, end } = newKindRange ?? periodDateRange(period, new Date());
+
+  // SCP-5a: the snapshot counts manual and simulated metric rows and the period's boosts (the client's own ad spend), and
+  // simulated rows only while the simulator switch is on, as GET overview counts them (report-data.ts's header).
+  const snap = await withTenants(
+    [tenantId],
+    (c) => snapshotOf(c, { tenantId, engagementId, clientId: engRow.client_id, kind, range: { start, end } }),
+    { modules: ["social"] },
+  );
+  const frozen = snap.frozen;
+
+  // ── AI narrative, grounded in THIS client's own brand corpus (SMM-19's path — never a second
+  //    route to the gateway). `clientId` comes from the engagement row this handler already
+  //    resolved server-side, never from a request body field — the exact property
+  //    `social-reports.test.ts`'s cross-client leak test drives end to end. A kind whose AI drafting the company turned off
+  //    writes an empty draft with no gateway call (`draftedVia: 'none'`). ───────────────────────────────────────────────────
+  let knowledgeHits: Array<{ sourceRef: string; text: string }> = [];
+  let narrativeText = "";
+  let draftedVia: "ai" | "fallback" | "none" = "none";
+  let rejectedNumbers: string[] | undefined;
+  let notes: ReportNotes = {};
+  let actionPlan: ReportAction[] = [];
+  let nextPeriod: string | null = null;
+  if (!kindRules || kindRules.aiDrafting) {
+    knowledgeHits = await queryBrandKnowledge(
+      principal.userId, tenantId, engRow.client_id,
+      `${engRow.name} performance report ${period ?? ""}`.trim(), REPORT_KNOWLEDGE_HITS,
+    );
+    const narrativeFacts = groundingFactsOf(frozen, { engagementName: engRow.name, clientName: engRow.client_name }, knowledgeHits);
+    // SCP-5a: a long kind also drafts its notes and action plan, in the same one gateway call (report-notes.ts); W5-A2: a daily
+    // or weekly report drafts its summary and its next-period line (report-kinds.ts).
+    const shortCtx = isShortKind(kind) ? shortDraftContext({ kind }, frozen, content) : null;
+    const prompt = shortCtx ? buildShortReportDraftPrompt(narrativeFacts, shortCtx)
+      : isPeriodicKind(kind) ? buildMonthlyReportDraftPrompt(narrativeFacts, draftShapeOf(content))
+      : buildReportNarrativePrompt(narrativeFacts);
+    let raw: string | null = null;
+    try {
+      // W5-A3 (§63.24.5, SCP-Q40): every generation call is recorded as the person's, with the run it belongs to (NULL for a one-client
+      // create), so a run's and a schedule's spend is the sum of its rows. Tracked, never capped.
+      raw = (await completeViaGateway(prompt, {
+        attribution: aiAttribution(principal, tenantId, "other", { task: "social.report_generate", runId: opts.runId ?? null }),
+      })).text;
+    } catch {
+      raw = null; // fail-soft: a gateway hiccup drafts the deterministic fallback, never blocks report creation
+    }
+    if (shortCtx) {
+      const draft = parseShortReportDraft(raw, narrativeFacts, shortCtx);
+      narrativeText = draft.narrativeMd;
+      nextPeriod = draft.nextPeriod;
+      draftedVia = draft.draftedVia === "ai" ? "ai" : "fallback";
+      rejectedNumbers = draft.rejected?.numbers;
+    } else if (isPeriodicKind(kind)) {
+      const draft = parseMonthlyReportDraft(raw, narrativeFacts, draftShapeOf(content));
+      narrativeText = draft.narrativeMd;
+      draftedVia = draft.draftedVia === "ai" ? "ai" : "fallback";
+      rejectedNumbers = draft.rejected?.numbers;
+      notes = draft.notes;
+      actionPlan = draft.actionPlan;
+    } else {
+      const parsed = parseReportNarrativeDraft(raw, narrativeFacts);
+      narrativeText = parsed.text;
+      draftedVia = parsed.draftedVia;
+      rejectedNumbers = parsed.rejectedNumbers;
+    }
+  }
+  // Frozen alongside the numbers (reports.ts's own header on `narrativeSource`) so a later read
+  // never claims an AI narrative that a gateway hiccup actually fell back from.
+  frozen.narrativeSource = draftedVia === "ai" ? "ai" : "deterministic";
+
+  const attempt = () => withTenants(
+    [tenantId],
+    async (c) => {
+      if (dedupePeriod) {
+        // Two creates for the same client, kind and period at once: the second waits here, then finds the first and returns it.
+        await c.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`social_report:${engagementId}:${kind}:${dedupePeriod}`]);
+        const prior = await loadExistingFor(c, engagementId, kind, dedupePeriod);
+        if (prior) return prior;
+      }
+      // SCP-5 W5-A0 (BFF §63.30.3): the report keeps the company's rules it was made under for its whole life.
+      const rulesRef = rulesRefFor(company ?? (await socialRules(c, tenantId)));
+      await c.query(
+        `INSERT INTO social_reports (id, tenant_id, engagement_id, period, kind, status, metrics, narrative_md, notes, action_plan, simulated, origin_site, rules_ref, next_period)
+         VALUES ($1,$2,$3,$4,$5,'draft',$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (id) DO NOTHING`,
+        [id, tenantId, engagementId, period, kind, JSON.stringify(frozen), narrativeText, JSON.stringify(notes), JSON.stringify(actionPlan),
+          snap.simulated, config.originSite, rulesRef, nextPeriod],
+      );
+      return null;
+    },
+    { modules: ["social"] },
+  );
+  let raced: ReportRow | null;
+  try {
+    raced = await attempt();
+  } catch (e) {
+    // The unique index's backstop (a path that took no lock): the report that won is the answer.
+    if (!dedupePeriod || !isUniqueViolation(e)) throw e;
+    raced = await withTenants([tenantId], (c) => loadExistingFor(c, engagementId, kind, dedupePeriod), { modules: ["social"] });
+    if (!raced) throw e;
+  }
+  if (raced) return existingAnswer(raced);
+  await writeActivity(tenantId, principal.userId, "created", "social_report", id, {
+    engagementId, kind, period, draftedVia, groundedOn: knowledgeHits.map((h) => h.sourceRef), simulated: snap.simulated,
+    ...(company ? { rulesRef: rulesRefFor(company) } : {}),
+    // W5-A3: a run's report names its run; in the background (no request) the run's agent or schedule is the activity's `via`.
+    ...(opts.runId ? { runId: opts.runId } : {}),
+    ...(opts.via ? { via: opts.via } : {}),
+    // Recorded so a REJECTED narrative is distinguishable from a gateway hiccup: both land as
+    // draftedVia:'fallback', but only one means the model stated a number nothing grounded.
+    // Absent (not `[]`) when nothing was rejected — an empty array would read as "checked and
+    // clean" on the AI path and "checked and clean" on the fallback path alike, which is exactly
+    // the absent-vs-zero conflation this module refuses.
+    ...(rejectedNumbers && rejectedNumbers.length > 0 ? { narrativeRejectedNumbers: rejectedNumbers } : {}),
+  });
+  return {
+    id, status: "draft", metrics: frozen, narrativeMd: narrativeText, notes, actionPlan, nextPeriod, simulated: snap.simulated, draftedVia,
+    groundedOn: knowledgeHits.map((h) => h.sourceRef),
+  };
+}
+
 @Controller("api/:tenantId/modules/social")
 @UseGuards(AuthGuard, ModuleEnabledGuard("social"))
 export class SocialReportsController {
@@ -338,168 +538,7 @@ export class SocialReportsController {
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("engagementId") engagementId: string,
     @Body() body: { id?: string; kind?: string; period?: string } = {},
   ) {
-    assertUuid(engagementId, "engagement_id");
-    if (body.id) assertUuid(body.id, "id");
-    const kind = (body.kind ?? "monthly") as ReportKind;
-    if (!isReportKind(kind)) refuse("invalid_kind");
-    const period = body.period ?? null;
-    await authorize(req.principal, socialReportResource(tenantId, "", await approverIdsOf(tenantId)), "create");
-
-    const id = body.id ?? newId();
-
-    // Idempotent (agentic criterion 3): a caller-supplied id that already exists returns the
-    // EXISTING frozen row untouched — never a re-snapshot, and never a second gateway call spent on
-    // a retry (mirrors createEngagement/createPost's own idempotency shape).
-    const existing = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
-    if (existing && existing.engagementId === engagementId) return existingAnswer(existing);
-
-    const eng = await withTenants(
-      [tenantId],
-      (c) => c.query<{ client_id: string; client_name: string; name: string; is_internal: boolean }>(
-        `SELECT se.client_id, cl.name AS client_name, cl.is_internal, se.name
-           FROM social_engagements se JOIN clients cl ON cl.id = se.client_id
-          WHERE se.id = $1 AND se.deleted_at IS NULL`,
-        [engagementId],
-      ),
-      { modules: ["social"] },
-    );
-    const engRow = eng.rows[0];
-    if (!engRow) throw new NotFoundException("engagement not found");
-    // M5-G0b (WSK-D36): no client-facing report is generated for the internal sentinel client.
-    if (engRow.is_internal) refuse("internal_client_no_reports");
-
-    // The company's rules decide which kinds are on and how this one is made (BFF §63.30). Campaign and ad hoc are SMM-23's own.
-    const company = isPeriodicKind(kind) ? await withTenants([tenantId], (c) => socialRules(c, tenantId), SOCIAL) : null;
-    const kindRules = company && isPeriodicKind(kind) ? reportKindRules(company.rules, kind) : null;
-    const content = contentOf(kind, kindRules);
-    const fiscal = company?.rules.reports.fiscalYearStartMonth ?? 1;
-    let newKindRange: { start: string; end: string } | null = null;
-    if (company && isPeriodicKind(kind) && kind !== "monthly") {
-      const r = resolvePeriod(kind, period, fiscal, todayIsoInTz(config.reportsTz), content.freezeAt === "create");
-      if (!r.ok) return r.code === "period_not_over" ? refuse("period_not_over") : invalidField("period");
-      newKindRange = r.range;
-    }
-    if (kindRules && !kindRules.enabled) throw new ConflictException({ message: "report_kind_off" });
-
-    // SCP-5a (§63.18): one monthly report per engagement and month; W5-A2: and one per client, kind and period for the others. An
-    // existing one for the period is returned as it is (`draftedVia: 'existing'`), before any gateway call is spent; the insert
-    // below re-checks under a lock. A monthly create with no `period` keeps SMM-23's behaviour (no period, no deduplication).
-    const dedupePeriod = period !== null && (kind === "monthly" || newKindRange !== null) ? period : null;
-    if (dedupePeriod) {
-      const prior = await withTenants([tenantId], (c) => loadExistingFor(c, engagementId, kind, dedupePeriod), { modules: ["social"] });
-      if (prior) return existingAnswer(prior);
-    }
-
-    const { start, end } = newKindRange ?? periodDateRange(period, new Date());
-
-    // SCP-5a: the snapshot counts manual and simulated metric rows and the period's boosts (the client's own ad spend), and
-    // simulated rows only while the simulator switch is on, as GET overview counts them (report-data.ts's header).
-    const snap = await withTenants(
-      [tenantId],
-      (c) => snapshotOf(c, { tenantId, engagementId, clientId: engRow.client_id, kind, range: { start, end } }),
-      { modules: ["social"] },
-    );
-    const frozen = snap.frozen;
-
-    // ── AI narrative, grounded in THIS client's own brand corpus (SMM-19's path — never a second
-    //    route to the gateway). `clientId` comes from the engagement row this handler already
-    //    resolved server-side, never from a request body field — the exact property
-    //    `social-reports.test.ts`'s cross-client leak test drives end to end. A kind whose AI drafting the company turned off
-    //    writes an empty draft with no gateway call (`draftedVia: 'none'`). ───────────────────────────────────────────────────
-    let knowledgeHits: Array<{ sourceRef: string; text: string }> = [];
-    let narrativeText = "";
-    let draftedVia: "ai" | "fallback" | "none" = "none";
-    let rejectedNumbers: string[] | undefined;
-    let notes: ReportNotes = {};
-    let actionPlan: ReportAction[] = [];
-    let nextPeriod: string | null = null;
-    if (!kindRules || kindRules.aiDrafting) {
-      knowledgeHits = await queryBrandKnowledge(
-        req.principal.userId, tenantId, engRow.client_id,
-        `${engRow.name} performance report ${period ?? ""}`.trim(), REPORT_KNOWLEDGE_HITS,
-      );
-      const narrativeFacts = groundingFactsOf(frozen, { engagementName: engRow.name, clientName: engRow.client_name }, knowledgeHits);
-      // SCP-5a: a long kind also drafts its notes and action plan, in the same one gateway call (report-notes.ts); W5-A2: a daily
-      // or weekly report drafts its summary and its next-period line (report-kinds.ts).
-      const shortCtx = isShortKind(kind) ? shortDraftContext({ kind }, frozen, content) : null;
-      const prompt = shortCtx ? buildShortReportDraftPrompt(narrativeFacts, shortCtx)
-        : isPeriodicKind(kind) ? buildMonthlyReportDraftPrompt(narrativeFacts, draftShapeOf(content))
-        : buildReportNarrativePrompt(narrativeFacts);
-      let raw: string | null = null;
-      try {
-        raw = (await completeViaGateway(prompt, { attribution: aiAttribution(req.principal, tenantId, "other", { task: "social.report_narrative" }) })).text;
-      } catch {
-        raw = null; // fail-soft: a gateway hiccup drafts the deterministic fallback, never blocks report creation
-      }
-      if (shortCtx) {
-        const draft = parseShortReportDraft(raw, narrativeFacts, shortCtx);
-        narrativeText = draft.narrativeMd;
-        nextPeriod = draft.nextPeriod;
-        draftedVia = draft.draftedVia === "ai" ? "ai" : "fallback";
-        rejectedNumbers = draft.rejected?.numbers;
-      } else if (isPeriodicKind(kind)) {
-        const draft = parseMonthlyReportDraft(raw, narrativeFacts, draftShapeOf(content));
-        narrativeText = draft.narrativeMd;
-        draftedVia = draft.draftedVia === "ai" ? "ai" : "fallback";
-        rejectedNumbers = draft.rejected?.numbers;
-        notes = draft.notes;
-        actionPlan = draft.actionPlan;
-      } else {
-        const parsed = parseReportNarrativeDraft(raw, narrativeFacts);
-        narrativeText = parsed.text;
-        draftedVia = parsed.draftedVia;
-        rejectedNumbers = parsed.rejectedNumbers;
-      }
-    }
-    // Frozen alongside the numbers (reports.ts's own header on `narrativeSource`) so a later read
-    // never claims an AI narrative that a gateway hiccup actually fell back from.
-    frozen.narrativeSource = draftedVia === "ai" ? "ai" : "deterministic";
-
-    const attempt = () => withTenants(
-      [tenantId],
-      async (c) => {
-        if (dedupePeriod) {
-          // Two creates for the same client, kind and period at once: the second waits here, then finds the first and returns it.
-          await c.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`social_report:${engagementId}:${kind}:${dedupePeriod}`]);
-          const prior = await loadExistingFor(c, engagementId, kind, dedupePeriod);
-          if (prior) return prior;
-        }
-        // SCP-5 W5-A0 (BFF §63.30.3): the report keeps the company's rules it was made under for its whole life.
-        const rulesRef = rulesRefFor(company ?? (await socialRules(c, tenantId)));
-        await c.query(
-          `INSERT INTO social_reports (id, tenant_id, engagement_id, period, kind, status, metrics, narrative_md, notes, action_plan, simulated, origin_site, rules_ref, next_period)
-           VALUES ($1,$2,$3,$4,$5,'draft',$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (id) DO NOTHING`,
-          [id, tenantId, engagementId, period, kind, JSON.stringify(frozen), narrativeText, JSON.stringify(notes), JSON.stringify(actionPlan),
-            snap.simulated, config.originSite, rulesRef, nextPeriod],
-        );
-        return null;
-      },
-      { modules: ["social"] },
-    );
-    let raced: ReportRow | null;
-    try {
-      raced = await attempt();
-    } catch (e) {
-      // The unique index's backstop (a path that took no lock): the report that won is the answer.
-      if (!dedupePeriod || !isUniqueViolation(e)) throw e;
-      raced = await withTenants([tenantId], (c) => loadExistingFor(c, engagementId, kind, dedupePeriod), { modules: ["social"] });
-      if (!raced) throw e;
-    }
-    if (raced) return existingAnswer(raced);
-    await writeActivity(tenantId, req.principal.userId, "created", "social_report", id, {
-      engagementId, kind, period, draftedVia, groundedOn: knowledgeHits.map((h) => h.sourceRef), simulated: snap.simulated,
-      ...(company ? { rulesRef: rulesRefFor(company) } : {}),
-      // Recorded so a REJECTED narrative is distinguishable from a gateway hiccup: both land as
-      // draftedVia:'fallback', but only one means the model stated a number nothing grounded.
-      // Absent (not `[]`) when nothing was rejected — an empty array would read as "checked and
-      // clean" on the AI path and "checked and clean" on the fallback path alike, which is exactly
-      // the absent-vs-zero conflation this module refuses.
-      ...(rejectedNumbers && rejectedNumbers.length > 0 ? { narrativeRejectedNumbers: rejectedNumbers } : {}),
-    });
-    return {
-      id, status: "draft", metrics: frozen, narrativeMd: narrativeText, notes, actionPlan, nextPeriod, simulated: snap.simulated, draftedVia,
-      groundedOn: knowledgeHits.map((h) => h.sourceRef),
-    };
+    return createSocialReport(req.principal, tenantId, engagementId, body);
   }
 
   // ==================================================================== LIST / DETAIL ============
