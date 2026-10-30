@@ -40,6 +40,11 @@ vi.mock("@/lib/socialReportsActions", () => ({
   draftMonthlyReport: vi.fn(), saveReport: vi.fn(), submitReport: vi.fn(), sendBackReport: vi.fn(), proposeReportDraft: vi.fn(), approveReport: vi.fn(), deliverReport: vi.fn(),
 }));
 
+vi.mock("@/lib/socialSavedActions", () => ({ addSavedItem: vi.fn(), updateSavedItem: vi.fn(), deleteSavedItem: vi.fn() }));
+vi.mock("@/lib/socialAuditActions", () => ({
+  startClientAudit: vi.fn(), startProspectAudit: vi.fn(), saveAudit: vi.fn(), proposeAuditSummary: vi.fn(), finalizeAudit: vi.fn(), attachAudit: vi.fn(), deleteAudit: vi.fn(),
+}));
+
 import { SIMULATED_MARK_NAME } from "./SimulatedMark";
 import { ClientAccounts } from "./ClientAccounts";
 import { ClientCalendar } from "./ClientCalendar";
@@ -62,6 +67,11 @@ import { BoostBoard } from "./BoostBoard";
 import { BoostCard } from "./BoostCard";
 import { SocialReportList } from "./SocialReportList";
 import { SocialReportView } from "./SocialReportView";
+import { SavedEntriesView } from "./SavedBank";
+import { AuditList } from "./AuditList";
+import { AuditView } from "./AuditView";
+import { asSavedPost, type SavedView } from "@/lib/socialSaved";
+import { asAuditDetail, asAuditListItem } from "@/lib/socialAudit";
 import { asReportDetail, asReportList } from "@/lib/socialReports";
 import { socialDemo } from "@/lib/demoSocial";
 import { asBoostRow, type BoostRow, type PortalSpend } from "@/lib/socialBoosts";
@@ -155,6 +165,18 @@ const demoGet = (tail: string) => socialDemo("GET", `/api/co-agency/modules/soci
 const reportRows = (simulated: boolean) => asReportList(demoGet("reports")).filter((r) => r.simulated === simulated);
 const reportDetail = (simulated: boolean) => asReportDetail(demoGet(`reports/${reportRows(simulated)[0].id}`));
 
+// SCP-5e: an approved post of the content bank, simulated or not. SCP-5g: an audit whose automatic part read a simulated post, or did not.
+const savedView: SavedView = { client: "e-1", collection: "posts", pillar: null, used: null, source: null, cursor: null };
+const savedPost = (simulated: boolean) => asSavedPost({ postId: "p-1", title: "Harvest teaser", format: "feed", cycleMonth: "2026-10", thumbFileId: null, pipelineStatus: "live", simulated });
+const auditRow = (simulated: boolean) => asAuditListItem({
+  auditId: "a-1", subject: "client", engagementId: "e-1", name: "Kopi Senja", status: "draft", month: "2026-09", overall: 62, band: "fair", bandLabel: "Fair", scored: 7, total: 12,
+  topFix: { key: "reels", label: "Reels", score: 1, advice: "Open with a hook." }, finalizedAt: null, simulated,
+});
+const auditDetail = (simulated: boolean) => asAuditDetail({
+  id: "a-1", subject: "client", engagementId: "e-1", name: "Kopi Senja", month: "2026-09", status: "draft", dimensions: [], overall: null, scored: 0, total: 12, fixes: [], simulated,
+  createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z", canWrite: false, canFinalize: false,
+});
+
 type Case = (simulated: boolean) => RenderResult;
 /** Every component that reads a simulated flag, by file, and how to draw it. */
 const COVERED: Record<string, Case> = {
@@ -186,6 +208,14 @@ const COVERED: Record<string, Case> = {
   ),
   "components/social/SocialReportList.tsx": (s) => render(<SocialReportList deptId="d-soc" rows={reportRows(s)} filters={{ status: null, period: null }} />),
   "components/social/SocialReportView.tsx": (s) => render(<SocialReportView deptId="d-soc" report={reportDetail(s)} clientName="A client" clientReportsHref={null} />),
+  "components/social/SavedBank.tsx": (s) => render(
+    <SavedEntriesView
+      deptId="d-soc" client="e-1" collection={{ key: "posts", label: "Approved posts", holds: [], derived: true, count: 1, previews: [] }}
+      entries={{ kind: "posts", items: [savedPost(s)] }} nextCursor={null} view={savedView} viewerId="u-1" pillars={[]} collections={[]}
+    />,
+  ),
+  "components/social/AuditList.tsx": (s) => render(<AuditList deptId="d-soc" rows={[auditRow(s)]} subject={null} />),
+  "components/social/AuditView.tsx": (s) => render(<AuditView deptId="d-soc" audit={auditDetail(s)} clients={[]} />),
   "components/portal/social/PortalBoostBudgets.tsx": (s) => render(<PortalBoostBudgets spend={portalSpend(s)} tenant={TENANT} />),
   "components/portal/social/PortalSocialPostCard.tsx": (s) => render(
     <PortalSocialToasts>

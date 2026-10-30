@@ -271,3 +271,23 @@ describe("the Social reports pages' areas (SCP-5a)", () => {
     expect(bestRules(["departments", "[deptId]", "reports"])[0].path).not.toMatch(/social-reports/);
   });
 });
+
+// SCP-5e, SCP-5g (BFF §63.17): the Saved page and the two audit pages sit in exactly one area each, the department's own; the audit is `{D}/social-audit`, and `{D}/audit` (SEO's Site Audit) is not.
+describe("the Saved and social audit pages' areas (SCP-5e, SCP-5g)", () => {
+  const pages = [["departments", "[deptId]", "saved"], ["departments", "[deptId]", "social-audit"], ["departments", "[deptId]", "social-audit", "[auditId]"]];
+  it("each page has exactly one rule, and it is the department's workspace area", () => {
+    for (const segs of pages) {
+      const rules = bestRules(segs);
+      expect(rules, segs.join("/")).toHaveLength(1);
+      expect(rules[0].kind, segs.join("/")).toBe("workspace");
+    }
+    expect(areaFor("/departments/d-x/saved")).toMatchObject({ kind: "workspace", deptId: "d-x" });
+    expect(areaFor("/departments/d-x/social-audit")).toMatchObject({ kind: "workspace", deptId: "d-x" });
+    expect(areaFor("/departments/d-x/social-audit/a-1")).toMatchObject({ kind: "workspace", deptId: "d-x" });
+  });
+  it("the audit list and one audit are the same area, and /audit stays SEO's own page with its own rule", () => {
+    expect(areaFor("/departments/d-x/social-audit")).toEqual(areaFor("/departments/d-x/social-audit/a-1"));
+    expect(bestRules(["departments", "[deptId]", "audit"])).toHaveLength(1);
+    expect(bestRules(["departments", "[deptId]", "audit"])[0].path).not.toMatch(/social-audit/);
+  });
+});
