@@ -19,6 +19,7 @@ import { demoBoostsRoute } from "./demoSocialBoosts";
 import { demoReportsRoute } from "./demoSocialReports";
 import { demoSavedRoute } from "./demoSocialSaved";
 import { demoAuditRoute } from "./demoSocialAudit";
+import { demoOnboardingRoute } from "./demoSocialOnboarding";
 import {
   DEMO_SIMULATED_NETWORKS, demoAccounts, demoRemoveSimulatedAccounts, demoSeedSimulatedAccounts,
   type DemoAccount, type DemoSimulatedNetwork, type DemoSocialNetwork as AccountsNetwork,
@@ -1005,6 +1006,8 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   { const saved = demoSavedRoute(m, tail, params, body, userId); if (saved) return saved; }
   // ── SCP-5g: the social audit (BFF §63.28), in demoSocialAudit.ts ─────────────────────────────────────────────────────────────
   { const audit = demoAuditRoute(m, tail, params, body, userId); if (audit) return audit; }
+  // ── SCP-5h: client onboarding (BFF §63.29), in demoSocialOnboarding.ts ───────────────────────────────────────────────────────
+  { const onboarding = demoOnboardingRoute(m, tail, body, userId); if (onboarding) return onboarding; }
   // ── SCP-1k: the client calendar (BFF §63.10) ─────────────────────────────────────────────────────
   if (tail === "calendar" && m === "GET") return demoCalendar(params);
   // ── SCP-1m: create a post in a cycle (BFF §63.6.1), and SCP-1k's bulk actions (§63.6.7) ───────────

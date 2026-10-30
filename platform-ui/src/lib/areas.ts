@@ -141,6 +141,7 @@ const WORKSPACE: AreaRule[] = [
   rule("/departments/[deptId]/saved", "workspace", false, "SCP-5e: the Social Media Saved page, each client's content bank (photos, approved posts, hashtag sets, captions, templates, references); its own entry so the page sits in one area, the department's; the registry tab comes with SCP-5 W5-H1"),
   rule("/departments/[deptId]/social-audit", "workspace", false, "SCP-5g: the Social Media audit list (clients and prospects, worst first); never /departments/[deptId]/audit, which is SEO's Site Audit in every department; its own entry so the page sits in one area, the department's"),
   rule("/departments/[deptId]/social-audit/[auditId]", "workspace", false, "SCP-5g: one audit's scorecard (the twelve dimensions, the fixes, the summary, Finalize), opened from the list and never a menu row; the department's own area"),
+  rule("/departments/[deptId]/onboarding", "workspace", false, "SCP-5h: the Social Media client onboarding page (each new client's checklist from the company's PM project template, its progress and next step, the baseline audit); HR's own employee Onboarding is a different page; its own entry so the page sits in one area, the department's"),
   ...WORKSPACES.flatMap((ws) =>
     ws.ownedRoutes.map((path): AreaRule => ({ path, subtree: true, kind: "workspace", slug: ws.key, why: `owned by the ${ws.label} workspace` })),
   ),

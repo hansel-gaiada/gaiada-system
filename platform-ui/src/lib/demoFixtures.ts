@@ -16,6 +16,7 @@ import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
 import { socialPortalPostsDemo } from "./demoSocialPortal";
 import { demoPortalSpendRoute } from "./demoSocialBoosts";
 import { demoAssetLibraryRead } from "./demoSocialPipelineRun";
+import { demoOnboardingPmRoute } from "./demoSocialOnboarding";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { requestsDemo } from "./demoRequests";
 import { agencyLeadsDemo } from "./demoAgencyLeads";
@@ -2512,6 +2513,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // (lib/demoClientReports.ts, shared with the portal's Reports page) and placed before the generic matchers.
   const clientReports = clientReportsDemo(method, p, body, userId);
   if (clientReports) return clientReports;
+
+  // SCP-5h: PM's two routes client onboarding uses (a tick, the kickoff move), for onboarding's own tasks and applications (lib/demoSocialOnboarding.ts).
+  const onboardingPm = demoOnboardingPmRoute(m, p, body, userId);
+  if (onboardingPm) return onboardingPm;
 
   // PM surface + task comments — stateful in-memory store (lib/demoPm.ts).
   const pm = pmDemo(method, p, url.searchParams, body);
