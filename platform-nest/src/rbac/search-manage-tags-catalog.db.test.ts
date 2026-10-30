@@ -55,12 +55,18 @@ describe("M5-P4 · manage_tags: catalog, groups, bundles, policy and migration a
 
   it("the policy's role arm is module_manager + company_admin only, with one mirror naming only manage_tags", () => {
     const doc: any = yaml.load(readFileSync(POLICY, "utf8"));
-    const rules = doc.resourcePolicy.rules as Array<{ actions: string[]; effect: string; derivedRoles?: string[] }>;
+    const rules = doc.resourcePolicy.rules as Array<{ actions: string[]; effect: string; derivedRoles?: string[]; condition?: { match: { expr: string } } }>;
     const rs = rules.filter((r) => r.actions.includes("manage_tags"));
-    expect(rs).toHaveLength(2);
-    const roleRule = rs.find((r) => r.derivedRoles?.includes("module_manager"))!;
-    expect(roleRule.derivedRoles!.slice().sort()).toEqual(["company_admin", "module_manager"]);
-    expect(roleRule.actions).toEqual(["manage_tags"]);
+    // M5-V3-l: the module tier (search's only) and company_admin (not module-mediated) are separate rules, plus one mirror.
+    expect(rs).toHaveLength(3);
+    const moduleRule = rs.find((r) => r.derivedRoles?.includes("module_manager"))!;
+    expect(moduleRule.derivedRoles).toEqual(["module_manager"]);
+    expect(moduleRule.actions).toEqual(["manage_tags"]);
+    expect(moduleRule.condition?.match.expr).toContain('request.resource.attr.module == "search"');
+    const adminRule = rs.find((r) => r.derivedRoles?.includes("company_admin"))!;
+    expect(adminRule.derivedRoles).toEqual(["company_admin"]);
+    expect(adminRule.actions).toEqual(["manage_tags"]);
+    expect(adminRule.condition?.match.expr).not.toContain("attr.module");
     const mirror = rs.find((r) => r.derivedRoles?.some((d) => d.startsWith("perm_")))!;
     expect(mirror.actions).toEqual(["manage_tags"]);
     expect(mirror.derivedRoles).toEqual(["perm_resource_search_property_manage_tags"]);
