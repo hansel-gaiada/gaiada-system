@@ -29,6 +29,7 @@ describe("gatewayTaskFor (AIP-07)", () => {
     ["social.draft_caption", "draft"],
     ["social.draft_ideas", "draft"],
     ["social.report_narrative", "draft"],
+    ["social.report_generate", "draft"],
     ["reports.narrative", "draft"],
     ["clients.account_summary", "draft"],
     ["webdev.assist", "draft"],
