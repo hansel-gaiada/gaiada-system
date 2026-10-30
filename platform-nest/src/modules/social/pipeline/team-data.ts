@@ -7,6 +7,7 @@
 //                    `readSimulatedPipelineIds` (only while simulated rows are left out)         -> needs attention (late, at risk, blocked), waits, workload
 //   failed + boosts  `readFailedPosts`, `readBoostsWaiting`                                       -> needs attention (failed posts, boosts waiting)
 //   reports          `readReportFacts` (two statements)                                           -> needs attention (report due, report to check)
+//   cycle steps      `readLateStepCandidates`, `openLateSteps` (cycle-steps-read.ts)                  -> needs attention (late cycle steps)
 //   steps            `readStepMoves`                                                              -> step averages
 //   unit             `readSocialUnitPeople`                                                       -> who is in the Social Media unit (the privacy gate)
 // Every statement starts with `TEAM_TAG`, so a test counts exactly these.
@@ -19,6 +20,7 @@ import { collectUnitSubtree, loadOrgStructure, loadSeatHoldersByNode, loadUnitRo
 import { declareSocialModuleScope } from "../module-scope";
 import { SCP } from "./fixture";
 import { SIMULATED_SQL } from "./overview-data";
+import { openLateSteps, type LateCandidate, type LateStepRow } from "./cycle-steps-read";
 
 export const TEAM_TAG = "/* scp-team */";
 const tagged = (sql: string): string => `${TEAM_TAG} ${sql}`;
@@ -65,6 +67,39 @@ export async function readFailedPosts(c: PoolClient, tenantId: string, includeSi
     [tenantId, includeSimulated],
   );
   return rows.map((r) => ({ postId: r.id, engagementId: r.engagement_id, clientName: r.client_name, title: r.title ?? "Untitled post", since: iso(r.since) }));
+}
+
+// ── late cycle steps (SCP-5f, BFF §63.27.4) ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The OPEN step tasks of the month's cycles that are past their due date (`today`, the company's report day): `cycle_step_late`. The month is
+ * the dashboard's own (`month`), so the cycles are M's. A step is found by its link (`linked_type = 'social_cycle_step'`, `linked_id` the
+ * cycle), never by title; an engagement that is deleted or closed lists none. Open means the task's status is not a done status of its project
+ * (PM's `effectiveStatuses`, through `openLateSteps`), so a step closed by hand is not listed and a reopened one is. Team-level: a client, a
+ * step and a date, no person.
+ */
+export async function readLateCycleSteps(c: PoolClient, tenantId: string, month: string, today: string): Promise<LateStepRow[]> {
+  await declareSocialModuleScope(c);
+  const { rows } = await c.query<{
+    engagement_id: string; client_name: string; cycle_id: string; step: string; title: string; due_date: string; project_id: string; status: string;
+  }>(
+    tagged(`
+    SELECT e.id::text AS engagement_id, cl.name AS client_name, cy.id::text AS cycle_id, t.linked_step AS step, t.title,
+           to_char(t.due_date, 'YYYY-MM-DD') AS due_date, t.project_id::text AS project_id, t.status
+      FROM social_cycles cy
+      JOIN social_engagements e ON e.id = cy.engagement_id AND e.tenant_id = cy.tenant_id AND e.deleted_at IS NULL AND e.status <> 'closed'
+      JOIN clients cl ON cl.id = e.client_id AND cl.tenant_id = e.tenant_id
+      JOIN pm_tasks t ON t.tenant_id = cy.tenant_id AND t.linked_type = 'social_cycle_step' AND t.linked_id = cy.id AND t.deleted_at IS NULL
+     WHERE cy.tenant_id = $1::uuid AND cy.deleted_at IS NULL AND cy.month = ($2 || '-01')::date
+       AND t.due_date IS NOT NULL AND t.due_date < $3::date
+     ORDER BY t.due_date, lower(cl.name), e.id, t.linked_step`),
+    [tenantId, month, today],
+  );
+  const candidates: LateCandidate[] = rows.map((r) => ({
+    engagementId: r.engagement_id, clientName: r.client_name, cycleId: r.cycle_id, step: r.step, title: r.title, dueDate: r.due_date,
+    projectId: r.project_id, status: r.status,
+  }));
+  return openLateSteps(c, candidates);
 }
 
 export interface BoostWaitingRow { boostId: string; postId: string; engagementId: string; clientName: string; title: string; since: string }

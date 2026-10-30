@@ -42,6 +42,7 @@ import {
 } from "./cycles-data";
 import type { ContentMonthTaskResult } from "./content-month";
 import type { CycleStepTasksResult } from "./cycle-steps";
+import { composeCycleSteps, readCycleSteps, type CycleStepRow, type StepsReason } from "./cycle-steps-read";
 import { isMonthKey, lastDayOfMonth, readyByFor, looksLikeIsoDate } from "./schedule-health";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -275,14 +276,21 @@ export class SocialCyclesController {
         const posts = await readCyclePosts(c, tenantId, [cycle.id]);
         const samples = (await readApprovalSamples(c, tenantId, [cycle.engagementId], today, tz)).get(cycle.engagementId) ?? [];
         const buffer = (await readSettings(c, tenantId)).bufferWorkingDays;
-        return { cycle, eng, posts, samples, buffer };
+        // SCP-5f (§63.27.4): the cycle's step tasks, found by link (read only).
+        const stepsData = await readCycleSteps(c, tenantId, cycle.id);
+        return { cycle, eng, posts, samples, buffer, stepsData };
       },
       { modules: ["social"] },
     );
     if (!data) throw new NotFoundException({ message: "cycle_not_found" });
 
     const info = await loadCalendarInfo(tenantId, [today, data.cycle.deadline, data.cycle.readyBy, addDays(today, -100)], HEALTH_LOOKBACK_DAYS);
-    return composeCycleHealth(data.cycle, data.eng, data.posts, data.samples, data.buffer, today, info);
+    const health = composeCycleHealth(data.cycle, data.eng, data.posts, data.samples, data.buffer, today, info);
+    // Additive (SCP-5f, §63.27.4): `steps` in the rules' order, or none with `stepsReason` when the engagement has no project.
+    const sd = data.stepsData;
+    const steps: CycleStepRow[] = sd ? composeCycleSteps(sd.rules, sd.month, sd.tasks, today) : [];
+    const stepsReason: StepsReason | null = sd?.reason ?? null;
+    return { ...health, steps: stepsReason ? [] : steps, stepsReason };
   }
 
   // ==================================================================== the deadline table, shared by GET and the answer of PUT

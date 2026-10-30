@@ -24,12 +24,13 @@ import { config } from "../../../config";
 import { withGlobal, withTenants, newId } from "../../../db";
 import { buildApp } from "../../../main";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../../testing/setup";
-import { createCompany, createUser, addMembership, createClient, createRole, grantRole } from "../../../testing/fixtures";
+import { createCompany, createUser, addMembership, createClient, createRole, grantRole, createProject } from "../../../testing/fixtures";
 import { grantSocialRole, grantSocialSeat, seedSocialOrgTree } from "../../../testing/social-pipeline-fixtures";
 import { registerModule, resetModules } from "../../registry";
 import { addDays } from "../../hr/working-days";
 import { todayIsoInTz } from "../../reports/person-scope";
 import { socialModule } from "../index";
+import { createPmTaskInTx, normalizePmTaskInput, setLinkedTaskProgressInTx } from "../../pm/pm.controller";
 import { FEED_TAG } from "./feed-data";
 import { TEAM_TAG } from "./team-data";
 import type { TeamAnswer } from "./team";
@@ -723,6 +724,68 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
     // the example body of this suite, for the record (test data only)
     // eslint-disable-next-line no-console
     console.log(`[scp5d example] ${JSON.stringify(await read("smHead"))}`);
+  });
+
+  // ── 4b. late cycle steps (SCP-5f, BFF §63.27.4) ──────────────────────────────────────────────────────────────────────────────
+  it("cycle_step_late: an open step past its due date, for the month's cycles only; it goes when the step closes and comes back when it reopens; no person", async () => {
+    config.socialSimulationEnabled = false;
+    const e = await makeEngagement(A, "Mock Cycle Steps Client", U.officerTwo, { cycle: { month: `${PREV}-01`, deadline: lastDay(PREV), readyBy: lastDay(PREV) } });
+    const other = await makeEngagement(A, "Mock Other Month Steps Client", U.officerTwo, { cycle: { month: `${M}-01`, deadline: lastDay(M), readyBy: lastDay(M) } });
+    const projectId = await createProject(A, "Mock content project (steps)");
+    const make = (cycleId: string, step: string, title: string, due: string | null): Promise<string> => withTenants([A], async (c) => {
+      const n = normalizePmTaskInput({ projectId, title, dueDate: due ?? undefined });
+      return (await createPmTaskInTx(c, A, null, { ...n, link: { type: "social_cycle_step", id: cycleId, step } })).id;
+    }, SOCIAL);
+    const closeIt = (taskId: string, done: boolean): Promise<unknown> =>
+      withTenants([A], (c) => setLinkedTaskProgressInTx(c, A, null, taskId, { progress: done ? 100 : 0, done }), SOCIAL);
+    const yesterday = shift(today, -1);
+    const planning = await make(e.cycleId!, "planning", "Mock plan", shift(today, -3));
+    const report = await make(e.cycleId!, "report", "Mock report", yesterday);
+    await make(e.cycleId!, "deploy", "Mock scheduled", today); // due today: not yet late
+    await make(e.cycleId!, "artwork", "Mock artwork", shift(today, 5)); // in the future
+    await make(e.cycleId!, "copy_lock", "Mock copy locked", null); // no due date
+    await make(other.cycleId!, "planning", "Mock plan (another month)", shift(today, -3)); // M's cycle, asked for PREV
+    const mine = (a: TeamAnswer) => a.needsAttention.filter((i) => i.kind === "cycle_step_late" && i.engagementId === e.id);
+    try {
+      const a = await read("smHead", `?month=${PREV}`);
+      expect(a.partial).toEqual([]);
+      expect(mine(a).map((i) => i.step)).toEqual(["planning", "report"]); // the longest late first
+      expect(mine(a)[0]).toEqual({
+        kind: "cycle_step_late", engagementId: e.id, clientName: "Mock Cycle Steps Client", step: "planning", dueDate: shift(today, -3),
+        title: "Mock plan", since: shift(today, -3),
+      });
+      // team-level: no person, no holder, no post
+      for (const i of mine(a)) { expect(i.holder).toBeUndefined(); expect(i.postId).toBeUndefined(); }
+      expect(a.needsAttention.some((i) => i.kind === "cycle_step_late" && i.engagementId === other.id)).toBe(false);
+      // it sits in the list's order: after boosts waiting, before the reports
+      const kinds = a.needsAttention.map((i) => i.kind);
+      expect(kinds.lastIndexOf("boost_waiting")).toBeLessThan(kinds.indexOf("cycle_step_late"));
+      if (kinds.includes("report_due")) expect(kinds.lastIndexOf("cycle_step_late")).toBeLessThan(kinds.indexOf("report_due"));
+      // the same for every reader (team-level)
+      expect(teamLevel(await read("platformAdmin", `?month=${PREV}`)).needsAttention).toEqual(a.needsAttention);
+      // M's own list has the other client's step, and not this one
+      const m = await read("smHead", `?month=${M}`);
+      expect(m.needsAttention.filter((i) => i.kind === "cycle_step_late").map((i) => i.engagementId)).toContain(other.id);
+      expect(m.needsAttention.some((i) => i.kind === "cycle_step_late" && i.engagementId === e.id)).toBe(false);
+
+      // a step that closes leaves the list; one that reopens comes back
+      await closeIt(planning, true);
+      expect(mine(await read("smHead", `?month=${PREV}`)).map((i) => i.step)).toEqual(["report"]);
+      await closeIt(report, true);
+      expect(mine(await read("smHead", `?month=${PREV}`))).toEqual([]);
+      await closeIt(planning, false);
+      expect(mine(await read("smHead", `?month=${PREV}`)).map((i) => i.step)).toEqual(["planning"]);
+
+      // a deleted step task, and a closed engagement, list nothing
+      await withTenants([A], (c) => c.query(`UPDATE pm_tasks SET deleted_at = now() WHERE id = $1`, [planning]));
+      expect(mine(await read("smHead", `?month=${PREV}`))).toEqual([]);
+      await closeIt(report, false);
+      expect(mine(await read("smHead", `?month=${PREV}`)).map((i) => i.step)).toEqual(["report"]);
+      await withTenants([A], (c) => c.query(`UPDATE social_engagements SET status = 'closed' WHERE id = $1`, [e.id]), SOCIAL);
+      expect(mine(await read("smHead", `?month=${PREV}`))).toEqual([]);
+    } finally {
+      await withTenants([A], (c) => c.query(`UPDATE pm_tasks SET deleted_at = now() WHERE project_id = $1`, [projectId]));
+    }
   });
 
   // ── 5. sections read on their own ──────────────────────────────────────────────────────────────────────────────────────────

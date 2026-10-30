@@ -24,9 +24,10 @@ import { todayIsoInTz } from "../../reports/person-scope";
 
 // ── the shape (BFF §63.19) ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-export type AttentionKind = "late" | "at_risk" | "blocked" | "failed_post" | "boost_waiting" | "report_due" | "report_to_check";
-/** The order the list is drawn in: what is already late first, the reports last. */
-export const ATTENTION_ORDER: readonly AttentionKind[] = ["late", "at_risk", "blocked", "failed_post", "boost_waiting", "report_due", "report_to_check"];
+export type AttentionKind =
+  "late" | "at_risk" | "blocked" | "failed_post" | "boost_waiting" | "cycle_step_late" | "report_due" | "report_to_check";
+/** The order the list is drawn in: what is already late first, the reports last. A late cycle step (SCP-5f, §63.27.4) sits before the reports. */
+export const ATTENTION_ORDER: readonly AttentionKind[] = ["late", "at_risk", "blocked", "failed_post", "boost_waiting", "cycle_step_late", "report_due", "report_to_check"];
 
 export interface AttentionItem {
   kind: AttentionKind;
@@ -36,8 +37,11 @@ export interface AttentionItem {
   engagementId: string;
   clientName: string;
   title?: string;
-  /** ISO timestamp, or the first day of the month for a report that is due. */
+  /** ISO timestamp, or the first day of the month for a report that is due; a late cycle step's due date. */
   since: string;
+  /** `cycle_step_late` only (SCP-5f, §63.27.4): the step's key of the company's rules and its due date (`YYYY-MM-DD`). Team-level: no person. */
+  step?: string;
+  dueDate?: string;
   holder?: { role: string; label: string };
 }
 
@@ -147,7 +151,7 @@ export function reportAttention(
   return out;
 }
 
-const idOfItem = (i: AttentionItem): string => i.boostId ?? i.postId ?? i.reportId ?? i.engagementId;
+const idOfItem = (i: AttentionItem): string => i.boostId ?? i.postId ?? i.reportId ?? (i.step ? `${i.engagementId}:${i.step}` : i.engagementId);
 
 /** The list's order: by kind (`ATTENTION_ORDER`), then the longest in that state first, then client, then id: a total order. */
 export function sortAttention(items: readonly AttentionItem[]): AttentionItem[] {
