@@ -105,6 +105,26 @@ client's photos". Resolving it returns the post to the step it left.
 | SCP-Q23 | Close the self-promotion gap into a lead seat? (raised by SCP-0b) | **Yes, with a ticket (SCP-1q).** Nobody may edit a position they hold, the same way assigning yourself is already refused, so nobody can make themselves a head. It protects every lead-seat authority, not only SCP, and lands before SCP's approvals go live. |
 | SCP-Q24 | What does the Social Home show? (raised 2026-10-27 by the owner: the Overview's header and blocks clutter the design) | **The design's feed only.** In the Social skin the Home has no Overview header (greeting, period, quick actions, Customise, Me/Team), no Overview blocks and no "More from Social Media" band. What only the Overview offered moves first to slots the design already has: Needs you to the top row of Notifications (Kh); today's check-in and pinned notices to the design's reminder cards (Ki); Notices and the Department calendar to More (Kj); Ask Web Dev to Create (Kk). The KPI strip, Pulse and the head's Team view go to the Team dashboard (SCP-5d). The Standard look and every other department keep the Overview. Reverses §6.4's "the KPI strip and banner stay" for the Social skin. |
 
+**Ruled by the owner on 2026-10-30** (relayed first-hand by the orchestrating session). SCP-Q25 to SCP-Q36 were raised by the
+contract for the rest of SCP-5 (BFF §63.24 to §63.29), each with a recommended default, and the owner took every default in two
+words: "accept default". SCP-Q37 is the owner's own.
+
+| # | Question | Ruling |
+|---|---|---|
+| SCP-Q25 | Who sends the weekly report? | **As the monthly:** the officer writes and submits it; only the four check and send it, and sending publishes it to the client's portal reports. Since SCP-Q37 this holds for every periodic kind. |
+| SCP-Q26 | Which clients get a weekly report? | **The clients switched on in the allocation,** off until set. Since SCP-Q37, per kind (`report_kinds`). |
+| SCP-Q27 | Do ideas reach the client? | **No.** "Mark shared" records that the team shared an idea; nothing goes to the portal or the PDF. |
+| SCP-Q28 | Saved captions, templates and references: per client or team-wide? | **Per client,** as the team's prototype. |
+| SCP-Q29 | Who curates Saved? | **The Social Media team adds;** changing or deleting someone else's item is the client's officer, the HoD or the GM. |
+| SCP-Q30 | Videos in Saved? | **Drive links only;** the Asset Library stores images. |
+| SCP-Q31 | Which monthly-cycle steps close themselves? | **All six,** each on its pipeline condition, and each reopens when the condition stops holding. |
+| SCP-Q32 | The audit's dimensions, weights, bands and benchmark? | **The 15 Oct design's twelve, reworded;** equal weights; bands at 75 and 50; the benchmark is our own clients' median engagement rate by business type over 90 days. All reviewed with the team at SCP-7d. |
+| SCP-Q33 | Where does a prospect live? | **On its audit,** as a name and a business type, attached to the client once signed. |
+| SCP-Q34 | Who writes audits? | **A client's: its officer, the HoD or the GM. A prospect's: the four.** |
+| SCP-Q35 | The onboarding checklist? | **The team's fifteen steps in six phases, reworded,** seeded as a PM project template the four edit; the team sets the offsets. |
+| SCP-Q36 | Who starts a client's onboarding? | **The four,** because it hands tasks to people. |
+| SCP-Q37 | Reports on demand (the owner, 2026-10-30) | **AI generates the reports, for one client or for all, at any period, and by chat.** The owner's words: "the goal is to have a button to make ai generate the reports. it could be per client or all, daily, weekly, monthly, quarterly, semester, yearly. and by chat with ai." Periodic reports from daily to yearly on `social_reports`; "Generate with AI" for one client or for every client the person may draft for; an agent tool that drafts and never approves or sends (BFF §63.24). The four still check and send every kind (SCP-Q25). |
+
 **Open:** none.
 
 **Superseded on 2026-10-26:** SCP-Q3 (the client page's look) by SCP-D5 and SCP-Q8; SCP-Q4 (two internal approvers) and
