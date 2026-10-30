@@ -233,7 +233,8 @@ describe.skipIf(!TEST_URL)("SCP-1n · the content month in PM (BFF §63.13)", ()
     const cycle = (await adminPool().query(`SELECT id::text AS id FROM social_cycles WHERE engagement_id = $1`, [e.engagementId])).rows[0].id as string;
     const tasks = await cycleTasks(cycle);
     expect(tasks).toHaveLength(1);
-    expect(await taskCount()).toBe(before + 1);
+    // SCP-5f (BFF §63.27): the same call also makes the cycle's six step tasks beside it (cycle-steps.http.test.ts proves them).
+    expect(await taskCount()).toBe(before + 7);
     const t = tasks[0];
     expect(t).toMatchObject({ title: "March 2027 content", progress: 0, project_id: e.projectId, linked_type: "social_cycle", linked_id: cycle });
     expect(t.status).not.toBe("done");
