@@ -629,6 +629,11 @@ services:
       # AIP-D3 (AIP-10/12/13) — the department of a turn, one flag per company: empty = off (the default), `all`,
       # or a comma-separated list of company ids. Off keeps the prompt and the knowledge call exactly as before.
       ASSISTANT_DEPT_CONTEXT: ${ASSISTANT_DEPT_CONTEXT:-}
+      # AIP-17b / AIP-19 (plan §6.3 items 6 to 8): empty = the code's defaults (200 replies a day; the job ON; every 10 minutes).
+      # AI_USAGE_JOB_ENABLED=0 turns the budget-notice and runaway job off.
+      AI_DAILY_REPLY_ALLOWANCE: ${AI_DAILY_REPLY_ALLOWANCE:-}
+      AI_USAGE_JOB_ENABLED: ${AI_USAGE_JOB_ENABLED:-}
+      AI_USAGE_JOB_INTERVAL_MS: ${AI_USAGE_JOB_INTERVAL_MS:-}
       BOT_URL: http://bot:3001
       # Same shared secret the bot service reads (see its ADMIN_TOKEN below). The two read
       # DIFFERENT .env names, so a deployment that sets only ADMIN_TOKEN left this empty and

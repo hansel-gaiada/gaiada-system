@@ -255,10 +255,15 @@ export async function runCompanyAlerts(tenantId: string, now: Date = new Date(),
         };
       }
     }
+    // A runaway notice's link opens the company view, which IT's seat holders cannot read (AIP-D18): they get the same words (AIP-D19)
+    // without the link, so the notice never sends someone to a refusal.
+    const ownerIds = new Set(owners.map((id) => id.toLowerCase()));
+    const isRunaway = x.kind === "runaway_person" || x.kind === "runaway_agent";
     let sent = 0;
     for (const r of recipients) {
       try {
-        await send(tenantId, r, null, type, payload);
+        const { href: _href, ...withoutLink } = payload;
+        await send(tenantId, r, null, type, isRunaway && !ownerIds.has(r.toLowerCase()) ? withoutLink : payload);
         sent++;
       } catch (err) {
         console.error(`[AI-USAGE-ALERTS] notice ${type} to ${r} failed:`, (err as Error)?.message ?? err);
