@@ -6,7 +6,7 @@
 // a person (`personRowsLimited`) and what could not be worked out (`partial`); this file only draws what it answered.
 import { HEALTH_LABEL, isMonthKey, asHealth, type Health, type HealthState } from "./socialCycles";
 
-export type AttentionKind = "late" | "at_risk" | "blocked" | "failed_post" | "boost_waiting" | "report_due" | "report_to_check";
+export type AttentionKind = "late" | "at_risk" | "blocked" | "failed_post" | "boost_waiting" | "cycle_step_late" | "report_due" | "report_to_check";
 export type WorkRole = "officer" | "copywriter" | "designer" | "approver";
 export type WaitRole = "officer" | "copywriter" | "approver" | "designer" | "client" | "external";
 
@@ -20,6 +20,9 @@ export interface AttentionItem {
   title: string | null;
   since: string;
   holder: { role: string; label: string } | null;
+  /** `cycle_step_late` only (SCP-5f, BFF §63.27.4): the step's key in the company's rules and the day it was due. Team-level: no person. */
+  step: string | null;
+  dueDate: string | null;
 }
 
 export interface TeamClient {
@@ -57,7 +60,7 @@ export interface TeamDashboard {
 
 // ── The words ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export const ATTENTION_ORDER: readonly AttentionKind[] = ["late", "at_risk", "blocked", "failed_post", "boost_waiting", "report_due", "report_to_check"];
+export const ATTENTION_ORDER: readonly AttentionKind[] = ["late", "at_risk", "blocked", "failed_post", "boost_waiting", "cycle_step_late", "report_due", "report_to_check"];
 
 export const ATTENTION_LABEL: Readonly<Record<AttentionKind, string>> = {
   late: "Late",
@@ -65,6 +68,7 @@ export const ATTENTION_LABEL: Readonly<Record<AttentionKind, string>> = {
   blocked: "Blocked",
   failed_post: "Failed to post",
   boost_waiting: "Boost waiting",
+  cycle_step_late: "Cycle step late",
   report_due: "Report due",
   report_to_check: "Report to check",
 };
@@ -76,6 +80,7 @@ export const ATTENTION_WORDS: Readonly<Record<AttentionKind, string>> = {
   blocked: "Stopped until something outside the post changes",
   failed_post: "The network refused it; it did not go live",
   boost_waiting: "A boost was requested and is waiting for the client, or was approved and has not started",
+  cycle_step_late: "A step of the client’s monthly cycle is past its due date and still open",
   report_due: "Due on the client’s report day and not yet sent",
   report_to_check: "A drafted report is waiting for its check",
 };
@@ -95,6 +100,16 @@ const STEP_LABEL: Readonly<Record<string, string>> = {
   brief: "Brief", copy: "Copy",
 };
 export const stepLabel = (step: string): string => STEP_LABEL[step] ?? step;
+
+/** The row's second line: when it has been waiting, and with whom. A late cycle step says the day it was due, in words ("Was due 12 Oct"), never a bare date. */
+export function attentionMeta(it: AttentionItem): string {
+  if (it.kind === "cycle_step_late") {
+    const day = it.dueDate ?? it.since;
+    return `Was due ${sinceText(day).replace(/^Since /, "")}`;
+  }
+  const holder = holderText(it.holder);
+  return `${sinceText(it.since)}${holder ? ` · With ${holder}` : ""}`;
+}
 
 /** What `partial` names, in words. An unknown name is shown as sent: a part we cannot name is still a part that is missing. */
 const PART_LABEL: Readonly<Record<string, string>> = {
@@ -146,6 +161,8 @@ export function attentionHref(deptId: string, it: AttentionItem): string {
     return it.reportId ? `${base}/social-reports/${e(it.reportId)}` : `${base}/social-reports`;
   }
   if (it.kind === "boost_waiting") return `${base}/boosts`;
+  // A late cycle step opens the client's Plan tab, where the six steps are drawn (BFF §63.27.4).
+  if (it.kind === "cycle_step_late") return `${base}/profile/${e(it.engagementId)}?tab=plan`;
   if (it.postId) return `${base}/posts/${e(it.postId)}`;
   return `${base}/profile/${e(it.engagementId)}`;
 }
@@ -218,7 +235,7 @@ export function asTeamDashboard(raw: unknown): TeamDashboard {
     const h = isObj(r.holder) && typeof r.holder.role === "string" ? { role: r.holder.role, label: str(r.holder.label) ?? "" } : null;
     needsAttention.push({
       kind, postId: str(r.postId), reportId: str(r.reportId), boostId: str(r.boostId), engagementId: r.engagementId, clientName: r.clientName,
-      title: str(r.title), since: str(r.since) ?? "", holder: h,
+      title: str(r.title), since: str(r.since) ?? "", holder: h, step: str(r.step), dueDate: str(r.dueDate),
     });
   }
   const clients: TeamClient[] = [];

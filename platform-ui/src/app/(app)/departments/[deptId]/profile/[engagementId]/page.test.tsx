@@ -62,7 +62,7 @@ const posts: ClientPost[] = [
 const lateHealth = { state: "late" as const, spareDays: -3, lateDays: 2, lateWith: "designer" as const, latestSafeHandoff: "2026-10-08", readyBy: "2026-10-09" };
 const cycle = (over: Partial<CycleView> = {}): CycleView => ({
   cycleId: "cy-1", engagementId: "e-alpha", clientName: "Brand Alpha", month: "2026-10", deadline: "2026-10-14", readyBy: "2026-10-09", today: "2026-10-16",
-  client: lateHealth, posts: [{ ...posts[0], health: lateHealth }, ...posts.slice(1)], ...over,
+  client: lateHealth, posts: [{ ...posts[0], health: lateHealth }, ...posts.slice(1)], steps: null, stepsReason: null, ...over,
 });
 const item = (over: Partial<CalendarItem>): CalendarItem => ({
   postId: "p-1", clientName: "Brand Alpha", title: "Harvest teaser", format: "feed", scheduledAt: "2026-10-20T09:30:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: false, dateMove: "locked", dateMoveRefusal: "field_locked", ...over,
@@ -236,6 +236,42 @@ describe("Plan", () => {
   it("falls back to Plan for a ?tab= the page does not have", async () => {
     await mount({ tab: "nonsense" });
     expect(screen.getByRole("list", { name: "Counted posts and empty slots" })).toBeInTheDocument();
+  });
+});
+
+describe("Plan: the strip of the month's steps (SCP-5f, BFF §63.27.4)", () => {
+  const step = (over: Record<string, unknown>) => ({
+    step: "planning", title: "October 2026 plan", taskId: "t-plan", dueDate: "2026-10-20", done: false, progress: 0, autoClose: "auto" as const, holder: "The officer", late: false, ...over,
+  });
+  it("draws the steps above the grid, each with its due date and state in words, a late step said in words", async () => {
+    vi.mocked(getCycleView).mockResolvedValue(ok(cycle({
+      steps: [
+        step({ step: "report", title: "Monthly report for August 2026", taskId: "t-report", dueDate: "2026-10-05", late: true }),
+        step({}),
+        step({ step: "deploy", title: "October 2026 scheduled", taskId: "t-deploy", done: true, progress: 100, holder: null }),
+      ],
+    })));
+    await mount();
+    const strip = screen.getByRole("region", { name: "The month's steps" });
+    expect(within(strip).getAllByRole("listitem").map((li) => li.getAttribute("data-state"))).toEqual(["late", "open", "done"]);
+    expect(strip).toHaveTextContent("Late, was due 5 Oct");
+    expect(strip).toHaveTextContent("Open, due 20 Oct");
+    expect(within(strip).getByRole("link", { name: "Monthly report for August 2026" })).toHaveAttribute("href", "/tasks/t-report");
+    // above the grid of slots
+    const slots = screen.getByRole("list", { name: "Counted posts and empty slots" });
+    expect(strip.compareDocumentPosition(slots) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+  it("says why a client with no project has no steps", async () => {
+    vi.mocked(getCycleView).mockResolvedValue(ok(cycle({ steps: [], stepsReason: "no_project" })));
+    await mount();
+    expect(screen.getByTestId("steps-reason")).toHaveTextContent("no project");
+  });
+  it("draws no strip when the answer carries no steps at all, and none on the other tabs", async () => {
+    await mount(); // the default answer has `steps: null`
+    expect(screen.queryByRole("region", { name: "The month's steps" })).toBeNull();
+    vi.mocked(getCycleView).mockResolvedValue(ok(cycle({ steps: [step({})] })));
+    await mount({ tab: "stories" });
+    expect(screen.queryByRole("region", { name: "The month's steps" })).toBeNull();
   });
 });
 

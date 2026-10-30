@@ -4,11 +4,12 @@
 // (`social_cycle`, set by the pipeline). The task drawer shows the way back:
 //   a post         {D}/posts/[postId]             the post page (a drawer over any list, BFF §63.17)
 //   a content month {D}/profile/[engagementId]    the client's page (Profile), the cycle's engagement
+//   a cycle step    {D}/profile/[engagementId]?tab=plan   the client's Plan tab, where the six steps are drawn (SCP-5f, BFF §63.27.3)
 // where `{D}` is `/departments/[deptId]` of the company's Social Media department. The pages are built by the other SCP tickets; this file only
 // names their URLs. The server's links are data; nothing here grants anything.
 import { workspaceFor } from "@/lib/workspaces";
 
-export type PmLinkType = "social_post" | "social_cycle";
+export type PmLinkType = "social_post" | "social_cycle" | "social_cycle_step";
 
 /** What a task carries (additive on `PmTask`): the pair is both set or both null. */
 export interface TaskLink {
@@ -38,6 +39,9 @@ export function taskLinkTarget(
   if (task.linkedType === "social_post") return { href: `${dept}/posts/${encodeURIComponent(task.linkedId)}`, label: "Social post" };
   if (task.linkedType === "social_cycle") {
     return where.engagementId ? { href: `${dept}/profile/${encodeURIComponent(where.engagementId)}`, label: "Client's content month" } : null;
+  }
+  if (task.linkedType === "social_cycle_step") {
+    return where.engagementId ? { href: `${dept}/profile/${encodeURIComponent(where.engagementId)}?tab=plan`, label: "Client's monthly step" } : null;
   }
   return null;
 }

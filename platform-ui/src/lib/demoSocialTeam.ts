@@ -19,6 +19,7 @@ import { todayIsoInDisplayZone } from "./format";
 import { demoBoosts } from "./demoSocialBoosts";
 import { scpHolderOf } from "./scpStageMachine";
 import { demoReportsFor, demoReportsInReview } from "./demoSocialReports";
+import { demoLateSteps } from "./demoSocialCycleStepsRead";
 import {
   COPYWRITER, CREATIVES_DESIGNER, DEMO_MEMBER_NAMES, IN_TEAM_DESIGNER, PIPE_ENGAGEMENTS, PIPE_POSTS, SEAT_APPROVERS, allocStore, demoCycleTable, demoPostHealth,
   isDemoSocialApprover, type DemoResult, type PipePost,
@@ -109,6 +110,11 @@ export function demoTeamDashboard(month: string, userId: string, opts: DemoTeamO
       kind: "boost_waiting", boostId: b.id, engagementId: b.engagementId, clientName: PIPE_ENGAGEMENTS.find((e) => e.id === b.engagementId)?.clientName ?? "", title: post.title,
       since: dayOf(requested ? b.requestedAt : b.approvedAt ?? b.requestedAt)
     });
+  }
+
+  // late cycle steps (BFF §63.27.4): an open step of the month's cycles past its due date. Team-level: a client, a step and a date, no holder and no person.
+  for (const l of demoLateSteps(month)) {
+    needsAttention.push({ kind: "cycle_step_late", engagementId: l.engagementId, clientName: l.clientName, step: l.step, dueDate: l.dueDate, title: l.title, since: l.dueDate });
   }
 
   // monthly reports (BFF §63.19, the rulings of 2026-10-29): `report_due` for month M is period M-1's monthly report, once the client's report day in M has come (a past

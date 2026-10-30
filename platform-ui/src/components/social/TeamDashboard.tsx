@@ -7,7 +7,7 @@
 import Link from "next/link";
 import {
   ATTENTION_LABEL, ATTENTION_WORDS, HEALTH_LABEL, HOLDER_NOTE, LIMITED_NOTE, WAIT_ROLE_LABEL, WORK_ROLE_LABEL,
-  attentionGroups, attentionHref, clientHref, clientsByHealth, holderText, partialText, postsCount, postsText, settingsHref, sinceText, stepLabel,
+  attentionGroups, attentionHref, attentionMeta, clientHref, clientsByHealth, partialText, postsCount, postsText, settingsHref, sinceText, stepLabel,
   waitsSorted, workingDaysText, workloadSorted, type TeamDashboard,
 } from "@/lib/socialTeam";
 import { HealthChip } from "./HealthChip";
@@ -38,14 +38,13 @@ export function TeamDashboard({ data, deptId }: { data: TeamDashboard; deptId: s
                 <p className="std-group__words">{ATTENTION_WORDS[g.kind]}</p>
                 <ul className="std-list">
                   {g.items.map((it, i) => {
-                    const holder = holderText(it.holder);
                     return (
                       <li key={`${g.kind}-${it.postId ?? it.reportId ?? it.boostId ?? it.engagementId}-${i}`} className="std-row">
                         <Link href={attentionHref(deptId, it)} className="std-row__main">
                           <span className="std-row__client">{it.clientName}</span>
                           {it.title && <span className="std-row__title">{it.title}</span>}
                         </Link>
-                        <span className="std-row__meta">{sinceText(it.since)}{holder ? ` · With ${holder}` : ""}</span>
+                        <span className="std-row__meta">{attentionMeta(it)}</span>
                       </li>
                     );
                   })}

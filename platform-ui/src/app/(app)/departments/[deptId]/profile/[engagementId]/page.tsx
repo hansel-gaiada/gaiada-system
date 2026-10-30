@@ -26,6 +26,7 @@ import { ClientHeader } from "@/components/social/ClientHeader";
 import { ClientAccounts, type ClientAccountsRead } from "@/components/social/ClientAccounts";
 import { ClientTabs } from "@/components/social/ClientTabs";
 import { ClientPlan } from "@/components/social/ClientPlan";
+import { CycleStepStrip } from "@/components/social/CycleStepStrip";
 import { BoostBudgetCard } from "@/components/social/BoostBudgetCard";
 import { ClientStories } from "@/components/social/ClientStories";
 import { ClientCalendar } from "@/components/social/ClientCalendar";
@@ -155,6 +156,7 @@ export default async function SocialClientPage({ params, searchParams }: { param
         <ReadRefusal subject="This cycle's posts" kind="unavailable" reason={cycle.reason} inline />
       ) : tab === "plan" ? (
         <>
+          <CycleStepStrip steps={cycleView?.steps ?? null} reason={cycleView?.stepsReason ?? null} />
           <ClientPlan deptId={deptId} engagementId={engagementId} posts={posts} target={row.postsPerCycle} canAdd />
           {boostBudget?.kind === "ok" ? (
             <BoostBudgetCard cycleId={cycleId} monthTitle={monthTitle(row.thisCycle?.month ?? month)} budget={boostBudget.data} />
