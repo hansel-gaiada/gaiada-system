@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **301** capabilities across **17** owners
-- **160** writes · 141 reads
-- Writes by impact: **high 28** · medium 44 · low 88
+- **303** capabilities across **17** owners
+- **161** writes · 142 reads
+- Writes by impact: **high 28** · medium 45 · low 88
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -51,10 +51,10 @@ unfalsifiable after.
 | knowledge | `knowledge` | 3 |
 | lms | `lms` | 1 |
 | monitoring | `monitoring` | 3 |
-| pm | `pm` | 19 |
+| pm | `pm` | 20 |
 | reports | `checkins` · `reports` | 24 |
 | search | `search` | 31 |
-| social | `social` | 41 |
+| social | `social` | 42 |
 | webdev | `webdev` | 41 |
 
 ## Capabilities
@@ -273,6 +273,7 @@ unfalsifiable after.
 | social | `social.listPosts` | `GET` | `/api/:tenantId/modules/social/posts` | read | — |
 | social | `social.listReports` | `GET` | `/api/:tenantId/modules/social/reports` | read | — |
 | social | `social.listThreadMessages` | `GET` | `/api/:tenantId/modules/social/threads/:threadId/messages` | read | — |
+| social | `social.onboarding` | `GET` | `/api/:tenantId/modules/social/onboarding` | read | — |
 | social | `social.planIdea` | `POST` | `/api/:tenantId/modules/social/ideas/:ideaId/plan` | write | `low` |
 | social | `social.provisionPublisherOrg` | `POST` | `/api/:tenantId/modules/social/publisher-orgs` | write | `medium` |
 | social | `social.publishPost` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish` | write | `high` |
@@ -288,6 +289,7 @@ unfalsifiable after.
 | social | `social.setEngagementScope` | `PATCH` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | write | `medium` |
 | social | `social.setRules` | `PUT` | `/api/:tenantId/modules/social/rules/:section` | write | `medium` |
 | social | `social.shareIdea` | `POST` | `/api/:tenantId/modules/social/ideas/:ideaId/share` | write | `low` |
+| social | `social.startOnboarding` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/onboarding` | write | `medium` |
 | social | `social.syncConnectorRegistry` | `POST` | `/api/:tenantId/modules/social/publisher-orgs/:clientId/sync` | write | `low` |
 | social | `social.teamDashboard` | `GET` | `/api/:tenantId/modules/social/team` | read | — |
 | social | `social.updateReplyDraft` | `PATCH` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId` | write | `low` |
