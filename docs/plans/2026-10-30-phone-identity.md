@@ -63,11 +63,29 @@ Two facts the owner should know:
     **26.4** (conditional and modal UI). 26.4 also adds "Condition - credential", which skips a second factor
     when the passkey was the first. 26.0 has only plain WebAuthn as a second factor.
   - So **an upgrade is a prerequisite**.
-- **Realm `gaiada` as committed in the repo** (live must be measured; it has drifted before):
-  - `loginWithEmailAllowed: true`: a username already works at the password screen.
-  - `registrationAllowed: false`, `resetPasswordAllowed: false`.
-  - `ssoSessionIdleTimeout` and `ssoSessionMaxLifespan` are both 36000 (10 h). No remember-me.
+- **Live Keycloak, measured read-only 2026-10-30 (PID-1a,** one admin-API login inside the container, GETs only):
+  - **26.0.8**, image `quay.io/keycloak/keycloak:26.0`, running since 2026-10-11. Its database is
+    `gaiada_keycloak` on the host Postgres. Public address `KC_HOSTNAME=https://erp.gaiada.com/idp`, so the passkey
+    RP ID defaults to `erp.gaiada.com`; the WebAuthn RP ID fields are empty today.
+  - **75 accounts, all enabled. Every one holds only a password** (no OTP, no WebAuthn), and **every username equals
+    the email.**
+  - `loginWithEmailAllowed: true`, `registrationAllowed: false`, `resetPasswordAllowed: false`,
+    `editUsernameAllowed: false`, `verifyEmail: true`.
+  - `ssoSessionIdleTimeout` and `ssoSessionMaxLifespan` are 36000 (10 h). `rememberMe: false`, and both remember-me
+    lifespans are 0.
+  - **`bruteForceProtected: false`: nothing slows down password guessing today** (§6, risk 13).
+  - Flows are all the built-in ones, with no client overrides. The `browser` flow is cookie, IdP redirector,
+    Organization, then username-password with a conditional OTP. The `reset credentials` flow sends the reset email,
+    unused while the reset is off.
+  - Required actions: `CONFIGURE_TOTP`, `VERIFY_EMAIL`, `UPDATE_PASSWORD` (enabled), `delete_account` (disabled).
+    **No WebAuthn registration action is enabled yet.**
+  - User profile: `username`, `email`, `firstName`, `lastName`. **No phone attribute**, and unmanaged attributes
+    are off.
+  - Clients: `gaiada-ui` (public, standard flow), `gaiada-platform`, the service-account clients
+    `gaiada-provisioner` and `webdesk-control`, and Keycloak's own. Direct grants are on only for `admin-cli`.
   - No `amr` mapper: `infra/runbooks/enable-mfa.md` is PLANNED, not applied.
+- **Usernames:** only `platform-nest/src/auth/oidc.ts` reads `preferred_username`, and only as a fallback display
+  name. Identity is `sub` plus the verified email, so usernames can differ from emails safely (§6, risk 14).
 - **The ERP's own session** is 12 h absolute (`platform-ui/src/lib/session.ts` `SESSION_TTL_SECONDS`).
 - **Assurance:**
   - `platform-nest/src/auth/oidc.ts` maps an `amr` containing `mfa`/`otp`/`hwk`/`totp` to `high`.
@@ -137,6 +155,8 @@ Two facts the owner should know:
 | 10 | **Bots and services break.** | They never use the browser flow (client credentials, service tokens), so they are unaffected. The proof includes a check that each one still works. |
 | 11 | **Custom code inside the identity provider** (the phone sign-in extension). | Kept to one form and one lookup. It fails closed on a duplicate number and gives the same message for every failure. Tests run in CI, the image is pinned, and it is rebuilt and re-tested at every Keycloak upgrade. If it ever fails, binding back the stock form restores username and email sign-in (a written revert). |
 | 12 | **The phone number is not proved** (PID-D8). Someone could register another person's number, or mistype their own. | Invite only, so only invited people can register. A number already in use is refused. IT can correct a number on the IT Accounts page (audited). Nobody gets access through a number: they still need the password and the passkey. |
+| 13 | **Brute-force protection is off on live** (measured 2026-10-30). Username or phone + password can be guessed with no slow-down. The passkey stops a guessed password from getting in, but only once it is required. | Turn on Keycloak's brute-force detection with **temporary** lockouts (never permanent: a permanent lockout of the owner is itself a lockout incident), in the first live realm step (PID-2i). Every headless test login stays a single attempt, as already ruled. |
+| 14 | **Usernames have always equalled emails** (all 75 live accounts). | Only one reader of `preferred_username` exists (a fallback display name). The proof checks that the IT Accounts page, the invite adoption (`findUserByEmail` with `exact=true`) and `sso-login.sh` all key on email or `sub`, never on the username. |
 
 ## 7. Rollout order
 
@@ -165,6 +185,8 @@ Two facts the owner should know:
 - 2d the passkey-based reset flow;
 - 2e "This is my own device" = remember-me, 7 days;
 - 2f the `amr` mapper;
+- 2i brute-force detection on, temporary lockouts only (§6 risk 13); offered to the owner as an early live step
+  ahead of the rest, since it closes a gap that exists today;
 - 2g all of it as a script with backup and revert, in `infra/runbooks/`.
 
 **PID-3 · Platform:**
