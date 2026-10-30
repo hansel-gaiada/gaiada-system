@@ -11,9 +11,10 @@
 // Refusals: 400 `invalid_field` `{field}` ('<section>.<path>' for a value; `section`, `expectedVersion`, `value`, `engagementId`,
 // `cursor`, `limit` for the request itself); 409 `rules_changed` `{detail: {currentVersion}}` on a stale `expectedVersion`; 404
 // `engagement_not_found` for a preview's unknown client. A write answers the read, and records `rules_changed` on entity
-// `social_rules` (the company's id) with `{section, version, reset, diff}`.
+// `social_rules` (the company's id) with `{section, version, reset, diff}`. Every route answers 200: the reset writes a version but
+// creates no addressable resource, and the preview writes nothing.
 import {
-  Body, Controller, ForbiddenException, Get, NotFoundException, Param, Post, Put, Query, Req, UseGuards,
+  Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, Post, Put, Query, Req, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { withTenants } from "../../../db";
@@ -104,6 +105,7 @@ export class SocialRulesController {
 
   // ==================================================================== POST rules/preview
   @Post("rules/preview")
+  @HttpCode(200)
   async preview(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: unknown): Promise<RulesPreviewAnswer> {
     await authorizePlan(req, tenantId);
     const b = bodyOf(body, ["section", "value", "engagementId"]);
@@ -188,6 +190,7 @@ export class SocialRulesController {
 
   // ==================================================================== POST rules/:section/reset
   @Post("rules/:section/reset")
+  @HttpCode(200)
   async resetSection(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("section") sectionP: string, @Body() body: unknown,
   ): Promise<RulesAnswer> {
