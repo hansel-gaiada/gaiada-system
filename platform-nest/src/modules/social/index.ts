@@ -1638,6 +1638,123 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "ideaId", "cycleId"],
       },
     },
+    // ── SCP-5g: the social audit (BFF §63.28.4, tools of 63.28.5) ──────────────────────────────────────────────────────────
+    // The same routes, the same gates and the same order of checks as the person's: a client's audit is its officer's, the HoD's or the GM's (403
+    // `not_officer_or_approver`), a prospect's the four's (403 `not_a_social_approver`), an unattended automation is refused every write (403
+    // `automation_cannot_act`). The writes are `low`: an internal record that reaches no client. The contract's `social.saveAudit` covers two routes, so
+    // it is two tools here (create and edit), as the rules and the ideas are.
+    {
+      name: "social.audits",
+      description:
+        "List the social audits (BFF §63.28), worst first: every open client with its live draft's score, else its latest final audit's, else none, and "
+        + "every prospect's audit. Each row has `auditId` (null when the client has none), `subject`, `engagementId`, `name`, `status` (`draft` or "
+        + "`final`), `month`, `overall` (0 to 100 or null), `band`, `scored` of `total` dimensions, `topFix`, `finalizedAt` and `simulated`. Optional "
+        + "`subject`: `client` or `prospect`. `canAddProspect` says whether the caller may start a prospect's audit.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/audits",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          subject: { type: "string", enum: ["client", "prospect"], description: "Only client audits, or only prospects'." },
+        },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "social.getAudit",
+      description:
+        "Read one social audit's scorecard (BFF §63.28): per dimension its label, weight, `auto` (the pipeline's score with its evidence, or none with its "
+        + "reason), `typed` (the person's score and note) and `used`; the overall out of 100, the band, the three fixes, the summary, `canWrite` and "
+        + "`canFinalize`. A draft computes its automatic part now; a final audit answers what it froze. 404 `audit_not_found`.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/audits/:auditId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          auditId: { type: "string", description: "The audit." },
+        },
+        required: ["tenantId", "auditId"],
+      },
+    },
+    {
+      name: "social.saveAudit",
+      description:
+        "Start a social audit (BFF §63.28.4): `subject: \"client\"` with the client's `engagementId` (and an optional `month`, `YYYY-MM`, default the last "
+        + "full month), or `subject: \"prospect\"` with `prospectName` (and optional `businessType` and `publicNumbers`: followers, postsLast30Days, avgLikes, "
+        + "avgComments, lastPostOn). A client that already has a draft answers it with `created: false`. A client's audit: its officer, the HoD or the GM; a "
+        + "prospect's: the four social approvers. Edit a draft with `social.editAudit`.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/audits",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          id: { type: "string", description: "Optional client-chosen id (idempotency)." },
+          subject: { type: "string", enum: ["client", "prospect"], description: "Whose audit." },
+          engagementId: { type: "string", description: "The client's engagement (client audits)." },
+          month: { type: "string", description: "The data month, YYYY-MM (client audits; default the last full month; not after this month)." },
+          prospectName: { type: "string", description: "The prospect's name, 1 to 200 characters (prospect audits)." },
+          businessType: { type: "string", description: "The prospect's business type, up to 60 characters (prospect audits)." },
+          publicNumbers: { type: "object", description: "A prospect's public numbers, each optional: followers, postsLast30Days (whole numbers), avgLikes, avgComments, lastPostOn (YYYY-MM-DD)." },
+        },
+        required: ["tenantId", "subject"],
+      },
+    },
+    {
+      name: "social.editAudit",
+      description:
+        "Change a DRAFT social audit (BFF §63.28.4): `scores` by dimension key, each `{score, note}` with `score` 0 to 5 by halves or null (null drops the "
+        + "override and the automatic score is used again); a typed score on an AUTOMATIC dimension of a client's audit needs a `note`; a key the company's "
+        + "scorecard lacks is 400. Also `summary` (up to 3,000; `summaryVia` `ai`, `template` or `typed`), a client's `month`, a prospect's `prospectName`, "
+        + "`businessType` and `publicNumbers`. A final audit is 409 `audit_final`. Same gate as `social.saveAudit`.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "PATCH",
+      pathTemplate: "/api/:tenantId/modules/social/audits/:auditId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          auditId: { type: "string", description: "The audit." },
+          scores: { type: "object", description: "`{<dimension key>: {score: 0 to 5 by halves | null, note?: string up to 500} | null}`." },
+          summary: { type: "string", description: "The summary, up to 3,000 characters; null clears it." },
+          summaryVia: { type: "string", enum: ["ai", "template", "typed"], description: "How the summary was written (default `typed`)." },
+          month: { type: "string", description: "A client audit's data month, YYYY-MM." },
+          prospectName: { type: "string", description: "A prospect audit's name." },
+          businessType: { type: "string", description: "A prospect audit's business type." },
+          publicNumbers: { type: "object", description: "A prospect's public numbers (replaces the stored ones)." },
+        },
+        required: ["tenantId", "auditId"],
+      },
+    },
+    {
+      name: "social.finalizeAudit",
+      description:
+        "Finalize a draft social audit (BFF §63.28.4): freeze its scorecard (every dimension, the overall, band and fixes, with the company's scorecard it "
+        + "was scored under) as a dated record. A final audit can never be edited or deleted; finalizing it again answers 200 `alreadyApplied`. An internal "
+        + "record that reaches no client. Same gate as `social.saveAudit`.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/audits/:auditId/finalize",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          auditId: { type: "string", description: "The audit." },
+        },
+        required: ["tenantId", "auditId"],
+      },
+    },
   ],
   rollupProviders: [socialRollups],
   // D-18: the console is the department template's reserved "Publish" craft group, under the
