@@ -24,7 +24,10 @@ describe("SCP-5a · the migration file (no database needed)", () => {
 
   it("is registered in the social module, after every earlier social migration", () => {
     expect(socialModule.migrations).toContain(MIGRATION);
-    expect(socialModule.migrations[socialModule.migrations.length - 1]).toBe(MIGRATION);
+    // In landing order: every later registration is a later file (SCP-5 rest adds after it; it is no longer necessarily the last).
+    const at = socialModule.migrations.indexOf(MIGRATION);
+    for (const later of socialModule.migrations.slice(at + 1)) expect(later > MIGRATION, later).toBe(true);
+    for (const earlier of socialModule.migrations.slice(0, at)) expect(earlier < MIGRATION, earlier).toBe(true);
   });
 
   it("holds no data change, no grant, no policy change and no ledger write, and is LF only", () => {
