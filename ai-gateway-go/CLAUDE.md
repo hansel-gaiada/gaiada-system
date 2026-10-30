@@ -209,3 +209,14 @@ persisted and **shared** — `sync-engine-go`'s `cmd/synccert` issues node certs
 
 OpenBao-issued provider creds, media DLP classification, native token streaming for providers other than `openai` (AIP-02 gave `openai` an opt-in one),
 DNS control / SIEM rule, automated cert rotation. These are decisions, not oversights.
+
+## Budget counters survive a restart (AIP-17a, plan §6.3 item 5)
+
+`internal/budget/persist.go`: one state file, `data/budget-state.json` (the `gateway-data` volume), holds the UTC day
+and the COUNTS of each budget under its own key: `chat` (global, per-company and `agent:<name>` counts of the
+chat/agent budget) and `embed` (the separate `/embed` budget, registered by `server.NewServers` via
+`server.WithBudgetState`). Never caps, console overrides or DR state. `GATEWAY_BUDGET_STATE_FILE` overrides the path;
+set but empty = persistence off (in-memory, as before). Written atomically (temp file in the same dir + rename, 0600)
+at most every 5 s and only when a count changed, and once more on SIGTERM/SIGINT (`main.go` flushes first, then
+drains the main listener). Boot loads it only when its day is today (UTC); a missing, corrupt or stale file starts from
+zero with one log line. A crash can lose up to 5 s of counts.

@@ -12,6 +12,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"gaiada/ai-gateway-go/internal/adminconfig"
@@ -183,6 +185,11 @@ func main() {
 		Embed: chain.NewChain(server.EmbedProviders(buildProviderList(cfg.EmbedChain, cfg, client)), cfg.BreakerThreshold, cfg.BreakerCooldownMs, time.Now),
 	}
 	b := budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap)
+	// AIP-17a: the day counters survive a restart. ONE state file, a key per budget ("chat" here, "embed"
+	// registered by the server). GATEWAY_BUDGET_STATE_FILE= (explicitly empty) turns it off. Counts only:
+	// caps, console overrides and DR mode are never read from or written to it.
+	budgetState := budget.NewPersister(budget.StatePathFromEnv(), log.Printf)
+	budgetState.Register("chat", b)
 	if cfg.DRMode { // env-declared failover: open the DR-burst window at boot
 		b.EnableDR(time.Now(), time.Duration(cfg.DRDurationMin)*time.Minute, cfg.DRBurstCap)
 		log.Printf("DR-burst budget unlocked at boot: +%d calls for %d min", cfg.DRBurstCap, cfg.DRDurationMin)
@@ -217,7 +224,7 @@ func main() {
 	if agentErr != nil {
 		log.Printf("agent listener: GATEWAY_AGENT_TOKENS rejected (%v); every agent call will be 401", agentErr)
 	}
-	mainMux, agentMux := server.NewServers(cfg, chains, b, classifier, inst, admin, agentTokens)
+	mainMux, agentMux := server.NewServers(cfg, chains, b, classifier, inst, admin, agentTokens, server.WithBudgetState(budgetState))
 	if cfg.AgentListen != "" {
 		startAgentListener(cfg, agentTokens, agentMux)
 	}
@@ -228,8 +235,42 @@ func main() {
 	log.Printf("Gaiada AI Gateway (Go) on %s — llm: %v, media: %v, auth: %v, cap: %d/day, tls: %s, topology: %s, classifier: %v",
 		addr, cfg.LLMChain, cfg.MediaChain, cfg.GatewayToken != "", cfg.DailyCallCap, cfg.TLSMode, cfg.TopologyMode, cfg.DLPClassifierEnabled)
 
+	// AIP-17a graceful stop: SIGTERM (docker compose recreating the container) or SIGINT flushes the
+	// budget counters at once, then drains the main listener. The flush comes first because the
+	// container's stop timeout can SIGKILL a slow drain; a second flush after the drain picks up
+	// anything taken meanwhile (it writes only if something changed).
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stopSignals()
+	persistDone := make(chan struct{})
+	go func() {
+		defer close(persistDone)
+		budgetState.Run(sigCtx) // flushes once more when sigCtx ends
+	}()
+	serve := func(srv *http.Server, listen func() error) {
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			<-sigCtx.Done()
+			<-persistDone
+			drain, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			if err := srv.Shutdown(drain); err != nil {
+				log.Printf("shutdown: %v", err)
+			}
+			if err := budgetState.Flush(); err != nil {
+				log.Printf("budget state: final flush failed: %v", err)
+			}
+		}()
+		if err := listen(); err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+		<-stopped
+		log.Printf("gateway stopped")
+	}
+
 	if cfg.TLSMode == "off" {
-		log.Fatal(http.ListenAndServe(addr, handler))
+		srv := &http.Server{Addr: addr, Handler: handler}
+		serve(srv, srv.ListenAndServe)
 		return
 	}
 
@@ -276,5 +317,5 @@ func main() {
 		VerifyPeerCertificate: verifyPeer,
 	}
 	srv := &http.Server{Addr: addr, Handler: handler, TLSConfig: tlsConfig}
-	log.Fatal(srv.ListenAndServeTLS("", ""))
+	serve(srv, func() error { return srv.ListenAndServeTLS("", "") })
 }

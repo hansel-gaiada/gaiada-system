@@ -1,5 +1,6 @@
-// Cost governance — port of ai-gateway/src/budget.ts. In-memory; a restart resets the
-// day's counts (same accepted tradeoff as the TS version at this cap size).
+// Cost governance — port of ai-gateway/src/budget.ts. The counters live in memory; since AIP-17a a
+// Persister (persist.go) writes them to a state file and reloads them at boot, so a restart no
+// longer hands out a fresh daily allowance.
 package budget
 
 import (

@@ -474,13 +474,31 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 // (AIP-00a-1, GATEWAY_AGENT_LISTEN). The agent routes are registered ONLY on the agent mux, and
 // the main mux never consults agent tokens, so neither listener can serve the other's routes.
 // An empty token set is a closed agent mux: every agent call is 401.
-func NewServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier, inst *metrics.Instruments, admin *Admin, agents AgentTokens) (*http.ServeMux, *http.ServeMux) {
-	mux, agentMux, _ := newServers(cfg, chains, b, classifier, inst, admin, agents)
+func NewServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier, inst *metrics.Instruments, admin *Admin, agents AgentTokens, opts ...Option) (*http.ServeMux, *http.ServeMux) {
+	mux, agentMux, _ := newServers(cfg, chains, b, classifier, inst, admin, agents, opts...)
 	return mux, agentMux
 }
 
+// Option tunes NewServers without changing its positional signature.
+type Option func(*serverOptions)
+
+type serverOptions struct {
+	budgetState *budget.Persister
+}
+
+// WithBudgetState (AIP-17a) hands NewServers the persister that owns the budget state file, so the
+// /embed budget it builds internally is registered under "embed" and restored/flushed with the chat
+// budget. nil (or no option) leaves /embed in memory only.
+func WithBudgetState(p *budget.Persister) Option {
+	return func(o *serverOptions) { o.budgetState = p }
+}
+
 // newServers is NewServers plus the agent in-flight counter, which the tests read.
-func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier, inst *metrics.Instruments, admin *Admin, agents AgentTokens) (*http.ServeMux, *http.ServeMux, *agentInflight) {
+func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier, inst *metrics.Instruments, admin *Admin, agents AgentTokens, opts ...Option) (*http.ServeMux, *http.ServeMux, *agentInflight) {
+	var so serverOptions
+	for _, o := range opts {
+		o(&so)
+	}
 	mux := http.NewServeMux()
 	// /embed's OWN budget (cfg.EmbedDailyCallCap): embeddings never take from b, the chat/agent cap. Called with an
 	// empty tenant, so no per-tenant cap applies (Take refuses any tenant when perTenantCap is 0). DR mode does not
@@ -490,6 +508,7 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 		embedCap = 50000 // unset or invalid: the guard's default, never "refuse every embed"
 	}
 	eb := budget.NewBudget(embedCap, 0)
+	so.budgetState.Register("embed", eb) // AIP-17a: its own key, never mixed with the chat budget's counts
 
 	// Boot values seed the runtime tuning; a persisted override has already been folded into cfg by
 	// main before this point, so the two never disagree at startup.
