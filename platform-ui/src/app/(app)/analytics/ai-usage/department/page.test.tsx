@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { UsageRead } from "@/lib/aiUsage-data";
 import type { UnitUsage } from "@/lib/aiUsage";
-import { EMPTY_TOTALS, unitUsage } from "@/lib/aiUsageFixtures";
+import { EMPTY_TOTALS, allowances, unitBudget, unitUsage } from "@/lib/aiUsageFixtures";
 import { agencyTree, lead, me as meFixture, member } from "@/lib/workspaceFixtures";
 
 // AIP-16 (BFF section 66.4, owner rulings AIP-D6 and AIP-D18): Analytics > AI usage, one department's month. PER PERSON only when the answer HAS the
@@ -19,11 +19,14 @@ vi.mock("@/lib/platform", async () => {
   return { ...actual, getMe: vi.fn() };
 });
 vi.mock("@/lib/campaigns-data", () => ({ readOrgRoot: vi.fn() }));
-vi.mock("@/lib/aiUsage-data", () => ({ getUnitAiUsage: vi.fn() }));
+vi.mock("@/lib/aiUsage-data", () => ({ getUnitAiUsage: vi.fn(), getAllowances: vi.fn() }));
+vi.mock("@/lib/aiBudgetActions", () => ({
+  setCompanyBudgetAction: vi.fn(), setUnitBudgetAction: vi.fn(), setAllowanceAction: vi.fn(), liftStopAction: vi.fn(),
+}));
 
 import { getMe } from "@/lib/platform";
 import { readOrgRoot } from "@/lib/campaigns-data";
-import { getUnitAiUsage } from "@/lib/aiUsage-data";
+import { getAllowances, getUnitAiUsage } from "@/lib/aiUsage-data";
 import DepartmentAiUsagePage from "./page";
 
 const readMock = vi.mocked(getUnitAiUsage);
@@ -163,5 +166,139 @@ describe("with no ?unit=: choose a department", () => {
     vi.mocked(readOrgRoot).mockResolvedValue(null);
     await mount({});
     expect(screen.getByText(/the organisation could not be read/)).toBeInTheDocument();
+  });
+});
+
+// AIP-17b and AIP-18 (BFF §66.8, §66.9, §66.11): this unit's OWN budget line, the owner's form and per-person allowances, and the Lift button.
+describe("the department's budget (AIP-17b)", () => {
+  const OWNER = { canSeePeople: true, canManage: true, canLiftStop: true };
+  const HEAD = { canSeePeople: true, canManage: false, canLiftStop: true };
+  const stopped = () => unitBudget({ mode: "soft_stop", monthlyUsd: "1.0000", spentUsd: "1.30000000", percent: 130, state: "over_100", stopLifted: false });
+  beforeEach(() => vi.mocked(getAllowances).mockReset().mockResolvedValue({ kind: "ok", data: allowances() }));
+  const liftButton = () => screen.queryByRole("button", { name: "Lift the stop for the rest of this month" });
+
+  it("shows no Budget box when no budget is set, and reads no allowances for a head", async () => {
+    await mount();
+    expect(screen.queryByRole("heading", { name: /^Budget/ })).not.toBeInTheDocument();
+    expect(getAllowances).not.toHaveBeenCalled();
+  });
+  it("shows the unit's own line: mode in words, figure, spent, percent and state, leading the page", async () => {
+    readMock.mockResolvedValue(ok(unitUsage({ budget: unitBudget() })));
+    await mount();
+    expect(cardTitles()[0]).toBe("Budget");
+    const b = within(card("Budget"));
+    expect(b.getByText("Report only")).toBeInTheDocument();
+    expect(b.getByText("$1.00 a month")).toBeInTheDocument();
+    expect(b.getByText("$0.8000 of $1.00")).toBeInTheDocument();
+    expect(b.getByText("80%")).toBeInTheDocument();
+    expect(b.getByText("over 80%")).toBeInTheDocument();
+    expect(b.queryByText("lifted for this month")).not.toBeInTheDocument();
+  });
+  it("shows the three state words", async () => {
+    for (const [state, percent, words] of [["under", 10, "under"], ["over_80", 85, "over 80%"], ["over_100", 100, "at or over 100%"]] as const) {
+      readMock.mockResolvedValue(ok(unitUsage({ budget: unitBudget({ state, percent }) })));
+      const { unmount } = await mount();
+      expect(within(card("Budget")).getByText(words)).toBeInTheDocument();
+      unmount();
+    }
+  });
+  it("shows no form to a head: no input, no Remove, no allowance column", async () => {
+    readMock.mockResolvedValue(ok(unitUsage({ budget: unitBudget(), capabilities: HEAD })));
+    await mount();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Remove|Change|Set the/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Daily reply allowance")).not.toBeInTheDocument();
+  });
+
+  describe("for the owner (canManage)", () => {
+    beforeEach(() => vi.mocked(getMe).mockResolvedValue(as.owner));
+    it("shows the budget form (figure and mode), starting from what is stored", async () => {
+      readMock.mockResolvedValue(ok(unitUsage({ budget: stopped(), capabilities: OWNER })));
+      await mount();
+      const b = within(card("Budget"));
+      expect((b.getByLabelText("Monthly figure (US dollars)") as HTMLInputElement).value).toBe("1.0000");
+      expect((b.getByLabelText("When it reaches the figure") as HTMLSelectElement).value).toBe("soft_stop");
+      expect(b.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+    });
+    it("with no budget set, gives the form to set one (Report only by default)", async () => {
+      readMock.mockResolvedValue(ok(unitUsage({ capabilities: OWNER })));
+      await mount();
+      const b = within(card("Budget"));
+      expect(b.getByText("No budget is set for this department.")).toBeInTheDocument();
+      expect((b.getByLabelText("When it reaches the figure") as HTMLSelectElement).value).toBe("report");
+      expect(b.getByRole("button", { name: "Set the budget" })).toBeInTheDocument();
+    });
+    it("adds an allowance column to the by-person table: the default shown when no override, the override as a number", async () => {
+      readMock.mockResolvedValue(ok(unitUsage({ capabilities: OWNER })));
+      await mount();
+      expect(getAllowances).toHaveBeenCalledWith("u-1", "co-a");
+      const people = within(card("By person"));
+      expect(people.getByText("Daily reply allowance")).toBeInTheDocument();
+      expect(people.getByText("Made Putra").closest(".lux-table__row")).toHaveTextContent("350 a day");
+      expect(people.getByText("Made Putra").closest(".lux-table__row")).not.toHaveTextContent("(default)");
+      expect(people.getByText("Name not available").closest(".lux-table__row")).toHaveTextContent("200 a day (default)");
+    });
+    it("reads no allowances when the answer has no people (nothing to put them in), and keeps the plain table without one", async () => {
+      readMock.mockResolvedValue(ok(unitUsage({ people: null, capabilities: OWNER })));
+      await mount();
+      expect(getAllowances).not.toHaveBeenCalled();
+      expect(screen.queryByText("Daily reply allowance")).not.toBeInTheDocument();
+    });
+    it("keeps the plain by-person table when the allowances cannot be read (the rest of the page is unaffected)", async () => {
+      vi.mocked(getAllowances).mockResolvedValue({ kind: "unavailable", reason: "x" });
+      readMock.mockResolvedValue(ok(unitUsage({ capabilities: OWNER })));
+      await mount();
+      expect(screen.queryByText("Daily reply allowance")).not.toBeInTheDocument();
+      expect(within(card("By person")).getByText("Made Putra")).toBeInTheDocument();
+    });
+  });
+
+  describe("the Lift button (AIP-18)", () => {
+    it("is offered for a Soft stop at or over 100%, not lifted this month, when canLiftStop, in the current month: to a head and to the owner", async () => {
+      for (const caps of [HEAD, OWNER]) {
+        readMock.mockResolvedValue(ok(unitUsage({ budget: stopped(), capabilities: caps })));
+        const { unmount } = await mount();
+        expect(liftButton()).toBeInTheDocument();
+        unmount();
+      }
+    });
+    it.each([
+      ["Report only", unitBudget({ mode: "report", state: "over_100", percent: 130 })],
+      ["over 80% only", unitBudget({ mode: "soft_stop", state: "over_80", percent: 85 })],
+      ["under", unitBudget({ mode: "soft_stop", state: "under", percent: 10 })],
+      ["already lifted this month", { ...stopped(), stopLifted: true }],
+    ])("is not offered when the budget is %s", async (_n, budget) => {
+      readMock.mockResolvedValue(ok(unitUsage({ budget, capabilities: HEAD })));
+      await mount();
+      expect(liftButton()).not.toBeInTheDocument();
+    });
+    it("is not offered without canLiftStop, and not with no budget", async () => {
+      readMock.mockResolvedValue(ok(unitUsage({ budget: stopped(), capabilities: { canSeePeople: true, canManage: false, canLiftStop: false } })));
+      await mount();
+      expect(liftButton()).not.toBeInTheDocument();
+      cleanup();
+      readMock.mockResolvedValue(ok(unitUsage({ budget: null, capabilities: HEAD })));
+      await mount();
+      expect(liftButton()).not.toBeInTheDocument();
+    });
+    it("is not offered beside a past month's figures (a lift always applies to the current month)", async () => {
+      readMock.mockResolvedValue(ok(unitUsage({ month: "2026-09", budget: stopped(), capabilities: HEAD })));
+      await mount({ unit: "d-web", month: "2026-09" });
+      expect(within(card("Budget")).getByText("at or over 100%")).toBeInTheDocument();
+      expect(liftButton()).not.toBeInTheDocument();
+    });
+    it("after a lift the line says 'lifted for this month' and the button is gone", async () => {
+      readMock.mockResolvedValue(ok(unitUsage({ budget: { ...stopped(), stopLifted: true }, capabilities: HEAD })));
+      await mount();
+      expect(within(card("Budget")).getByText("lifted for this month")).toBeInTheDocument();
+      expect(liftButton()).not.toBeInTheDocument();
+    });
+    it("asks first, and says what lifting does", async () => {
+      readMock.mockResolvedValue(ok(unitUsage({ budget: stopped(), capabilities: HEAD })));
+      await mount();
+      fireEvent.click(liftButton() as HTMLElement);
+      expect(screen.getByText(/Replies return to normal for this department until the month ends, and waiting agent runs start/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Confirm: lift the stop" })).toBeInTheDocument();
+    });
   });
 });

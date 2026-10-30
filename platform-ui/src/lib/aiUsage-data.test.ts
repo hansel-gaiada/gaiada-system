@@ -8,8 +8,8 @@ vi.mock("@/lib/platform", async () => {
 });
 
 import { PlatformError, platformFetch } from "@/lib/platform";
-import { getCompanyAiUsage, getMyAiUsage, getUnitAiUsage } from "./aiUsage-data";
-import { companyUsage, myUsage, unitUsage } from "./aiUsageFixtures";
+import { getAllowances, getCompanyAiUsage, getMyAiUsage, getUnitAiUsage } from "./aiUsage-data";
+import { allowances, companyUsage, myUsage, unitUsage } from "./aiUsageFixtures";
 
 const fetchMock = vi.mocked(platformFetch);
 
@@ -70,5 +70,22 @@ describe("the three readers", () => {
     expect(r.kind).toBe("unavailable");
     fetchMock.mockResolvedValue({});
     expect((await getCompanyAiUsage("u-1", "co-a", "2026-10")).kind).toBe("unavailable");
+  });
+});
+
+describe("the allowances reader (AIP-17b, §66.9)", () => {
+  it("asks `GET allowances` under the tenant and returns the checked answer", async () => {
+    fetchMock.mockResolvedValue(allowances());
+    const r = await getAllowances("u-1", "co-a");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/co-a/ai-usage/allowances", "u-1");
+    expect(r).toEqual({ kind: "ok", data: allowances() });
+  });
+  it("is forbidden for anyone but `manage` (403), and unavailable for a failure or a malformed answer", async () => {
+    failWith(() => new PlatformError(403, "Forbidden"));
+    expect(await getAllowances("u-1", "co-a")).toEqual({ kind: "forbidden" });
+    failWith(() => new PlatformError(500, "boom"));
+    expect(await getAllowances("u-1", "co-a")).toEqual({ kind: "unavailable", reason: "boom" });
+    fetchMock.mockResolvedValue({ defaultDailyReplies: "200", overrides: [] });
+    expect((await getAllowances("u-1", "co-a")).kind).toBe("unavailable");
   });
 });

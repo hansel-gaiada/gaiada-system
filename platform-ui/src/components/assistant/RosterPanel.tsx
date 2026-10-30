@@ -4,8 +4,9 @@ import {
   handoffStatusLabel, hasActiveHandoff, splitRosterByDepartment, type AssistantHandoff, type RosterAgent, type RosterEpisode,
 } from "@/lib/assistant";
 import {
-  createHandoffAction, getHandoffTranscriptAction, refreshHandoffsAction, refreshRosterAction,
+  cancelHandoffAction, createHandoffAction, getHandoffTranscriptAction, refreshHandoffsAction, refreshRosterAction,
 } from "@/lib/assistantActions";
+import { heldNote } from "@/lib/aiBudget";
 import type { AgentRun } from "@/lib/admin";
 
 // ASST-21 — the roster right-rail panel: the REAL specialist registry (never a hardcoded mirror —
@@ -42,6 +43,7 @@ export function RosterPanel({ activeThreadId, workspaceKey = null }: { activeThr
   const [openRunId, setOpenRunId] = useState<string | null>(null);
   const [transcripts, setTranscripts] = useState<Record<string, AgentRun | null>>({});
   const [transcriptLoading, setTranscriptLoading] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<string | null>(null);
 
   const loadRoster = useCallback(async () => {
     const r = await refreshRosterAction();
@@ -113,6 +115,16 @@ export function RosterPanel({ activeThreadId, workspaceKey = null }: { activeThr
     }
     setError(null);
     setGoalDraft("");
+    await loadHandoffs(activeThreadId);
+  }
+
+  // AIP-18 — cancel a hand-off that is waiting over budget (it never starts). The list is refreshed either way: a 409 means it had already started or ended.
+  async function handleCancelHeld(h: AssistantHandoff) {
+    if (!activeThreadId) return;
+    setCancelling(h.id);
+    const r = await cancelHandoffAction(activeThreadId, h.id);
+    setCancelling(null);
+    setError(r.ok ? null : r.error);
     await loadHandoffs(activeThreadId);
   }
 
@@ -190,12 +202,18 @@ export function RosterPanel({ activeThreadId, workspaceKey = null }: { activeThr
                           <p className="asst-mem__content">{h.agent} — {h.goalText}</p>
                           <div className="asst-mem__row-meta">
                             <span className="asst-roster__status-chip" data-status={h.status}>{handoffStatusLabel(h.status)}</span>
+                            {h.status === "held" && (
+                              <button type="button" className="asst-mem__action" disabled={cancelling === h.id} onClick={() => handleCancelHeld(h)}>
+                                {cancelling === h.id ? "Cancelling…" : "Cancel"}<span className="asst-sr-only"> the hand-off to {h.agent}</span>
+                              </button>
+                            )}
                             {runId && (
                               <button type="button" className="asst-mem__action" onClick={() => handleViewTranscript(h)}>
                                 {openRunId === runId ? "Hide" : "View"} transcript
                               </button>
                             )}
                           </div>
+                          {h.status === "held" && <p className="asst-mem__group-hint" data-hold={h.holdKind ?? undefined}>{heldNote(h.holdKind ?? null)}</p>}
                           {runId && openRunId === runId && (
                             <div className="asst-roster__transcript">
                               {transcriptLoading === runId ? (

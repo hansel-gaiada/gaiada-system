@@ -112,6 +112,23 @@ describe("openAssistantStream — real incremental decoding", () => {
     ]);
   });
 
+  it("decodes the soft stop's `budget` frame, which arrives first and is not terminal (AIP-18)", async () => {
+    const reader = makeControllableReader();
+    installFetchMock(reader);
+    const enc = new TextEncoder();
+    reader.push(enc.encode('event: budget\ndata: {"kind":"allowance","resetsAt":"2026-10-31T00:00:00.000Z"}\n\n'));
+    reader.push(enc.encode('event: token\ndata: {"text":"hi"}\n\n'));
+    reader.push(enc.encode("event: done\ndata: {}\n\n"));
+    reader.push(null);
+
+    const events = await drain(openAssistantStream("t1", "m1").events);
+    expect(events).toEqual([
+      { type: "budget", budget: { kind: "allowance", resetsAt: "2026-10-31T00:00:00.000Z" } },
+      { type: "token", text: "hi" },
+      { type: "done" },
+    ]);
+  });
+
   it("a block split across two chunk boundaries still decodes once the rest arrives", async () => {
     const reader = makeControllableReader();
     installFetchMock(reader);

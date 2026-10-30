@@ -14550,3 +14550,27 @@ partial index `ix_assistant_handoffs_held`. No data change.
 `modules/assistant/assistant-handoff-held-migration.test.ts` run anywhere; `modules/assistant/assistant-soft-stop.test.ts` (send path, ask, held hand-offs,
 cancel, release by the job, the release race, the live CHECKs) and `modules/ai-usage/lift.http.test.ts` (the lift matrix and release on lift) run on the
 Linux CI gate and skip without Postgres and Cerbos.
+
+### 66.12 The screens for the budgets and the soft stop (AIP-17b and AIP-18, 2026-10-30, BUILT in `platform-ui`; no new route)
+
+No new route and no contract change: the screens read §66.8 and §66.11 and write §66.9 and the lift, exactly as written above. Notes for whoever changes either side.
+
+- **Budget lines** lead the company screen (`/ai-usage`: the alert figure, then one line per department) and the department screen (`/analytics/ai-usage/department`:
+  that unit's own line). A line says the figure, the spend against it, the percent, the state in words ("under", "over 80%", "at or over 100%"), the mode ("Report
+  only", "Soft stop") and "lifted for this month". A `null` `spentUsd` is "unknown", never `$0` or 0 percent; `noCostCalls` is said in a note. With no budget set
+  a reader sees nothing (no empty box); `capabilities.canManage` gets the form instead. A malformed line makes the read `unavailable`; an absent `budgets` or
+  `budget` key (an older server) is "no budget".
+- **The forms** (`capabilities.canManage` only; the server decides) check money the way §66.9 does before the round trip (positive, at most 4 decimals, at most
+  8 whole digits; leading and trailing spaces trimmed) and say the server's 400 sentence as the answer. The company screen lists the allowance overrides
+  (`GET allowances`); the department screen adds an "allowance" cell per person in the by-person table (the default shown when there is no override). That read
+  happens only when the caller `canManage` and the answer has `people`.
+- **Lift** is offered on the department screen only when that unit's own line is `soft_stop`, `over_100` and not `stopLifted`, the answer's `canLiftStop` is true,
+  **and the screen shows the current UTC month** (a lift always applies to the current month, so it is not offered beside a past month's figures).
+- **The chat line** reads `turn_budget` from three places with one parser: the stream's `budget` frame (reducer state `turnBudget`), the part on a reloaded
+  message, and the ask answer's `turnBudget` (no UI calls `assistant/ask` today; `asTurnBudget` is the reader when one does). One quiet line under the reply, no
+  numbers; the allowance reset is said in the viewer's local time with UTC beside it, the department line names the UTC month before `resetsAt`.
+- **Held hand-offs**: status `held` is "Waiting: over budget" with a note that says which stop holds it and that it starts by itself, and a Cancel that POSTs the
+  cancel route (a 409 is said as "not waiting any more" and the list is refreshed either way). `held` is not terminal, so the run-watch poll keeps going until it starts.
+- **Demo mode** (`DEMO_MODE=1`): a stateful budget store (company figure over 80 percent, Web Dev in Soft stop over its figure with the Lift button for the owner
+  and its head, SEO in Report only, one allowance override), and `asst-thread-4` with a reply per kind of stop and a held hand-off. Send `BUDGET_TEST` or
+  `BUDGET_DEPT_TEST` to be stopped live; hand off a goal containing `HOLD_TEST` or `HOLD_DEPT_TEST` to see one held.

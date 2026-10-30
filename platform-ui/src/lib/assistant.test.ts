@@ -7,7 +7,7 @@ import {
   groupCapabilities, parseCitations, parseSessionResumeMismatch,
   deriveProposalCardState, isWriteProposal, canActOnProposal, proposalStateLabel, formatRedactedArgs,
   hasPendingProposalDecision, normalizeThreadToolCall, normalizeLiveToolCall, partitionToolCalls,
-  formatExpiresAt, splitRosterByDepartment,
+  formatExpiresAt, splitRosterByDepartment, handoffStatusLabel, hasActiveHandoff, isHandoffTerminal,
   type RosterAgent, type AssistantThread, type AssistantMemory, type AssistantCapability, type ThreadToolCall, type LiveToolCall,
 } from "./assistant";
 
@@ -216,7 +216,7 @@ describe("streamReducer — pure, immutable, guarded against terminal-state resu
     let s = initialStreamState();
     s = streamReducer(s, { type: "token", text: "Hel" });
     s = streamReducer(s, { type: "token", text: "lo" });
-    expect(s).toEqual({ status: "streaming", text: "Hello", meta: null, usage: null, citations: [], toolCalls: [], error: null });
+    expect(s).toEqual({ status: "streaming", text: "Hello", meta: null, usage: null, citations: [], turnBudget: null, toolCalls: [], error: null });
   });
   it("meta sets the live badge state as soon as it arrives, non-terminal", () => {
     let s = initialStreamState();
@@ -248,12 +248,12 @@ describe("streamReducer — pure, immutable, guarded against terminal-state resu
   });
   it("any other errorKind lands status 'error' and records the message/kind", () => {
     const s = streamReducer(initialStreamState(), { type: "error", error: "boom", errorKind: "upstream_error" });
-    expect(s).toEqual({ status: "error", text: "", meta: null, usage: null, citations: [], toolCalls: [], error: { message: "boom", kind: "upstream_error" } });
+    expect(s).toEqual({ status: "error", text: "", meta: null, usage: null, citations: [], turnBudget: null, toolCalls: [], error: { message: "boom", kind: "upstream_error" } });
   });
   it("never mutates the previous state object", () => {
     const s0 = initialStreamState();
     const s1 = streamReducer(s0, { type: "token", text: "x" });
-    expect(s0).toEqual({ status: "idle", text: "", meta: null, usage: null, citations: [], toolCalls: [], error: null });
+    expect(s0).toEqual({ status: "idle", text: "", meta: null, usage: null, citations: [], turnBudget: null, toolCalls: [], error: null });
     expect(s1).not.toBe(s0);
   });
 });
@@ -707,5 +707,43 @@ describe("splitRosterByDepartment", () => {
   it("treats an agent with a missing departments field as general", () => {
     const legacy = { ...agent("legacy", []), departments: undefined } as unknown as RosterAgent;
     expect(splitRosterByDepartment([legacy], "hr").shown.map((a) => a.name)).toEqual(["legacy"]);
+  });
+});
+
+// AIP-18 (BFF §66.11) — the soft stop's frame, and the held hand-off.
+describe("decodeAssistantEvent and streamReducer: the `budget` frame (AIP-18)", () => {
+  it("decodes the allowance frame, and the department frame with its unit", () => {
+    expect(decodeAssistantEvent({ event: "budget", data: '{"kind":"allowance","resetsAt":"2026-10-31T00:00:00.000Z"}' }))
+      .toEqual({ type: "budget", budget: { kind: "allowance", resetsAt: "2026-10-31T00:00:00.000Z" } });
+    expect(decodeAssistantEvent({ event: "budget", data: '{"kind":"department","unitNodeId":"d-web","resetsAt":"2026-11-01T00:00:00.000Z"}' }))
+      .toEqual({ type: "budget", budget: { kind: "department", unitNodeId: "d-web", resetsAt: "2026-11-01T00:00:00.000Z" } });
+  });
+  it("drops a frame with no known kind, like any malformed block", () => {
+    expect(decodeAssistantEvent({ event: "budget", data: "{}" })).toBeNull();
+    expect(decodeAssistantEvent({ event: "budget", data: '{"kind":"weekly"}' })).toBeNull();
+    expect(decodeAssistantEvent({ event: "budget", data: "not json" })).toBeNull();
+  });
+  it("sets the live state, non-terminal, and an unstopped stream never has one", () => {
+    let s = initialStreamState();
+    expect(s.turnBudget).toBeNull();
+    s = streamReducer(s, { type: "budget", budget: { kind: "allowance", resetsAt: "2026-10-31T00:00:00.000Z" } });
+    expect(s.turnBudget).toEqual({ kind: "allowance", resetsAt: "2026-10-31T00:00:00.000Z" });
+    expect(s.status).toBe("idle");
+    s = streamReducer(s, { type: "token", text: "hi" });
+    s = streamReducer(s, { type: "done" });
+    expect(s.turnBudget).not.toBeNull(); // the line stays when the stream ends
+    let plain = initialStreamState();
+    plain = streamReducer(plain, { type: "token", text: "hi" });
+    plain = streamReducer(plain, { type: "done" });
+    expect(plain.turnBudget).toBeNull();
+  });
+});
+
+describe("held hand-offs (AIP-18)", () => {
+  it("says 'Waiting: over budget' for held, and the held status is not terminal (the run-watch poll keeps going until it starts)", () => {
+    expect(handoffStatusLabel("held")).toBe("Waiting: over budget");
+    expect(isHandoffTerminal({ status: "held" })).toBe(false);
+    expect(hasActiveHandoff([{ status: "held" }])).toBe(true);
+    expect(hasActiveHandoff([{ status: "cancelled" }])).toBe(false);
   });
 });

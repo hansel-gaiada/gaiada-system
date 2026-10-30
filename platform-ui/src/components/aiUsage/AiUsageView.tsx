@@ -7,6 +7,8 @@ import {
   modelLabel, noUseText, personLabel, surfaceLabel, tokenMark,
   type DayLine, type DepartmentLine, type ModelLine, type PersonLine, type SurfaceLine, type UsageFigures,
 } from "@/lib/aiUsage";
+import type { Allowances } from "@/lib/aiBudget";
+import { allowanceCell } from "./BudgetSections";
 import "./aiUsage.css";
 
 // AIP-16 and AIP-05 (BFF §66): the one drawing of an AI usage answer, for all three screens. Counts and money only: nothing here can show a thread
@@ -72,9 +74,11 @@ export interface AiUsageViewProps {
   departments?: readonly DepartmentLine[];
   /** The company view's "Company, no person" lines (`noPerson`). */
   noPerson?: readonly SurfaceLine[];
+  /** AIP-17b: the daily reply allowances (`GET allowances`, the owner's), which adds an "Allowance" cell with its set and clear form to each person. Absent for everyone else. */
+  allowances?: Allowances | null;
 }
 
-export function AiUsageView({ month, totals, bySurface, byDay, byModel, people, departments, noPerson }: AiUsageViewProps) {
+export function AiUsageView({ month, totals, bySurface, byDay, byModel, people, departments, noPerson, allowances }: AiUsageViewProps) {
   if (isEmptyMonth(totals)) return <EmptyNote>{noUseText(month)}</EmptyNote>;
   return (
     <div className="aiu">
@@ -113,9 +117,15 @@ export function AiUsageView({ month, totals, bySurface, byDay, byModel, people, 
 
       {people ? (
         <Card title="By person" hint="Shown to this department's head and the owner. Counts and cost only: not a ranking and not a score.">
-          {people.length > 0 ? (
+          {people.length === 0 ? <EmptyNote>No person in this department used AI this month.</EmptyNote> : allowances ? (
+            <HairlineTable
+              columns={[{ label: "Person" }, ...FIGURE_COLS, { label: "Daily reply allowance" }]}
+              tcols={`${TCOLS} minmax(0, 1.6fr)`}
+              rows={people.map((p) => [personLabel(p), ...figureCells(p), allowanceCell(allowances, p)])}
+            />
+          ) : (
             <FigureTable first="Person" rows={people.map((p) => ({ label: personLabel(p), f: p }))} />
-          ) : <EmptyNote>No person in this department used AI this month.</EmptyNote>}
+          )}
         </Card>
       ) : null}
 

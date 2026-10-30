@@ -2542,9 +2542,9 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const guidance = assistantGuidanceDemo(method, p, body, userId);
   if (guidance) return guidance;
 
-  // AIP-16 and AIP-05 — the AI usage reads (`/ai-usage/me`, `/units/:id`, `/company`, BFF §66). Read-only and deterministic (lib/demoAiUsage.ts), placed
+  // AIP-16 and AIP-05 — the AI usage reads (`/ai-usage/me`, `/units/:id`, `/company`, BFF §66; AIP-17b and AIP-18: the budget and allowance writes and the lift). Reads are deterministic and the budget store is stateful (lib/demoAiUsage.ts), placed
   // high so no later catch-all answers one with an empty body, which a screen would read as "No AI use recorded".
-  const aiUsage = aiUsageDemo(method, p, url.searchParams, userId);
+  const aiUsage = aiUsageDemo(method, p, url.searchParams, userId, body);
   if (aiUsage) return aiUsage;
 
   // DW-10c-3 — the department calendar (`/departments/:unitNodeId/calendar`, BFF §59.1). Answers in the server's order of checks (read gate,

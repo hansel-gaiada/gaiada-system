@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import type { UsageRead } from "@/lib/aiUsage-data";
 import type { CompanyUsage } from "@/lib/aiUsage";
-import { EMPTY_TOTALS, companyUsage } from "@/lib/aiUsageFixtures";
+import type { Allowances } from "@/lib/aiBudget";
+import { EMPTY_TOTALS, allowances, companyBudget, companyUsage, unitBudget } from "@/lib/aiUsageFixtures";
 import { me as meFixture } from "@/lib/workspaceFixtures";
 
 // AIP-16 (BFF section 66.5, owner ruling AIP-D18): the company's AI usage, Company area. Totals by surface, department, model and day; never a person.
@@ -18,11 +19,14 @@ vi.mock("@/lib/platform", async () => {
   const actual = await vi.importActual<typeof import("@/lib/platform")>("@/lib/platform");
   return { ...actual, getMe: vi.fn() };
 });
-vi.mock("@/lib/aiUsage-data", () => ({ getCompanyAiUsage: vi.fn() }));
+vi.mock("@/lib/aiUsage-data", () => ({ getCompanyAiUsage: vi.fn(), getAllowances: vi.fn() }));
+vi.mock("@/lib/aiBudgetActions", () => ({
+  setCompanyBudgetAction: vi.fn(), setUnitBudgetAction: vi.fn(), setAllowanceAction: vi.fn(), liftStopAction: vi.fn(),
+}));
 
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getCompanyAiUsage } from "@/lib/aiUsage-data";
+import { getAllowances, getCompanyAiUsage } from "@/lib/aiUsage-data";
 import CompanyAiUsagePage from "./page";
 
 const readMock = vi.mocked(getCompanyAiUsage);
@@ -125,5 +129,124 @@ describe("an empty month, a refusal and a failed read", () => {
     await mount();
     expect(screen.getByText(/cannot be read right now/)).toBeInTheDocument();
     expect(screen.getByText("upstream 502")).toBeInTheDocument();
+  });
+});
+
+// AIP-17b and AIP-18 (BFF §66.8, §66.9): the company's alert figure and each department's budget line lead the page; the owner (`capabilities.canManage`)
+// gets the forms and the per-person allowance overrides (`GET allowances`). NO BUDGET, NO BOX: a reader with nothing set sees nothing of this.
+describe("budget lines (AIP-17b)", () => {
+  const OWNER = { canSeePeople: true, canManage: true, canLiftStop: true };
+  const withBudgets = (over: Partial<CompanyUsage> = {}) =>
+    companyUsage({
+      budgets: {
+        company: companyBudget(),
+        units: [unitBudget(), unitBudget({ unitNodeId: "d-seo", name: "SEO", mode: "soft_stop", monthlyUsd: "5.0000", spentUsd: "6.00000000", percent: 120, state: "over_100", stopLifted: true })],
+      },
+      ...over,
+    });
+  const allowRead = (a: Allowances) => vi.mocked(getAllowances).mockResolvedValue({ kind: "ok", data: a });
+  beforeEach(() => vi.mocked(getAllowances).mockReset());
+
+  it("shows nothing at all when no budget is set (no empty box) and reads no allowances for a reader", async () => {
+    await mount();
+    expect(cardTitles()).toEqual(["By surface", "Month total", "By model", "By department", "Company, no person", "By day"]);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(getAllowances).not.toHaveBeenCalled();
+  });
+  it("shows the company's alert figure: figure, spent so far, percent and state in words", async () => {
+    readMock.mockResolvedValue(ok(withBudgets()));
+    await mount();
+    const c = within(card("Company alert figure"));
+    expect(c.getByText("$250.00 a month")).toBeInTheDocument();
+    expect(c.getByText("$218.75 of $250.00")).toBeInTheDocument();
+    expect(c.getByText("87.5%")).toBeInTheDocument();
+    expect(c.getByText("over 80%")).toBeInTheDocument();
+    expect(cardTitles().slice(0, 2)).toEqual(["Company alert figure", "Department budgets"]);
+  });
+  it("shows each department's line: its link, the mode in words, 'lifted for this month' only when so, and the state", async () => {
+    readMock.mockResolvedValue(ok(withBudgets()));
+    await mount();
+    const d = within(card("Department budgets"));
+    expect(d.getByRole("link", { name: "Web Dev" })).toHaveAttribute("href", "/analytics/ai-usage/department?unit=d-web&month=2026-10");
+    expect(d.getByRole("link", { name: "SEO" })).toHaveAttribute("href", "/analytics/ai-usage/department?unit=d-seo&month=2026-10");
+    const web = d.getByRole("link", { name: "Web Dev" }).closest("li") as HTMLElement;
+    expect(within(web).getByText("Report only")).toBeInTheDocument();
+    expect(within(web).getByText("80%")).toBeInTheDocument();
+    expect(within(web).queryByText("lifted for this month")).not.toBeInTheDocument();
+    const seo = d.getByRole("link", { name: "SEO" }).closest("li") as HTMLElement;
+    expect(within(seo).getByText("Soft stop")).toBeInTheDocument();
+    expect(within(seo).getByText("at or over 100%")).toBeInTheDocument();
+    expect(within(seo).getByText("lifted for this month")).toBeInTheDocument();
+  });
+  it("says an unknown spend as unknown, never $0 or 0%, and notes the calls with no cost", async () => {
+    readMock.mockResolvedValue(ok(withBudgets({ budgets: { company: companyBudget({ spentUsd: null, percent: 0, state: "under", noCostCalls: 4 }), units: [] } })));
+    await mount();
+    const c = within(card("Company alert figure"));
+    expect(c.getByText("unknown of $250.00")).toBeInTheDocument();
+    expect(c.getByText("unknown", { selector: "dd" })).toBeInTheDocument();
+    expect(c.getByText("4 calls had no cost figure, so they are not counted against the figure.")).toBeInTheDocument();
+  });
+  it("shows no edit form to a reader: no inputs, no Remove, no allowances", async () => {
+    readMock.mockResolvedValue(ok(withBudgets()));
+    await mount();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Remove|Change|Set the/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Daily reply allowances/ })).not.toBeInTheDocument();
+    expect(getAllowances).not.toHaveBeenCalled();
+  });
+
+  describe("for the owner (canManage)", () => {
+    it("shows the forms: the figure, each department's budget, and an Add form for departments with none", async () => {
+      readMock.mockResolvedValue(ok(withBudgets({ capabilities: OWNER })));
+      allowRead(allowances());
+      await mount();
+      expect(getAllowances).toHaveBeenCalledWith("u-1", "co-a");
+      const c = within(card("Company alert figure"));
+      expect((c.getByLabelText("Monthly alert figure (US dollars)") as HTMLInputElement).value).toBe("250.0000");
+      expect(c.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+      const d = card("Department budgets");
+      expect(within(d).getAllByRole("button", { name: "Remove" })).toHaveLength(2);
+      // the Add form offers only a department with a node and no budget yet (Web Dev and SEO have one; the null bucket has no node)
+      expect(within(d).queryByLabelText("Department")).toBeNull();
+    });
+    it("offers the Add form with the departments that have no budget", async () => {
+      readMock.mockResolvedValue(ok(withBudgets({ capabilities: OWNER, budgets: { company: companyBudget(), units: [unitBudget()] } })));
+      allowRead(allowances());
+      await mount();
+      const select = within(card("Department budgets")).getByLabelText("Department") as HTMLSelectElement;
+      expect([...select.options].map((o) => o.textContent)).toEqual(["Choose a department", "SEO"]);
+    });
+    it("with no budget set, still gives the owner the form to set one: a control, not an empty box", async () => {
+      readMock.mockResolvedValue(ok(companyUsage({ capabilities: OWNER })));
+      allowRead(allowances({ overrides: [] }));
+      await mount();
+      const c = within(card("Company alert figure"));
+      expect(c.getByText("No alert figure is set.")).toBeInTheDocument();
+      expect(c.getByRole("button", { name: "Set the figure" })).toBeInTheDocument();
+      expect(within(card("Department budgets")).getByText("No department has a budget.")).toBeInTheDocument();
+    });
+    it("lists the per-person allowance overrides with the default, each with a way back to the default", async () => {
+      readMock.mockResolvedValue(ok(companyUsage({ capabilities: OWNER })));
+      allowRead(allowances());
+      await mount();
+      const a = within(card("Daily reply allowances"));
+      expect(a.getByText("Default: 200 replies a day.")).toBeInTheDocument();
+      const row = a.getByText("Made Putra").closest("li") as HTMLElement;
+      expect(row).toHaveTextContent("350 replies a day");
+      expect(within(row).getByRole("button", { name: /Use the default/ })).toBeInTheDocument();
+    });
+    it("says so when nobody has their own allowance", async () => {
+      readMock.mockResolvedValue(ok(companyUsage({ capabilities: OWNER })));
+      allowRead(allowances({ overrides: [] }));
+      await mount();
+      expect(within(card("Daily reply allowances")).getByText("No one has their own allowance.")).toBeInTheDocument();
+    });
+    it("says a failed allowances read cannot tell, and still draws the rest of the page", async () => {
+      readMock.mockResolvedValue(ok(companyUsage({ capabilities: OWNER })));
+      vi.mocked(getAllowances).mockResolvedValue({ kind: "unavailable", reason: "upstream 502" });
+      await mount();
+      expect(screen.getByText("upstream 502")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: /^By surface/ })).toBeInTheDocument();
+    });
   });
 });

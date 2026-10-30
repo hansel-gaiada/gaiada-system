@@ -235,7 +235,8 @@ interface DemoHandoff {
   ownerUserId: string;
   agent: string;
   goalText: string;
-  goalId: string;
+  /** AIP-18: null while held (no runner goal yet), and on a hand-off cancelled while it waited. */
+  goalId: string | null;
   runId: string | null;
   status: HandoffStatus;
   outcome: string | null;
@@ -243,6 +244,10 @@ interface DemoHandoff {
   approvalId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** AIP-18: the stop that holds (or held) it. */
+  holdKind: "allowance" | "department" | null;
+  holdUnitNodeId: string | null;
+  heldAt: string | null;
 }
 
 // A small, fixed stand-in for the runner's REAL registry (see `handoffs.ts`'s `fetchRoster` for
@@ -255,6 +260,22 @@ const DEMO_ROSTER_AGENTS = [
 
 const now = () => new Date().toISOString();
 const DEMO_OWNER = "demo-hansel";
+
+// AIP-18 (BFF §66.11) — the soft stop, drivable in demo mode. `asst-thread-4` holds one reply stopped by the person's daily allowance, one stopped by the
+// department's budget, and one hand-off held over budget (Cancel it, or watch it stay). A new message that contains BUDGET_TEST (allowance) or
+// BUDGET_DEPT_TEST (department) is stopped LIVE: the stream's first frame is `event: budget`, and the finished reply keeps the `turn_budget` part. A hand-off
+// whose goal contains HOLD_TEST (or HOLD_DEPT_TEST) is held instead of run. The reset instants are the next 00:00 UTC and the first of next month.
+const nextUtcMidnight = (): string => { const d = new Date(); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1)).toISOString(); };
+const nextUtcMonth = (): string => { const d = new Date(); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString(); };
+const turnBudgetPart = (kind: "allowance" | "department") =>
+  kind === "allowance"
+    ? { type: "turn_budget", kind, resetsAt: nextUtcMidnight() }
+    : { type: "turn_budget", kind, unitNodeId: "dept-1", resetsAt: nextUtcMonth() };
+/** Which stop a demo message asks for (department first: its marker contains the allowance one's). */
+const demoStopFor = (text: string): "allowance" | "department" | null => (/BUDGET_DEPT_TEST/.test(text) ? "department" : /BUDGET_TEST/.test(text) ? "allowance" : null);
+function readTurnBudgetDemo(parts: unknown): unknown | null {
+  return Array.isArray(parts) ? parts.find((x) => !!x && typeof x === "object" && (x as { type?: unknown }).type === "turn_budget") ?? null : null;
+}
 
 function seedThreads(): DemoThread[] {
   return [
@@ -278,6 +299,13 @@ function seedThreads(): DemoThread[] {
       status: "active", pinned: false, lastMessageAt: "2026-07-10T08:00:00Z",
       totalTokens: 60, totalCostUsd: "0.00", compactionSummary: null, compactionSummaryUptoSeq: null,
       createdAt: "2026-07-10T07:55:00Z", updatedAt: "2026-07-10T08:00:00Z",
+    },
+    {
+      id: "asst-thread-4", tenantId: "co-agency", ownerUserId: DEMO_OWNER,
+      title: "Over budget: lighter replies", brainProvider: null, brainTier: null, brainModel: null, hermesSessionId: null,
+      status: "active", pinned: false, lastMessageAt: "2026-07-01T09:05:00Z",
+      totalTokens: 120, totalCostUsd: "0.00", compactionSummary: null, compactionSummaryUptoSeq: null,
+      createdAt: "2026-07-01T09:00:00Z", updatedAt: "2026-07-01T09:05:00Z",
     },
   ];
 }
@@ -307,6 +335,43 @@ function seedMessages(): DemoMessage[] {
       content: "It separates DECIDING an automation write (approved/rejected) from EXECUTING it. Approving used to execute nothing — D14 adds a registry-scoped executor that re-drives the call as the original requester, with a single-use grant.",
       partial: "", parts: null, provider: null, model: null, tokens: 84, latencyMs: 1100, errorKind: null,
       createdAt: "2026-08-03T14:20:03Z",
+    },
+    // AIP-18 — replies the soft stop answered in a lighter mode: each carries the `turn_budget` part, and the transcript shows ONE quiet line under it.
+    {
+      id: "asst-msg-5", tenantId: "co-agency", threadId: "asst-thread-4", seq: 1, role: "user",
+      content: "Summarise this week's open tasks for me.", partial: "",
+      parts: null, provider: null, model: null, tokens: null, latencyMs: null, errorKind: null,
+      createdAt: "2026-07-01T09:00:00Z",
+    },
+    {
+      id: "asst-msg-6", tenantId: "co-agency", threadId: "asst-thread-4", seq: 2, role: "assistant",
+      content: "Three tasks are due this week: the Northwind hero image, checkout QA and the SEO audit hand-off. Nothing is blocked.",
+      partial: "", parts: [turnBudgetPart("allowance")], provider: null, model: null, tokens: 40, latencyMs: 900, errorKind: null,
+      createdAt: "2026-07-01T09:00:03Z",
+    },
+    {
+      id: "asst-msg-7", tenantId: "co-agency", threadId: "asst-thread-4", seq: 3, role: "user",
+      content: "And what is the status of the web projects?", partial: "",
+      parts: null, provider: null, model: null, tokens: null, latencyMs: null, errorKind: null,
+      createdAt: "2026-07-01T09:04:00Z",
+    },
+    {
+      id: "asst-msg-8", tenantId: "co-agency", threadId: "asst-thread-4", seq: 4, role: "assistant",
+      content: "Web Dev has two projects in progress and one waiting on client feedback.",
+      partial: "", parts: [turnBudgetPart("department")], provider: null, model: null, tokens: 30, latencyMs: 800, errorKind: null,
+      createdAt: "2026-07-01T09:04:03Z",
+    },
+  ];
+}
+
+// AIP-18 — one hand-off held over budget, on the budget-stop thread: "Waiting: over budget", with Cancel.
+function seedHandoffs(): DemoHandoff[] {
+  return [
+    {
+      id: "asst-handoff-seed-held", tenantId: "co-agency", threadId: "asst-thread-4", ownerUserId: DEMO_OWNER, agent: "status-reporter",
+      goalText: "Write the weekly status report for every web project.", goalId: null, runId: null, status: "held", outcome: null,
+      errorKind: null, approvalId: null, createdAt: "2026-07-01T09:06:00Z", updatedAt: "2026-07-01T09:06:00Z",
+      holdKind: "allowance", holdUnitNodeId: null, heldAt: "2026-07-01T09:06:00Z",
     },
   ];
 }
@@ -383,7 +448,7 @@ const nid = (p: string) => `${p}-demo-${seqBox.n++}`;
 const MEMORY: DemoMemory[] = globalThis.__gaiadaDemoAssistantMemory ?? (globalThis.__gaiadaDemoAssistantMemory = seedMemory());
 // ASST-21 — same singleton requirement; read from the "action" layer via createHandoffAction/
 // refreshHandoffsAction.
-const HANDOFFS: DemoHandoff[] = globalThis.__gaiadaDemoAssistantHandoffs ?? (globalThis.__gaiadaDemoAssistantHandoffs = []);
+const HANDOFFS: DemoHandoff[] = globalThis.__gaiadaDemoAssistantHandoffs ?? (globalThis.__gaiadaDemoAssistantHandoffs = seedHandoffs());
 // T4 — see the singleton declaration's own comment above.
 const TOOL_CALLS: DemoToolCall[] = globalThis.__gaiadaDemoAssistantToolCalls ?? (globalThis.__gaiadaDemoAssistantToolCalls = []);
 const WRITE_INTENTS: DemoWriteIntent[] = globalThis.__gaiadaDemoAssistantIntents ?? (globalThis.__gaiadaDemoAssistantIntents = []);
@@ -462,10 +527,11 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
     // ASST-17 — the placeholder row records the turn mode in `parts` (mirrors the real
     // `turnModePart`), which is what `demoAssistantStreamBody` reads back to decide whether to
     // simulate a tool turn at all — never trusting a client-controlled query string either.
-    const placeholderParts = toolMode ? [{ type: "turn_mode", mode: "tools", agent }] : null;
+    const stop = demoStopFor(content);
+    const placeholderParts = [...(toolMode ? [{ type: "turn_mode", mode: "tools", agent }] : []), ...(stop ? [turnBudgetPart(stop)] : [])];
     MESSAGES.push({
       id: assistantId, tenantId, threadId, seq: nextSeq + 1, role: "assistant", content: null, partial: "",
-      parts: placeholderParts, provider: null, model: null, tokens: null, latencyMs: null, errorKind: null, createdAt: now(),
+      parts: placeholderParts.length > 0 ? placeholderParts : null, provider: null, model: null, tokens: null, latencyMs: null, errorKind: null, createdAt: now(),
     });
     return {
       status: 201,
@@ -677,15 +743,40 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
     const goal = (b.goal ?? "").trim();
     if (!goal) return { status: 400, json: { error: "goal is required" } };
     const id = nid("asst-handoff");
+    const ts = now();
+    // AIP-18 — a goal containing HOLD_TEST (allowance) or HOLD_DEPT_TEST (department) is HELD: no runner goal, nothing runs, and it starts by itself when the stop ends.
+    const holdKind = /HOLD_DEPT_TEST/.test(goal) ? "department" : /HOLD_TEST/.test(goal) ? "allowance" : null;
+    if (holdKind) {
+      HANDOFFS.push({
+        id, tenantId, threadId, ownerUserId: userId, agent, goalText: goal, goalId: null, runId: null,
+        status: "held", outcome: null, errorKind: null, approvalId: null, createdAt: ts, updatedAt: ts,
+        holdKind, holdUnitNodeId: holdKind === "department" ? "dept-1" : null, heldAt: ts,
+      });
+      const hold = holdKind === "allowance" ? { kind: holdKind, resetsAt: nextUtcMidnight() } : { kind: holdKind, unitNodeId: "dept-1", resetsAt: nextUtcMonth() };
+      return { status: 201, json: { id, goalId: null, status: "held", hold } };
+    }
     const goalId = nid("demo-goal");
     const runId = nid("demo-run");
-    const ts = now();
     HANDOFFS.push({
       id, tenantId, threadId, ownerUserId: userId, agent, goalText: goal, goalId, runId,
       status: "ok", outcome: `(demo) ${agent} handled: ${goal}`, errorKind: null, approvalId: null,
-      createdAt: ts, updatedAt: ts,
+      createdAt: ts, updatedAt: ts, holdKind: null, holdUnitNodeId: null, heldAt: null,
     });
     return { status: 201, json: { id, goalId, status: "ok" } };
+  }
+
+  // AIP-18 — cancel a HELD hand-off (BFF §66.11): owner-only, 409 `not_held` for anything else, 404 for an id that is not this thread's.
+  const handoffCancelM = p.match(/^\/api\/([^/]+)\/assistant\/threads\/([^/]+)\/handoffs\/([^/]+)\/cancel$/);
+  if (handoffCancelM && m === "POST") {
+    const [, tenantId, threadId, handoffId] = handoffCancelM;
+    const thread = THREADS.find((t) => t.id === threadId && t.tenantId === tenantId);
+    if (!thread || thread.ownerUserId !== userId) return { status: 404, json: { error: "thread not found" } };
+    const row = HANDOFFS.find((h) => h.id === decodeURIComponent(handoffId) && h.threadId === threadId && h.tenantId === tenantId);
+    if (!row) return { status: 404, json: { error: "handoff not found" } };
+    if (row.status !== "held") return { status: 409, json: { error: "not_held" } };
+    row.status = "cancelled";
+    row.updatedAt = now();
+    return ok(pubHandoff(row));
   }
 
   const handoffListM = p.match(/^\/api\/([^/]+)\/assistant\/threads\/([^/]+)\/handoffs$/);
@@ -867,6 +958,13 @@ export function demoAssistantStreamBody(tenantId: string, threadId: string, mess
           // controller already closed (client aborted) — nothing left to do.
         }
       };
+
+      // AIP-18 — a stopped turn announces itself ONCE, as the first frame, read off the placeholder ROW's own part (never anything client-supplied).
+      const turnBudget = readTurnBudgetDemo(placeholder.parts);
+      if (turnBudget) {
+        const { type: _t, ...frame } = turnBudget as Record<string, unknown>;
+        enqueue(`event: budget\ndata: ${JSON.stringify(frame)}\n\n`);
+      }
 
       // ── T4 (ASST-23, §7.4) — THE TOOL-TURN SIMULATION. Deliberately its own branch, checked
       // first: a tools-mode turn never falls through to the plain-chat echo below (and the

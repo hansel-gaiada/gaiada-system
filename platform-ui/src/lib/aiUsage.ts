@@ -8,6 +8,8 @@
 // string and BigInt arithmetic, never through a float, because a whole month costs about $0.001 today and a float round trip is exactly where
 // a tiny figure would be mangled. Whatever the answer says was estimated, priced from our table or left unpriced is said next to the figure.
 
+import { asCompanyBudgets, asUnitBudget, type CompanyBudgets, type UnitBudgetLine } from "./aiBudget";
+
 // ── The wire shape (§66.2 to §66.5) ───────────────────────────────────────────────────────────────
 
 /** The figures every group carries (§66.2). */
@@ -57,6 +59,8 @@ export interface UnitUsage {
   byModel: ModelLine[];
   byDay: DayLine[];
   people: PersonLine[] | null;
+  /** §66.8: that unit's OWN budget line, or null when none is set (also when an older server sends no key). */
+  budget: UnitBudgetLine | null;
   capabilities: UsageCapabilities;
 }
 
@@ -69,6 +73,8 @@ export interface CompanyUsage {
   bySurface: SurfaceLine[];
   byModel: ModelLine[];
   byDay: DayLine[];
+  /** §66.8: the company's alert figure and every department's budget; empty when none is set. */
+  budgets: CompanyBudgets;
   capabilities: UsageCapabilities;
 }
 
@@ -161,6 +167,7 @@ export function asUnitUsage(raw: unknown): UnitUsage {
     byDay: list(raw.byDay, "byDay", dayLine),
     // The server omits the key for the company tier. Absent stays absent (`null`): it is not "nobody".
     people: "people" in raw && raw.people !== undefined ? list(raw.people, "people", personLine) : null,
+    budget: asUnitBudget(raw.budget),
     capabilities: asCapabilities(raw.capabilities),
   };
 }
@@ -175,6 +182,7 @@ export function asCompanyUsage(raw: unknown): CompanyUsage {
     bySurface: list(raw.bySurface, "bySurface", surfaceLine),
     byModel: list(raw.byModel, "byModel", modelLine),
     byDay: list(raw.byDay, "byDay", dayLine),
+    budgets: asCompanyBudgets(raw.budgets),
     capabilities: asCapabilities(raw.capabilities),
   };
 }
@@ -242,6 +250,9 @@ const withQuery = (path: string, params: Record<string, string | undefined>): st
 export const myAiUsageHref = (month?: string): string => withQuery(MY_AI_USAGE_PATH, { month });
 export const departmentAiUsageHref = (unit?: string, month?: string): string => withQuery(DEPARTMENT_AI_USAGE_PATH, { unit, month });
 export const companyAiUsageHref = (month?: string): string => withQuery(COMPANY_AI_USAGE_PATH, { month });
+
+/** `GET allowances` (§66.9), under the tenant: `manage` only. */
+export const allowancesPath = (tenantId: string): string => `/api/${encodeURIComponent(tenantId)}/ai-usage/allowances`;
 
 /** The read routes' paths and query (§66.3 to §66.5), under the tenant. */
 export const myUsagePath = (tenantId: string, month: string): string => `/api/${encodeURIComponent(tenantId)}/ai-usage/me?month=${encodeURIComponent(month)}`;
@@ -366,3 +377,15 @@ export function figureNotes(f: UsageFigures): string[] {
 
 /** An empty month: nothing at all recorded in the answer's totals. */
 export const isEmptyMonth = (totals: UsageFigures): boolean => totals.calls === 0;
+
+// ── Budget lines in words (§66.8; the rules and the wire shape are in `aiBudget.ts`) ─────────────
+
+/** What has been spent against the figure, in words: `$0.8000 of $1.0000`. Unknown spend says so, never `$0`. */
+export function budgetSpentText(b: { spentUsd: string | null; monthlyUsd: string }): string {
+  return `${formatCost(b.spentUsd)} of ${formatCost(b.monthlyUsd)}`;
+}
+
+/** The note under a budget line when some calls had no cost: they are never counted against the figure. */
+export function budgetNoCostNote(noCostCalls: number): string | null {
+  return noCostCalls > 0 ? `${calls(noCostCalls)} had no cost figure, so ${noCostCalls === 1 ? "it is" : "they are"} not counted against the figure.` : null;
+}

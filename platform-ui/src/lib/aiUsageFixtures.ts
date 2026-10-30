@@ -1,6 +1,7 @@
 // Test fixtures for the AI usage screens (AIP-05, AIP-16; BFF section 66): answers in the shape the routes send, at the figures the live estate shows
 // (knowledge embeds outnumber replies about 3,000 to 1; a whole month costs about a tenth of a cent). Pure data, never imported by the app.
 import type { CompanyUsage, MyUsage, UnitUsage, UsageFigures } from "./aiUsage";
+import type { Allowances, CompanyBudgetLine, UnitBudgetLine } from "./aiBudget";
 
 export const fig = (over: Partial<UsageFigures> = {}): UsageFigures => ({
   calls: 10, promptTokens: 1000, completionTokens: 200, costUsd: "0.00100000",
@@ -38,6 +39,7 @@ export const unitUsage = (over: Partial<UnitUsage> = {}): UnitUsage => ({
     { userId: "u-2", name: "Made Putra", ...fig({ calls: 9, costUsd: "0.00020000" }) },
     { userId: "u-3", name: null, ...fig({ calls: 4, costUsd: "0.00000500" }) },
   ],
+  budget: null,
   capabilities: { canSeePeople: true, canManage: false, canLiftStop: false },
   ...over,
 });
@@ -54,7 +56,25 @@ export const companyUsage = (over: Partial<CompanyUsage> = {}): CompanyUsage => 
   bySurface: [{ surface: "knowledge", ...KNOWLEDGE }, { surface: "assistant", ...ASSISTANT }],
   byModel: [{ provider: "openrouter", model: "z-ai/glm-5.3-flash", ...ASSISTANT }],
   byDay: [{ day: "2026-10-03", ...fig({ calls: 3000 }) }],
+  budgets: { company: null, units: [] },
   capabilities: CAPS,
+  ...over,
+});
+
+/** §66.8: a department's budget line (the doc's example: 80 percent of $1, mode report). */
+export const unitBudget = (over: Partial<UnitBudgetLine> = {}): UnitBudgetLine => ({
+  unitNodeId: "d-web", name: "Web Dev", monthlyUsd: "1.0000", mode: "report", spentUsd: "0.80000000", noCostCalls: 0, percent: 80, state: "over_80", stopLifted: false, ...over,
+});
+
+/** §66.8: the company's alert figure. */
+export const companyBudget = (over: Partial<CompanyBudgetLine> = {}): CompanyBudgetLine => ({
+  monthlyUsd: "250.0000", spentUsd: "218.75000000", noCostCalls: 0, percent: 87.5, state: "over_80", ...over,
+});
+
+/** §66.9: the allowances answer. */
+export const allowances = (over: Partial<Allowances> = {}): Allowances => ({
+  defaultDailyReplies: 200,
+  overrides: [{ userId: "u-2", name: "Made Putra", dailyReplies: 350, updatedAt: "2026-10-29T10:00:00.000Z" }],
   ...over,
 });
 

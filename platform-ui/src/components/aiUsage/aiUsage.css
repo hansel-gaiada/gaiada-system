@@ -25,3 +25,34 @@
 @media (max-width: 560px) {
   .aiu .lux-table { overflow-x: auto; }
 }
+
+/* AIP-17b and AIP-18: budget lines, the owner's forms and the lift (BFF §66.8, §66.9, §66.11). A state is said in words; colour only repeats it. */
+.aiu-budgets { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-16); }
+.aiu-budget { display: flex; flex-direction: column; gap: var(--space-8); padding-top: var(--space-12); border-top: 0.5px solid var(--erp-hairline); }
+.aiu-budget:first-child { padding-top: 0; border-top: 0; }
+.aiu-budget--row { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-16); }
+.aiu-budget__name { margin: 0; font: 600 14px/1.4 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
+.aiu-budget__figs { margin: 0; display: grid; gap: var(--space-8) var(--space-20); grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.aiu-budget__figs > div { display: flex; flex-direction: column; gap: var(--space-4); }
+.aiu-budget__figs dt { font: 600 12px var(--font-body); letter-spacing: 0.04em; color: var(--ink-muted); }
+.aiu-budget__figs dd { margin: 0; font: 600 15px var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
+.aiu-budget__figs dd[data-state="over_80"] { color: var(--status-warning-fg); }
+.aiu-budget__figs dd[data-state="over_100"] { color: var(--status-critical-fg); }
+.aiu-note { margin: var(--space-8) 0 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); overflow-wrap: anywhere; }
+.aiu-flags { margin: 0 0 var(--space-8); display: flex; flex-wrap: wrap; gap: var(--space-8); }
+.aiu-flag { font: 600 12px var(--font-body); padding: 2px var(--space-8); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); color: var(--text-primary); }
+.aiu-flag[data-mode="soft_stop"] { border-color: var(--status-warning); }
+.aiu-flag--lifted { border-color: var(--status-ok); color: var(--status-ok-fg); }
+.aiu-form { display: flex; flex-direction: column; gap: var(--space-12); margin-top: var(--space-12); }
+.aiu-form__row { display: grid; gap: var(--space-12); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.aiu-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-12); margin-top: var(--space-8); }
+.aiu-msg { font: 400 12px/1.5 var(--font-body); max-width: 520px; overflow-wrap: anywhere; }
+.aiu-msg--bad { color: var(--status-critical-fg); }
+.aiu-msg--ok { color: var(--status-ok-fg); font-weight: 600; }
+.aiu-msg--ok:empty { display: none; }
+.aiu-lift { margin-top: var(--space-12); padding: var(--space-12); border: 0.5px solid var(--status-warning); border-radius: var(--radius-md); }
+.aiu-lift .aiu-note { margin-top: 0; color: var(--text-primary); }
+.aiu-allow { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); }
+.aiu-allow__form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); }
+.aiu-allow__input { width: 96px; }
+.aiu-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

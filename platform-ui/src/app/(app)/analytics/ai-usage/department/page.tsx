@@ -6,19 +6,26 @@ import { getActiveTenant } from "@/lib/tenant";
 import { can, leadUnits, leadsAnyUnitWith } from "@/lib/rbac";
 import { readOrgRoot } from "@/lib/campaigns-data";
 import { unitOptions } from "@/lib/activityTeam";
-import { getUnitAiUsage } from "@/lib/aiUsage-data";
+import { getAllowances, getUnitAiUsage } from "@/lib/aiUsage-data";
+import { liftOffered } from "@/lib/aiBudget";
 import { AI_USAGE_FORBIDDEN, AI_USAGE_NOT_FOUND, DEPARTMENT_AI_USAGE_PATH, departmentAiUsageHref, parseMonth } from "@/lib/aiUsage";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { AiUsageView } from "@/components/aiUsage/AiUsageView";
+import { UnitBudgetSection } from "@/components/aiUsage/BudgetSections";
 import { MonthPicker } from "@/components/aiUsage/MonthPicker";
 import "@/components/aiUsage/aiUsage.css";
 
 // Analytics > AI usage (AIP-16, owner rulings AIP-D6 and AIP-D18; BFF §66.4): one department's month of AI use, by surface, model and day, and PER
 // PERSON when the server sends the people (the department's head and the owner; the key is absent for company admins and the GM, and then no person is
 // drawn, never an empty list). Counts and money only: no thread title, no prompt, no text. A unit counts its whole subtree.
+//
+// BUDGET (AIP-17b, BFF §66.8 and §66.9; AIP-18, §66.11): this unit's OWN budget line leads the page. The owner (`capabilities.canManage`) gets the form to set, change
+// and remove it and, in the by-person table, an allowance cell per person (`GET allowances`, `manage` only). The Lift button is offered only when the unit is in
+// Soft stop mode, at or over 100%, not lifted this month, `capabilities.canLiftStop` is true, and the page shows the current UTC month (`liftOffered`). A reader
+// with no budget set sees nothing of this: no empty box.
 //
 // WHO SEES IT: the server decides every read (`read_people`, else `read_unit`, else `read_company`, else 403). The registry offers the tab to the unit's
 // head (`unitCap` `ai_usage.read_unit`) and to the company read; this page asks the server whenever it is given a unit, so the GM, who holds the read
@@ -80,6 +87,8 @@ export default async function DepartmentAiUsagePage({ searchParams }: { searchPa
   }
 
   const read = await getUnitAiUsage(userId, tenant, unit, month);
+  const canManage = read.kind === "ok" && read.data.capabilities.canManage;
+  const allowances = canManage && read.kind === "ok" && read.data.people !== null ? await getAllowances(userId, tenant) : null;
   const heading = read.kind === "ok" && read.data.unit.name ? `${TITLE}: ${read.data.unit.name}` : TITLE;
   const change = <Link href={departmentAiUsageHref(undefined, month)} className="lux-btn lux-btn--ghost lux-btn--sm">Change department</Link>;
 
@@ -88,6 +97,15 @@ export default async function DepartmentAiUsagePage({ searchParams }: { searchPa
       <PageHeader eyebrow="Analytics" title={heading} actions={change} />
       <MonthPicker month={month} basePath={DEPARTMENT_AI_USAGE_PATH} params={{ unit }} />
       {read.kind === "ok" ? (
+        <>
+        <UnitBudgetSection
+          unitNodeId={read.data.unit.unitNodeId}
+          name={read.data.unit.name}
+          line={read.data.budget}
+          canManage={canManage}
+          showLift={liftOffered(read.data.budget, read.data.capabilities, read.data.month)}
+          month={read.data.month}
+        />
         <AiUsageView
           month={read.data.month}
           totals={read.data.totals}
@@ -95,7 +113,9 @@ export default async function DepartmentAiUsagePage({ searchParams }: { searchPa
           byModel={read.data.byModel}
           byDay={read.data.byDay}
           people={read.data.people}
+          allowances={allowances?.kind === "ok" ? allowances.data : null}
         />
+        </>
       ) : read.kind === "forbidden" ? (
         <ReadRefusal subject="this department's AI usage" kind="forbidden" detail={AI_USAGE_FORBIDDEN} />
       ) : read.kind === "not_found" ? (

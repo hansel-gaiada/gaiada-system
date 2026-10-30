@@ -336,17 +336,31 @@ export async function createHandoffAction(
   threadId: string,
   agent: string,
   goal: string,
-): Promise<ActionResult<{ id: string; goalId: string; status: string }>> {
+): Promise<ActionResult<{ id: string; goalId: string | null; status: string; hold?: { kind: "allowance" | "department"; resetsAt: string; unitNodeId?: string } }>> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
   try {
-    const r = await platformFetch<{ id: string; goalId: string; status: string }>(
+    const r = await platformFetch<{ id: string; goalId: string | null; status: string; hold?: { kind: "allowance" | "department"; resetsAt: string; unitNodeId?: string } }>(
       `/api/${c.tenant}/assistant/threads/${threadId}/handoff`,
       c.userId,
       { method: "POST", body: JSON.stringify({ agent, goal }) },
     );
     return { ok: true, ...r };
   } catch (e) {
+    return fail(e);
+  }
+}
+
+/** AIP-18 (BFF §66.11) — cancel a HELD hand-off (waiting: over budget); it never starts. Owner-only. `409 not_held` means it had already started or ended
+ *  (a started run belongs to the runner and this route never stops one): said in words, and the caller refreshes the list either way. */
+export async function cancelHandoffAction(threadId: string, handoffId: string): Promise<ActionResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  try {
+    await platformFetch<unknown>(`/api/${c.tenant}/assistant/threads/${threadId}/handoffs/${encodeURIComponent(handoffId)}/cancel`, c.userId, { method: "POST" });
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 409) return { ok: false, status: 409, error: "This hand-off is not waiting any more: it has already started or ended." };
     return fail(e);
   }
 }

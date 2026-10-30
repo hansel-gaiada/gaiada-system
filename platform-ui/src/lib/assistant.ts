@@ -19,6 +19,8 @@
 // `useTypewriter` (components/assistant/useAssistantStream.ts), which never mutates or reads back
 // into the reducer. The reducer is the source of truth; the smoother is a lag applied on top of it.
 
+import { asTurnBudget, type TurnBudget } from "./aiBudget";
+
 // ============================================================== Thread/message shapes ==============
 
 export type AssistantThreadStatus = "active" | "archived";
@@ -415,6 +417,9 @@ export type ClientStreamEvent =
   // already finished by the time the stream opens at all). Absent entirely on a turn that used no
   // RAG grounding — never an empty-items frame (mirrors platform-nest's `citationParts`).
   | { type: "citations"; items: AssistantCitation[] }
+  // AIP-18 (BFF §66.11) — the soft stop. Arrives ONCE, as the first frame, and only on a stopped turn (the person's daily allowance or their
+  // department's budget is used up): the reply continues in a lighter mode and the UI shows ONE quiet line. Never a figure. Absent on every unstopped turn.
+  | { type: "budget"; budget: TurnBudget }
   // ── T4 (ASST-23, §7.4) — the tool-turn frames. Until this ticket these all decoded to `null`
   // (pinned by lib/assistant.test.ts's old ":105" case) — ASST-17/T3a/T3b made them real, on the
   // tool-turn path only; a plain chat turn's wire never emits any of these four. ──────────────────
@@ -507,6 +512,11 @@ export function decodeAssistantEvent(block: RawSSEBlock): ClientStreamEvent | nu
       if (!callId || !toolName || !intentId || !impact || !expiresAt) return null;
       return { type: "confirm_required", callId, toolName, intentId, args: obj.args ?? {}, impact, expiresAt };
     }
+    case "budget": {
+      // The frame is the part's own object: `{ kind, unitNodeId?, resetsAt }`. A block without a known `kind` is dropped like any malformed block.
+      const budget = asTurnBudget(obj);
+      return budget ? { type: "budget", budget } : null;
+    }
     case "done":
       return { type: "done" };
     case "error":
@@ -570,6 +580,8 @@ export interface StreamState {
   // guarantee as `meta`). `[]` for the entire stream when this turn used no RAG grounding — the
   // honest "nothing to cite" state, identical in rendering to "not answered yet".
   citations: AssistantCitation[];
+  // AIP-18 — set when a `budget` frame arrives (the first frame of a stopped turn). `null` for the whole stream on every unstopped turn.
+  turnBudget: TurnBudget | null;
   // T4 — accumulated in wire order, one entry per distinct `callId` seen so far (see
   // `upsertLiveToolCall`). `[]` for every plain chat turn — a tool turn's frames are the only thing
   // that ever populates this.
@@ -578,7 +590,7 @@ export interface StreamState {
 }
 
 export function initialStreamState(): StreamState {
-  return { status: "idle", text: "", meta: null, usage: null, citations: [], toolCalls: [], error: null };
+  return { status: "idle", text: "", meta: null, usage: null, citations: [], turnBudget: null, toolCalls: [], error: null };
 }
 
 const TERMINAL_STATUSES = new Set<StreamStatus>(["done", "error", "stopped"]);
@@ -614,6 +626,8 @@ export function streamReducer(state: StreamState, event: ClientStreamEvent): Str
       return { ...state, usage: { tokens: event.tokens, latencyMs: event.latencyMs, source: event.source, promptTokens: event.promptTokens, completionTokens: event.completionTokens } };
     case "citations":
       return { ...state, citations: event.items };
+    case "budget":
+      return { ...state, turnBudget: event.budget };
     case "tool_call":
       return { ...state, toolCalls: upsertLiveToolCall(state.toolCalls, event.callId, { toolName: event.toolName, args: event.args, status: "running" }) };
     case "tool_result":
@@ -1051,7 +1065,9 @@ export interface RosterResult {
 
 /** Mirrors the runner's `GoalStatus` (ai-agents `runner/store.ts`) — a handoff's own lifecycle. */
 export type HandoffStatus =
-  | "queued" | "running" | "ok" | "suspended" | "budget_exhausted" | "failed" | "interrupted" | "cancelled";
+  | "queued" | "running" | "ok" | "suspended" | "budget_exhausted" | "failed" | "interrupted" | "cancelled"
+  /** AIP-18 (BFF §66.11) — stored while the owner's AI allowance or department budget is used up; the runner is not called, and it starts by itself when the stop ends. */
+  | "held";
 
 const TERMINAL_HANDOFF_STATUSES = new Set<HandoffStatus>(["ok", "suspended", "budget_exhausted", "failed", "interrupted", "cancelled"]);
 
@@ -1061,7 +1077,8 @@ export interface AssistantHandoff {
   ownerUserId: string;
   agent: string;
   goalText: string;
-  goalId: string;
+  /** `null` while held (no runner goal yet), and on a hand-off cancelled or failed while it waited (AIP-18). */
+  goalId: string | null;
   /** Set once the runner reports a terminal run for this goal — the run-watch view's cue that
    *  `GET :t/agents/runs/:runId` (now additionally readable by THIS owner, resource_agent_run.yaml)
    *  has something to show. `null` while still queued/running. */
@@ -1072,6 +1089,10 @@ export interface AssistantHandoff {
   approvalId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** AIP-18 — which stop holds (or held) this hand-off. Kept after a held hand-off starts, as a record of the wait; absent from an older server. */
+  holdKind?: "allowance" | "department" | null;
+  holdUnitNodeId?: string | null;
+  heldAt?: string | null;
 }
 
 export function isHandoffTerminal(h: Pick<AssistantHandoff, "status">): boolean {
@@ -1095,6 +1116,7 @@ const HANDOFF_STATUS_LABEL: Record<HandoffStatus, string> = {
   failed: "Failed",
   interrupted: "Interrupted",
   cancelled: "Cancelled",
+  held: "Waiting: over budget",
 };
 
 export function handoffStatusLabel(status: string): string {

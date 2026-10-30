@@ -7,6 +7,8 @@ import { renderMarkdownLite } from "./markdownLite";
 import { CitationChips } from "./CitationChips";
 import { ProposalCard } from "./ProposalCard";
 import { ToolCallChips } from "./ToolCallChips";
+import { TurnBudgetLine } from "./TurnBudgetLine";
+import { parseTurnBudget } from "@/lib/aiBudget";
 
 // ASST-07 — one message bubble. `streaming`/`liveText` are set ONLY for the single row currently
 // being generated in THIS tab (see AssistantWorkspace) — every other row renders its persisted
@@ -58,6 +60,10 @@ export function Message({ message, streaming, liveText, liveState, threadId }: {
   // ordering guarantee); once finalized, read the persisted `parts` — the same "live state during
   // the turn, then the reload-safe record" split ASST-12's badge/meter already use above.
   const citations = streaming ? liveState?.citations ?? [] : parseCitations(message.parts);
+
+  // AIP-18 — the soft stop's line: the live `budget` frame (the first frame of a stopped turn) while this row streams, the `turn_budget` part once finalized
+  // and on every reload. `null` (nothing drawn) on every unstopped turn, a user row and a message from before AIP-18.
+  const turnBudget = isUser ? null : streaming ? liveState?.turnBudget ?? null : parseTurnBudget(message.parts);
 
   // ASST-24 — read-only, persisted-only (no live-stream counterpart exists — see
   // `parseSessionResumeMismatch`'s own header). Never shown on the row currently streaming in
@@ -118,6 +124,7 @@ export function Message({ message, streaming, liveText, liveState, threadId }: {
             {proposals.map((p) => <ProposalCard key={p.callId} call={p} threadId={threadId} />)}
           </div>
         )}
+        {turnBudget && <TurnBudgetLine budget={turnBudget} />}
         {/* ASST-24 — quiet, honest note: the reply itself is valid (never rendered as an error or
             a failure state); only Hermes' OWN memory diverged. The earlier turns are still right
             here in this transcript — it is the provider's side that restarted. */}

@@ -4,9 +4,10 @@ import "server-only";
 // malformed answer, is "unavailable" with the reason, never a month of nothing.
 import { platformFetch, PlatformError } from "./platform";
 import {
-  asCompanyUsage, asMyUsage, asUnitUsage, companyUsagePath, myUsagePath, unitUsagePath,
+  allowancesPath, asCompanyUsage, asMyUsage, asUnitUsage, companyUsagePath, myUsagePath, unitUsagePath,
   type CompanyUsage, type MyUsage, type UnitUsage,
 } from "./aiUsage";
+import { asAllowances, type Allowances } from "./aiBudget";
 
 export type UsageRead<T> =
   | { kind: "ok"; data: T }
@@ -38,3 +39,7 @@ export const getUnitAiUsage = (userId: string, tenantId: string, unitNodeId: str
 /** `GET /ai-usage/company?month=` (§66.5). */
 export const getCompanyAiUsage = (userId: string, tenantId: string, month: string): Promise<UsageRead<CompanyUsage>> =>
   read(companyUsagePath(tenantId, month), userId, asCompanyUsage, false);
+
+/** `GET /ai-usage/allowances` (§66.9): the daily reply default and the overrides. `manage` only, so anyone else is `forbidden`. */
+export const getAllowances = (userId: string, tenantId: string): Promise<UsageRead<Allowances>> =>
+  read(allowancesPath(tenantId), userId, asAllowances, false);

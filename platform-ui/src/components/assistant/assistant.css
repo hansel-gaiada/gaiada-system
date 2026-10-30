@@ -178,6 +178,8 @@
 /* ASST-24 — quiet, informational note: the conversation restarted on the provider's side. Not an
    error (no --status-danger token), just a step quieter than the ordinary meta line above. */
 .asst-msg__session-note { margin: 6px 0 0; font: 400 12px var(--font-body); font-style: italic; color: var(--ink-subtle); }
+/* AIP-18 — the soft stop's one quiet line under a reply (no colour alarm: it says what changed, in words). */
+.asst-msg__budget { margin: 6px 0 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); overflow-wrap: anywhere; }
 
 .asst-md-p { margin: 0 0 10px; }
 .asst-md-p:last-child { margin-bottom: 0; }
@@ -288,6 +290,7 @@
 .asst-roster__status-chip[data-status="failed"],
 .asst-roster__status-chip[data-status="budget_exhausted"] { color: var(--status-danger-fg); }
 .asst-roster__status-chip[data-status="suspended"] { color: var(--status-warning-fg); }
+.asst-roster__status-chip[data-status="held"] { color: var(--status-warning-fg); }
 .asst-roster__status-chip[data-status="running"] { color: var(--status-progress-fg); }
 .asst-roster__transcript { margin-top: 6px; padding: 6px 8px; background: var(--wash); font: 400 11.5px/1.5 var(--font-body); color: var(--text-primary); }
 .asst-roster__transcript ol { margin: 0; padding-left: 18px; }

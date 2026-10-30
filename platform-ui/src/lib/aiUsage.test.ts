@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   asCompanyUsage, asFigures, asMyUsage, asUnitUsage, companyAiUsageHref, companyUsagePath, costGapMark, costMark, currentMonth, dayLabel, departmentAiUsageHref,
   departmentLabel, figureNotes, formatCost, formatTokens, isEmptyMonth, modelLabel, monthLabel, myAiUsageHref, myUsagePath, noUseText, parseMonth, personLabel,
-  recentMonths, shiftMonth, surfaceLabel, tokenMark, unitUsagePath, type UsageFigures,
+  recentMonths, shiftMonth, surfaceLabel, tokenMark, unitUsagePath, allowancesPath, budgetNoCostNote, budgetSpentText, type UsageFigures,
 } from "./aiUsage";
+import { companyBudget, companyUsage, unitBudget, unitUsage } from "./aiUsageFixtures";
 
 // AIP-16 and AIP-05 (BFF section 66): the pure half. Cost and token words, unknown vs 0, the month, the answer's checks.
 const FIG = {
@@ -197,5 +198,36 @@ describe("the answer, checked", () => {
     expect(a.byDepartment.map((d) => d.unitNodeId)).toEqual(["d-web", null]);
     expect(a.noPerson[0].surface).toBe("knowledge");
     expect(() => asCompanyUsage({ month: "2026-10", totals: wire, byDepartment: "x", noPerson: [], byModel: [], bySurface: [], byDay: [] })).toThrow(/byDepartment/);
+  });
+});
+
+describe("budget lines on the reads (AIP-17b, §66.8)", () => {
+  it("reads the company's `budgets` and a unit's `budget`", () => {
+    const c = asCompanyUsage(companyUsage({ budgets: { company: companyBudget(), units: [unitBudget()] } }));
+    expect(c.budgets.company?.monthlyUsd).toBe("250.0000");
+    expect(c.budgets.units[0].unitNodeId).toBe("d-web");
+    expect(asUnitUsage(unitUsage({ budget: unitBudget({ mode: "soft_stop" }) })).budget?.mode).toBe("soft_stop");
+  });
+  it("an answer with no budget key (an older server) has no budget, never a bad answer", () => {
+    const { budgets: _b, ...noBudgets } = companyUsage();
+    const { budget: _u, ...noBudget } = unitUsage();
+    expect(asCompanyUsage(noBudgets).budgets).toEqual({ company: null, units: [] });
+    expect(asUnitUsage(noBudget).budget).toBeNull();
+  });
+  it("a malformed budget line is a bad answer, never a guess", () => {
+    expect(() => asUnitUsage(unitUsage({ budget: { ...unitBudget(), monthlyUsd: "x" } as never }))).toThrow(/budget/);
+  });
+  it("says what was spent against the figure, an unknown spend as unknown and never $0", () => {
+    expect(budgetSpentText({ spentUsd: "0.80000000", monthlyUsd: "1.0000" })).toBe("$0.8000 of $1.00");
+    expect(budgetSpentText({ spentUsd: "218.75000000", monthlyUsd: "250.0000" })).toBe("$218.75 of $250.00");
+    expect(budgetSpentText({ spentUsd: null, monthlyUsd: "1.0000" })).toBe("unknown of $1.00");
+  });
+  it("notes calls with no cost, which a budget never counts", () => {
+    expect(budgetNoCostNote(0)).toBeNull();
+    expect(budgetNoCostNote(1)).toBe("1 call had no cost figure, so it is not counted against the figure.");
+    expect(budgetNoCostNote(3)).toBe("3 calls had no cost figure, so they are not counted against the figure.");
+  });
+  it("addresses the allowances read under the tenant", () => {
+    expect(allowancesPath("co a")).toBe("/api/co%20a/ai-usage/allowances");
   });
 });
