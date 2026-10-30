@@ -13934,6 +13934,112 @@ Roles: `officer`, `lead` and `client`. A `client` step is the client's to provid
 
 **63.29.6 Proofs:** the payload's 400s (an unknown phase or role, a repeated key, an offset out of range); the apply's due dates on the golden working-day table (a kickoff on a holiday, a weekend, the year turn) and its milestones; one application per project and template, a replay answering the same ids; a kickoff move re-dating only the open tasks; the start refused to the officer and a `company_admin` (403 `not_a_social_approver`), `no_project` and `onboarding_template_not_set`; a `client` step assigned to the officer; the settings picker refusing another company's template and a `task` template.
 
+### 63.30 Company rules for SCP-5 (SCP-Q41) — **STATUS: PLANNED (2026-10-30)**
+
+**What it is.** Each company sets its own rules for the rest of SCP-5 in the UI, and the owner's rulings SCP-Q25 to SCP-Q40 are the seeded defaults (plan §2). The owner's words: "i want ui can be used to set all these rules. it will give flexibility that company need". It also keeps the module free of our own group's habits ("internal now, SaaS later"). §63.24 to §63.29 read their rules from here, and none of them hard-codes a rule this section names.
+
+**63.30.1 What a company sets.** One rules document per company, in sections. Each setting's default is the ruling, or the value the contract gave:
+
+| Section | Setting | Default |
+|---|---|---|
+| `reports` | `fiscalYearStartMonth`, 1 to 12. Quarters, halves and years follow it; a fiscal year is named by the calendar year it starts in | 1: calendar periods (SCP-Q39) |
+| `reports.kinds.<kind>`, for `daily`, `weekly`, `monthly`, `quarterly`, `semester`, `yearly` | `enabled` | on |
+| | `due`: `{rule: 'working_days_after', n: 0 to 30}`; for weekly also `{rule: 'weekday', weekday: 1 to 7, week: 'same'\|'next'}`; for the four long kinds also `{rule: 'report_due_day'}` (the client's day in the month after the period) | the short kinds 1 working day after; the long kinds `report_due_day` |
+| | `freezeAt`: `create` or `submit` | the short kinds `submit`, the long kinds `create` |
+| | `content.narrative`: `{max: 100 to 10,000 \| null}` | the short kinds 1,000; the long kinds no limit |
+| | `content.nextPeriodLine`: on or off | on for the short kinds |
+| | `content.notes`: `{areas: [{key, label}]}`, 0 to 6 areas | none for the short kinds; followers, engagement and audience for the long kinds (63.18) |
+| | `content.actionPlan`: `{enabled, max: 1 to 20}` | on, 10, for the long kinds |
+| | `checkRequires`: some of `narrative`, `notes`, `actionPlan`, `nextPeriodLine` | `narrative` for the short kinds; `notes` for the long kinds |
+| | `aiDrafting`: on or off | on |
+| `ideas` | `metricRequired`: on or off | on (63.25) |
+| | `sharedInMonthlyReport`: whether ideas marked shared print in the next monthly report | off (SCP-Q27) |
+| `cycle` | `steps`: 1 to 12 in order, each `{key, title, due, autoClose}`. `title` may use `{month}`. `due` is `{rule: 'ready_by', lessEstimatesFrom: <an estimated step> \| null, lessWorkingDays: 0 to 30}`, `{rule: 'report_due_day', monthOffset: -3 to 0}` or `{rule: 'none'}`. `autoClose` is `manual` or one condition from a fixed menu: `report_delivered` (with `reportMonthOffset`), `plan_laid_out`, `copy_locked`, `artwork_done`, `client_approved`, `all_scheduled` | 63.27's six steps, every one closing itself (SCP-Q31) |
+| `audit` | `dimensions`: 1 to 20 `{key, label, weight: 0 to 10, source: 'typed' or one of the six automatic rules of 63.28.1, advice}`; `bands`: 2 to 5 `{key, label, from: 0 to 100}`; `benchmark`: `{source: 'own_clients_median'}` or `{source: 'typed', rates: {<business type>: rate}}` | 63.28.1's twelve, each weighing 1; bands from 75 and from 50; our own clients' median (SCP-Q32) |
+| `saved` | `categories`: up to 12 `{key, label, holds: some of 'asset', 'link', 'text', enabled}`, plus the three read from elsewhere (`photos`, which also shows the client's design photos; `posts`; `hashtags`), which can be renamed, reordered or hidden but not removed | 63.26's six, per client (SCP-Q28) |
+| Onboarding | the company's onboarding template: a PM project template, edited in this page through PM's routes (63.29): phases, steps, roles and offsets in working days | the team's fifteen steps (SCP-Q35) |
+| Report automation | the schedules of 63.24.9, their own data | none |
+
+**63.30.2 Not set here,** with the reason:
+
+| What | Why it is not a company rule |
+|---|---|
+| Who may act: officers, copywriters, designers, the four of SCP-Q19; who checks, sends back and sends a report; who edits these rules and the schedules | A permission. The IAM roles-as-data program and PERMISSION-CONTRACT own it, with Cerbos and RLS as the authority; never a settings page |
+| One report per client, kind and period | A safety invariant: a client never gets two reports for one period. The database enforces it |
+| AI only drafts: nothing approves or sends a report by itself | A safety invariant (SCP-Q37, SCP-Q38): one of the four sends |
+| Maker/checker on posts; the four for money | The safety invariants of §53 (SCP-Q19, PV-D46) |
+| A schedule acts as its owner and is re-authorized at each run | The SCP-Q17 guarantee (SCP-Q38) |
+| Where a prospect lives; the stored shapes; the stage machine | Structural: changing one is a migration and a contract change, not a setting |
+| The automatic audit computations and the cycle's auto-close conditions | Code: a company picks from their menus, and cannot write a new one |
+| `campaign` and `adhoc` reports | SMM-23's own, outside the periodic kinds |
+| Operational limits (drafts in flight, page sizes, the lengths the database holds) | Operations, not company policy |
+
+**63.30.3 Data: `<prefix+7>_social_rules.sql`** (social; it lands before the other wave-5 files, and prefixes follow landing order; no DML; closing assertions):
+- `social_rule_versions` (new, third wall, append-only: a BEFORE UPDATE OR DELETE trigger raises, the 0087 shape):
+
+| Column | Type and rule |
+|---|---|
+| `tenant_id`, `version` | `uuid NOT NULL`, `integer NOT NULL`; PK `(tenant_id, version)`; `version >= 1`, consecutive per company |
+| `rules` | `jsonb NOT NULL`, an object: the whole document, validated by the server (63.30.4) |
+| `section` | `text NOT NULL`: the section this version changed: `reports`, `ideas`, `cycle`, `audit` or `saved` |
+| `reset` | `boolean NOT NULL DEFAULT false`: the section was set back to the defaults |
+| `defaults_version` | `text NOT NULL`: the seed the edit was made against |
+| `effective_from`, `edited_by`, `origin_site` | `timestamptz NOT NULL DEFAULT now()`; `uuid NOT NULL → users`; as usual |
+
+- **Read-through defaults.** A company with no row reads the seed `platform-nest/src/modules/social/social-rules-defaults.json` (with a byte-identical twin `platform-ui/src/lib/socialRulesDefaults.json`, compared by a test) as version 0, named by its `defaultsVersion`. Nothing is written until someone saves.
+- **What a record keeps.** `rules_ref text NOT NULL`, which is `'company:<version>'` or `'default:<defaultsVersion>'`: the rules the record was made under. This file adds it to `social_reports` and `social_cycles`. Their existing rows take the constant default `'default:scp-5a'`, which reads as the seed's monthly rules as SCP-5a built them, so no row is rewritten. `social_report_runs` and `social_audits` declare it in their own files (it replaces `social_audits.dimensions_version`). A PM template application keeps a copy of the template it applied (`template_payload`, 63.29.1).
+- **A change applies to new periods and new records only.** A report, run, audit or cycle reads its own `rules_ref` for its whole life: its due day, freeze point, content, check, steps and scorecard. Nothing made before a change is rewritten. A schedule's next run is computed with the rules in force when it is computed.
+
+**63.30.4 Routes** (base 63.0):
+
+| Route | Gate | What it does |
+|---|---|---|
+| `GET rules` | `social_post` · `read` (the pages need them) | `{version, defaultsVersion, rules, defaults, sections: {<section>: {changed, version, editedBy, effectiveFrom}}, canEdit}`; `version` 0 is the seed |
+| `PUT rules/:section` | `social_engagement` · `plan` (403 `not_a_social_approver`) | `{expectedVersion, value}`: validates the section and writes version + 1, the rest of the document unchanged. 400 `invalid_field` `{field: '<section>.<path>'}` for a value outside its rule: an unknown key, a repeated key, bands out of order, a due rule the kind cannot take, a `checkRequires` part the content turns off, a category that holds nothing. 409 `rules_changed` `{currentVersion}` when another save came first. Answers the read |
+| `POST rules/:section/reset` | `plan` | `{expectedVersion}`: a new version whose section equals the seed (`reset: true`) |
+| `GET rules/versions?section=&cursor=` | `plan` | The history, newest first: `{version, section, reset, editedBy, effectiveFrom, diff: [{path, from, to}]}` |
+| `POST rules/preview` | `plan` | `{section, value, engagementId?}`: what the unsaved value would do, saving nothing: the next due dates of each report kind, the next cycle's step dates for a client, a client's audit score under the edited scorecard |
+
+Saves take `pg_advisory_xact_lock` on `social_rules:<tenantId>`, so two saves never take one version number. Activity: `rules_changed` on entity `social_rules`, `{section, version, reset, diff}`.
+
+**63.30.5 The page.** `{D}/settings` (the `settings` row, gated by `canLeadSocial`) holds the sections Reports (with the ideas settings), Monthly cycle, Audit scorecard, Onboarding (63.29.2's template picker and the template's steps through PM's routes), Saved, and Report automation (63.24.9). Each section:
+- shows the current values beside the default, with "Reset to default";
+- saves one section at a time with `expectedVersion`;
+- previews where it helps: the next due dates, the next cycle's steps for a chosen client, a client's score;
+- names the field of a refused save in words.
+
+At phone width the sections stack. By keyboard every control is in order and focus returns after each dialog. Nothing is said by colour alone. DEMO_MODE keeps the rules in its store, starting from the seed, and answers the routes in the server's order. No new row, key or URL.
+
+**63.30.6 How the other sections use it.**
+- **Defaults.** The fixture's report kinds and cycle steps, and the audit's dimensions, move into the seed and become defaults. The stage-machine fixture keeps the machine (statuses, actions and refusals), and its scenarios run on both sides against the defaults.
+- **Reading.** Every route reads the company's rules through one reader (`socialRules(c, tenantId)`: read-through, cached for the request), and a record's own rules through its `rules_ref`.
+- **New refusals:**
+  - 409 `report_kind_off`: on create, on generate and on a schedule's run, for a kind the company turned off; the schedule then pauses with the reason `kind_off`.
+  - 409 `ai_drafting_off`: on generate, for a kind with AI drafting off. Create for such a kind writes an empty draft (`draftedVia: 'none'`).
+
+**Agents.**
+
+| Tool | Route | Class |
+|---|---|---|
+| `social.rules` | `GET rules` | read |
+| `social.setRules` | `PUT rules/:section`, `POST rules/:section/reset` | `write`, impact `medium`: it changes how the whole department works from the next period, so the person confirms in the thread |
+
+**63.30.7 Proofs** (63.21's rules):
+- a company with no row works on the seed and reads version 0; the seed's twins are byte-equal;
+- each section's validation, one refusal per rule with its `field`; `rules_changed` on a stale `expectedVersion`; two saves at once make two consecutive versions; the version table refuses UPDATE and DELETE;
+- versions hold: a report keeps its due day after the rule changes, and the next one takes the new rule; a cycle made before a step change keeps its tasks; an audit keeps its scorecard; a run keeps its rules;
+- each setting reaches its behaviour:
+  - a kind turned off refuses create and generate and pauses its schedule;
+  - AI drafting off makes empty drafts;
+  - an added notes area is required by the check;
+  - a fiscal year starting in April makes Q1 April to June;
+  - a step set to `manual` is never closed by the pipeline;
+  - a moved band changes a draft audit's band;
+  - a hidden Saved category leaves the menu and keeps its items;
+  - shared ideas print in the monthly report only when the setting is on;
+- what is not set here stays fixed: the validator has no key for who acts, the one-report rule, drafting-only AI or a schedule's owner, and a test proves an unknown key is refused;
+- the routes refuse an officer and a `company_admin` (403); the preview saves nothing; the history shows its diffs;
+- the page: phone width, keyboard, axe in light and dark, DEMO_MODE.
 
 ## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
 
