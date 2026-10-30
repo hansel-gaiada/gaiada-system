@@ -107,7 +107,8 @@ client's photos". Resolving it returns the post to the step it left.
 
 **Ruled by the owner on 2026-10-30** (relayed first-hand by the orchestrating session). SCP-Q25 to SCP-Q36 were raised by the
 contract for the rest of SCP-5 (BFF §63.24 to §63.29), each with a recommended default, and the owner took every default in two
-words: "accept default". SCP-Q37 to SCP-Q40 are the owner's own, ruled the same day.
+words: "accept default". SCP-Q37 to SCP-Q41 are the owner's own, ruled the same day. Since SCP-Q41 the rulings that are rules
+of work (SCP-Q25 to SCP-Q40, where they are) are the seeded defaults of each company's own SCP-5 rules, which the four edit in the UI.
 
 | # | Question | Ruling |
 |---|---|---|
@@ -127,6 +128,7 @@ words: "accept default". SCP-Q37 to SCP-Q40 are the owner's own, ruled the same 
 | SCP-Q38 | Reports generated on a schedule, set in the UI | **Yes, owned by the approver who sets it.** The owner's words: "proceed. also ensure the UI is ready and HOD can set the automation however he need in the UI". The four set report schedules (kind, clients, timing, on or off) in a "Report automation" section of `{D}/settings`; each run drafts the period that just ended through "Generate with AI" and acts as the schedule's owner, re-authorized at run time; if the owner no longer may, the run is skipped and the schedule pauses with the reason (BFF §63.24.9). This is how SCP-Q17 is kept: every run has its person; unattended principals stay refused. Runs only draft. |
 | SCP-Q39 | Report periods: calendar or fiscal? | **Calendar** quarters, halves and years. |
 | SCP-Q40 | Cap the AI spend of report generation? | **Track it, never cap it.** The owner's words: "we track but not cap it". Every generation call is recorded in the AI usage record with its run, each run shows its tokens and cost, and each schedule its spend; nothing is refused on spend (BFF §63.24.5, §63.24.9). |
+| SCP-Q41 | Fixed rules, or rules each company sets? | **Each company sets them in the UI; the rulings above are the defaults.** The owner's words: "i want ui can be used to set all these rules. it will give flexibility that company need". It follows the standing ruling "internal now, SaaS later: never hard-wire our group". The four edit, on `{D}/settings`, per report kind (on or off, the due rule, when the numbers freeze, the content, what the check needs, AI drafting), the fiscal year's first month, the monthly cycle's steps, the audit scorecard, the onboarding checklist, Saved's categories, whether shared ideas reach the monthly report, and the report schedules. Rules are versioned: a report, a run, an audit or a cycle keeps the version it was made under, and a change applies to new periods and records only (BFF §63.30). **Not set here:** who may act (approvers, checkers, senders, the four of SCP-Q19; permissions belong to the IAM roles-as-data program and PERMISSION-CONTRACT); the safety invariants (one report per client, kind and period; AI only drafts and never approves or sends; maker/checker on posts; the four for money; a schedule acts as its owner); and the structural shapes, such as where a prospect lives. |
 
 **Open:** none.
 
