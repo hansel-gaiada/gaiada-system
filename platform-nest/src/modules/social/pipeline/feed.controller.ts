@@ -33,6 +33,11 @@ import { findDepartmentBySlug, roleHolders } from "./pipeline-data";
 import { readBoostsToStart } from "./boosts-data";
 import { readReportsDue, readReportsToAct } from "../report-data";
 import { monthLabel, previousPeriod, reportDueDate } from "../reports";
+import { readPeriodicDue } from "../report-periodic-due";
+import { KIND_LABEL, isPeriodicKind } from "../report-kinds";
+import { periodicWhen } from "../../../core/report-period-label";
+import { periodRange } from "./rules-periods";
+import type { ReportKind } from "../reports";
 import { HOLDER_LABELS } from "./pipeline-read";
 import {
   FEED_WINDOW_AHEAD_DAYS, FEED_WINDOW_BEHIND_DAYS, readFeedCandidates, readFeedContext, readFeedPageExtras, readLastFollowUps, readMetricsMissing,
@@ -49,6 +54,12 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SOCIAL_HR = { modules: ["social", "hr"] };
 const SOCIAL = { modules: ["social"] };
 const NEEDS_YOU_MAX = 50;
+
+/** A report's period in plain words for an item's title: "9 Nov 2026", "9 to 15 Nov 2026", "Q4 2026"; the month's name for a monthly (as SCP-5a built it), else the period as stored. */
+function periodWords(kind: string, period: string): string {
+  const range = isPeriodicKind(kind) ? periodRange(kind, period, 1) : null;
+  return (range && periodicWhen(kind, period, range.start, range.end)) ?? monthLabel(period);
+}
 
 function invalid(field: string, error = "invalid_field"): never {
   throw new BadRequestException({ message: error, field });
@@ -334,6 +345,23 @@ export class SocialFeedController {
     } catch {
       partial.push("reports due");
     }
+    // Source 4b (SCP-5 W5-A2, §63.24.4): the officer's periodic reports due: each client's kinds in its `report_kinds` that the company has
+    // on, from the period's due day (its rules') until the report is delivered. The monthly's item above is untouched.
+    try {
+      const today = todayIsoInTz(config.reportsTz);
+      const data = await withTenants([tenantId], async (c) => ({ dept: await findDepartmentBySlug(c, tenantId, "social-media") }), SOCIAL);
+      const due = await readPeriodicDue(tenantId, { today, officerId: me, statuses: ["active", "paused"], mode: "reached" });
+      const base = data.dept ? `/departments/${data.dept.id}/social-reports` : "/departments#";
+      for (const r of due) {
+        items.push({
+          id: `social:${tenantId}:${r.reportId ?? `${r.engagementId}:${r.kind}:${r.period}`}:periodic_report_due`, kind: "periodic_report_due", role: "officer",
+          title: `${KIND_LABEL[r.kind]}, ${periodWords(r.kind, r.period)}`, clientName: r.clientName,
+          since: `${r.due}T00:00:00.000Z`, due: r.due, href: r.reportId && data.dept ? `${base}/${r.reportId}` : base,
+        });
+      }
+    } catch {
+      partial.push("periodic reports due");
+    }
     // Source 5 (SCP-5a, §63.7): for the HoD and GM seats, every client's reports in the HoD check (`report_check`) and ready to
     // send (`report_send`). The owner and the superadmin act from the same pages but get no queue.
     try {
@@ -347,11 +375,12 @@ export class SocialFeedController {
         const base = data.dept ? `/departments/${data.dept.id}/social-reports` : "/departments#";
         for (const r of data.rows) {
           const due = r.kind === "monthly" && r.period && r.reportDueDay !== null ? reportDueDate(r.period, r.reportDueDay) : null;
-          const what = r.kind === "monthly" ? "Monthly report" : r.kind === "campaign" ? "Campaign report" : "Report";
+          // W5-A2: every kind is named by its own label ("Weekly report, 9 to 15 Nov 2026"); the monthly's and campaign's are as SCP-5a built.
+          const what = KIND_LABEL[r.kind as ReportKind] ?? "Report";
           items.push({
             id: `social:${tenantId}:${r.id}:${r.status === "in_review" ? "report_check" : "report_send"}`,
             kind: r.status === "in_review" ? "report_check" : "report_send", role: "approver",
-            title: r.period ? `${what}, ${monthLabel(r.period)}` : what, clientName: r.clientName, since: r.since,
+            title: r.period ? `${what}, ${periodWords(r.kind, r.period)}` : what, clientName: r.clientName, since: r.since,
             ...(due ? { due } : {}), href: data.dept ? `${base}/${r.id}` : base,
           });
         }

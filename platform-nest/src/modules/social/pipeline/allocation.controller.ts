@@ -28,6 +28,7 @@ import { emitEvent } from "../../../events/outbox.service";
 import { AuthGuard } from "../../../auth/guards";
 import { ModuleEnabledGuard } from "../../module-enabled.guard";
 import { declareSocialModuleScope } from "../module-scope";
+import { CLIENT_REPORT_KINDS } from "../report-kinds";
 import { NETWORKS, invalidField } from "./brand-book";
 import { CYCLE_STEPS_LOOKBACK_DAYS, loadCalendarInfo, readCyclePosts, readCyclesOfMonth, todayIsoInTz } from "./cycles-data";
 import { openEngagementCycleDeadlines, redateEngagementCycleSteps } from "./cycle-steps";
@@ -50,6 +51,8 @@ export interface AllocationRow {
   deliveryBatch: "A" | "B" | null;
   reportFormat: "email" | "meeting" | null;
   reportDueDay: number | null;
+  /** SCP-5 W5-A2 (BFF §63.24.2): the periodic kinds the client is due besides the monthly (the Needs you, dashboard and "all clients" drive). */
+  reportKinds: string[];
   platforms: string[];
   formats: string[];
   defaultPostTime: string | null;
@@ -66,13 +69,14 @@ export interface AllocationPatch {
   deliveryBatch?: "A" | "B" | null;
   reportFormat?: "email" | "meeting" | null;
   reportDueDay?: number | null;
+  reportKinds?: string[];
   platforms?: string[];
   formats?: string[];
   defaultPostTime?: string | null;
   stepEstimates?: StepEstimates;
 }
 const PATCH_KEYS = [
-  "officerId", "postsPerCycle", "creativeSource", "deliveryBatch", "reportFormat", "reportDueDay", "platforms", "formats", "defaultPostTime", "stepEstimates",
+  "officerId", "postsPerCycle", "creativeSource", "deliveryBatch", "reportFormat", "reportDueDay", "reportKinds", "platforms", "formats", "defaultPostTime", "stepEstimates",
 ] as const;
 
 const isInt = (v: unknown, lo: number, hi: number): v is number => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi;
@@ -124,6 +128,16 @@ export function parseAllocationPatch(body: unknown): AllocationPatch {
     if (b.reportDueDay !== null && !isInt(b.reportDueDay, 1, 31)) invalidField("reportDueDay");
     out.reportDueDay = b.reportDueDay as number | null;
   }
+  if (b.reportKinds !== undefined) {
+    // De-duplicated here: the column's CHECK admits a repeated kind (a CHECK cannot refuse a duplicate in an array), so the route does.
+    if (!Array.isArray(b.reportKinds) || b.reportKinds.length > 50) invalidField("reportKinds");
+    const kinds: string[] = [];
+    for (const k of b.reportKinds as unknown[]) {
+      if (typeof k !== "string" || !(CLIENT_REPORT_KINDS as readonly string[]).includes(k)) invalidField("reportKinds");
+      if (!kinds.includes(k as string)) kinds.push(k as string);
+    }
+    out.reportKinds = kinds;
+  }
   if (b.platforms !== undefined) out.platforms = pickList(b.platforms, NETWORKS, "platforms");
   if (b.formats !== undefined) out.formats = pickList(b.formats, FORMATS, "formats");
   if (b.defaultPostTime !== undefined) {
@@ -147,7 +161,7 @@ export function parseAllocationPatch(body: unknown): AllocationPatch {
 interface AllocationDbRow {
   id: string; client_id: string; client_name: string; status: string; owner_id: string | null; officer_name: string | null;
   posts_per_cycle: number | null; creative_source: string; delivery_batch: string | null; report_format: string | null;
-  report_due_day: number | null; platforms: string[]; formats: string[]; default_post_time: string | null; step_estimates: unknown;
+  report_due_day: number | null; report_kinds: string[]; platforms: string[]; formats: string[]; default_post_time: string | null; step_estimates: unknown;
 }
 
 /**
@@ -160,7 +174,7 @@ export async function readAllocation(
   await declareSocialModuleScope(c);
   const { rows } = await c.query<AllocationDbRow>(
     `SELECT e.id, e.client_id, cl.name AS client_name, e.status, e.owner_id, u.name AS officer_name,
-            e.posts_per_cycle, e.creative_source, e.delivery_batch, e.report_format, e.report_due_day,
+            e.posts_per_cycle, e.creative_source, e.delivery_batch, e.report_format, e.report_due_day, e.report_kinds,
             e.platforms, e.formats, to_char(e.default_post_time, 'HH24:MI') AS default_post_time, e.step_estimates
        FROM social_engagements e
        JOIN clients cl ON cl.id = e.client_id AND cl.tenant_id = e.tenant_id
@@ -193,6 +207,7 @@ export async function readAllocation(
       deliveryBatch: r.delivery_batch === "A" || r.delivery_batch === "B" ? r.delivery_batch : null,
       reportFormat: r.report_format === "email" || r.report_format === "meeting" ? r.report_format : null,
       reportDueDay: r.report_due_day === null ? null : Number(r.report_due_day),
+      reportKinds: r.report_kinds ?? [],
       platforms: r.platforms ?? [],
       formats: r.formats ?? [],
       defaultPostTime: r.default_post_time,
@@ -243,6 +258,7 @@ export async function applyAllocationPatchInTx(c: PoolClient, tenantId: string, 
   if (patch.deliveryBatch !== undefined) set("delivery_batch", patch.deliveryBatch);
   if (patch.reportFormat !== undefined) set("report_format", patch.reportFormat);
   if (patch.reportDueDay !== undefined) set("report_due_day", patch.reportDueDay);
+  if (patch.reportKinds !== undefined) set("report_kinds", patch.reportKinds, "::text[]");
   if (patch.platforms !== undefined) set("platforms", patch.platforms, "::text[]");
   if (patch.formats !== undefined) set("formats", patch.formats, "::text[]");
   if (patch.defaultPostTime !== undefined) set("default_post_time", patch.defaultPostTime, "::time");
