@@ -6,6 +6,7 @@
 //   3. A change: the item's own fields only; `body` for a text, `source` and `aiNote` for a link; a link left as `ai` keeps its note; `category` moves.
 //   4. The list's query, the opaque cursor and `savedItemIds` (1 to 10 distinct uuids).
 import { describe, it, expect } from "vitest";
+import { socialModule } from "../index";
 import { DEFAULT_RULES, savedCategories, validateSection, type RulesDoc } from "./rules";
 import {
   decodeSavedCursor, encodeSavedCursor, parseSavedCreate, parseSavedItemIds, parseSavedListQuery, parseSavedPatch,
@@ -191,5 +192,19 @@ describe("parseSavedItemIds (savedItemIds on the post edit)", () => {
   });
   it("is 400 on `savedItemIds` for none, eleven, a duplicate, a non-uuid or not a list", () => {
     for (const bad of [[], ids(11), [I, I], ["nope"], [7], I, null, {}]) expect(refusal(() => parseSavedItemIds(bad)), JSON.stringify(bad)).toBe("invalid_field:savedItemIds");
+  });
+});
+
+describe("the agent tools (BFF §63.15, §63.26)", () => {
+  const tool = (name: string) => socialModule.mcpTools.find((t) => t.name === name);
+  it("social.savedItems reads the two GETs; social.saveItem writes the POST at impact low (team material, removed in one step)", () => {
+    expect(tool("social.savedItems")).toMatchObject({ method: "GET", pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/saved" });
+    expect(tool("social.savedItems")?.write).toBeFalsy();
+    expect(tool("social.saveItem")).toMatchObject({ method: "POST", write: true, impact: "low", pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/saved" });
+  });
+  it("the tools name exactly the fields the routes take", () => {
+    const props = (n: string) => Object.keys((tool(n)?.inputSchema as { properties: Record<string, unknown> }).properties).sort();
+    expect(props("social.saveItem")).toEqual(["aiNote", "assetGroupId", "body", "category", "engagementId", "holds", "id", "media", "pillar", "source", "tenantId", "title", "url"]);
+    expect(props("social.savedItems")).toEqual(["collection", "cursor", "engagementId", "limit", "pillar", "source", "tenantId", "used"]);
   });
 });
