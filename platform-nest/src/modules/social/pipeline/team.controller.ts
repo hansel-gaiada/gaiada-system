@@ -37,12 +37,13 @@ import {
   FEED_WINDOW_AHEAD_DAYS, FEED_WINDOW_BEHIND_DAYS, readFeedCandidates, readFeedContext, type FeedCandidate, type FeedContext,
 } from "./feed-data";
 import { isMonthKey, previousMonth } from "./schedule-health";
+import { readPeriodicDue } from "../report-periodic-due";
 import {
-  TEAM_ROW_CAP, readBoostsWaiting, readFailedPosts, readNames, readReportFacts, readRequestAssignees, readRosterFacts, readSimulatedPipelineIds,
+  TEAM_ROW_CAP, TEAM_TAG, readBoostsWaiting, readFailedPosts, readNames, readReportFacts, readRequestAssignees, readRosterFacts, readSimulatedPipelineIds,
   readSocialUnitPeople, readStepMoves,
 } from "./team-data";
 import {
-  boostAttention, clientRows, composeHoldings, estimatesNotSet, failedAttention, monthRange, narrowPeople, postAttention, reportAttention,
+  boostAttention, clientRows, composeHoldings, estimatesNotSet, failedAttention, monthRange, narrowPeople, periodicAttention, postAttention, reportAttention,
   sortAttention, stepAverages, type AttentionItem, type PostCtx, type Roster, type TeamAnswer,
 } from "./team";
 
@@ -134,6 +135,12 @@ export class SocialTeamController {
       const facts = await withTenants([tenantId], (c) => readReportFacts(c, tenantId, previousMonth(month)), SOCIAL);
       if (facts.due.length > TEAM_ROW_CAP || facts.toCheck.length > TEAM_ROW_CAP) partial.add("needsAttention");
       attention.push(...reportAttention(month, { due: facts.due.slice(0, TEAM_ROW_CAP), toCheck: facts.toCheck.slice(0, TEAM_ROW_CAP) }, today));
+    } catch (e) { fail("needsAttention", e); }
+    // SCP-5 W5-A2 (§63.24.4): the clients' periodic reports that are due, with their `reportKind`, whatever `month`.
+    try {
+      const periodic = await readPeriodicDue(tenantId, { today, statuses: ["draft", "active", "paused"], mode: "after", sqlTag: TEAM_TAG });
+      if (periodic.length > TEAM_ROW_CAP) partial.add("needsAttention");
+      attention.push(...periodicAttention(periodic.slice(0, TEAM_ROW_CAP)));
     } catch (e) { fail("needsAttention", e); }
 
     // ── clients (the month's deadline table, the table `GET cycles` answers) ──

@@ -12,7 +12,7 @@
 // publisher-held post is the publisher's, not a person's: they are in no wait and no workload.
 // A person's row counts the posts that are THEIR turn by the feed's own rule (`isYourTurn`), so a copywriter's holding is the proofread queue they could
 // take (every copywriter sees the same queue; the role's `posts` counts each post once), and an approver never holds a post they made.
-import type { WorkingCalendar } from "../../hr/working-days";
+import { addDays, type WorkingCalendar } from "../../hr/working-days";
 import { SCP } from "./fixture";
 import type { FeedCandidate } from "./feed-data";
 import { healthOfCandidate, holderRoleOf, isYourTurn } from "./feed";
@@ -21,6 +21,9 @@ import { lastDayOfMonth, previousMonth, workingDaysBetween, type ApprovalSample,
 import type { CycleTable, EngagementRow } from "./cycles-data";
 import type { BoostWaitingRow, FailedPostRow, ReportDueRow, ReportToCheckRow, StepMove } from "./team-data";
 import { todayIsoInTz } from "../../reports/person-scope";
+import type { PeriodicKind } from "./rules";
+import type { PeriodicDue } from "../report-periodic-due";
+import { KIND_LABEL } from "../report-kinds";
 
 // ── the shape (BFF §63.19) ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -36,6 +39,8 @@ export interface AttentionItem {
   engagementId: string;
   clientName: string;
   title?: string;
+  /** SCP-5 W5-A2 (BFF §63.24.4): the periodic kind of a `report_due` item (daily, weekly, quarterly, semester, yearly); absent on the monthly's, as built. */
+  reportKind?: PeriodicKind;
   /** ISO timestamp, or the first day of the month for a report that is due. */
   since: string;
   holder?: { role: string; label: string };
@@ -115,7 +120,7 @@ export const failedAttention = (rows: readonly FailedPostRow[]): AttentionItem[]
 export const boostAttention = (rows: readonly BoostWaitingRow[]): AttentionItem[] =>
   rows.map((r) => ({ kind: "boost_waiting", postId: r.postId, boostId: r.boostId, engagementId: r.engagementId, clientName: r.clientName, title: r.title, since: r.since }));
 
-const KIND_LABEL: Record<string, string> = { monthly: "Monthly", campaign: "Campaign", adhoc: "Ad hoc" };
+const KIND_LABEL_SHORT: Record<string, string> = { monthly: "Monthly", campaign: "Campaign", adhoc: "Ad hoc" };
 
 /**
  * The reports' two kinds. Report due, as ruled by the orchestrator for `GET team?month=M` (the contract left it open; the UI and demo follow it):
@@ -141,11 +146,22 @@ export function reportAttention(
   for (const r of facts.toCheck) {
     out.push({
       kind: "report_to_check", reportId: r.reportId, engagementId: r.engagementId, clientName: r.clientName,
-      title: `${KIND_LABEL[r.kind] ?? r.kind} report${r.period ? ` ${r.period}` : ""}`, since: r.since,
+      title: `${KIND_LABEL_SHORT[r.kind] ?? r.kind} report${r.period ? ` ${r.period}` : ""}`, since: r.since,
     });
   }
   return out;
 }
+
+/**
+ * SCP-5 W5-A2 (BFF §63.24.4): the periodic reports that are due, as `report_due` items with their `reportKind`. Each is one client's one
+ * period of one kind whose due day has passed (`readPeriodicDue` in mode 'after': "from the day after its due day"), whatever `month`;
+ * `since` is that day after. The monthly's items above are untouched.
+ */
+export const periodicAttention = (due: readonly PeriodicDue[]): AttentionItem[] =>
+  due.map((d) => ({
+    kind: "report_due" as const, reportKind: d.kind, ...(d.reportId ? { reportId: d.reportId } : {}), engagementId: d.engagementId,
+    clientName: d.clientName, title: `${KIND_LABEL[d.kind]} ${d.period}`, since: addDays(d.due, 1),
+  }));
 
 const idOfItem = (i: AttentionItem): string => i.boostId ?? i.postId ?? i.reportId ?? i.engagementId;
 
