@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **298** capabilities across **17** owners
-- **158** writes · 140 reads
-- Writes by impact: **high 28** · medium 45 · low 85
+- **310** capabilities across **17** owners
+- **166** writes · 144 reads
+- Writes by impact: **high 28** · medium 50 · low 88
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -51,10 +51,10 @@ unfalsifiable after.
 | knowledge | `knowledge` | 3 |
 | lms | `lms` | 1 |
 | monitoring | `monitoring` | 3 |
-| pm | `pm` | 19 |
+| pm | `pm` | 20 |
 | reports | `checkins` · `reports` | 25 |
 | search | `search` | 31 |
-| social | `social` | 42 |
+| social | `social` | 45 |
 | webdev | `webdev` | 41 |
 
 ## Capabilities
@@ -241,20 +241,26 @@ unfalsifiable after.
 | social | `social.approvePostVariant` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/approve` | write | `high` |
 | social | `social.approveReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/approve` | write | `low` |
 | social | `social.approveReport` | `POST` | `/api/:tenantId/modules/social/reports/:id/approve` | write | `low` |
+| social | `social.audits` | `GET` | `/api/:tenantId/modules/social/audits` | read | — |
 | social | `social.boostAction` | `POST` | `/api/:tenantId/modules/social/boosts/:boostId/actions` | write | `high` |
 | social | `social.checkPublishPreconditions` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/publish-preconditions` | read | — |
 | social | `social.checkReplySendPreconditions` | `GET` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send-preconditions` | read | — |
 | social | `social.createEngagement` | `POST` | `/api/:tenantId/modules/social/engagements` | write | `low` |
 | social | `social.createPost` | `POST` | `/api/:tenantId/modules/social/posts` | write | `low` |
 | social | `social.createReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages` | write | `low` |
+| social | `social.deleteReportSchedule` | `DELETE` | `/api/:tenantId/modules/social/report-schedules/:id` | write | `medium` |
 | social | `social.deliverReport` | `POST` | `/api/:tenantId/modules/social/reports/:id/deliver` | write | `medium` |
 | social | `social.draftContentBrief` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/agent-content-brief` | write | `low` |
 | social | `social.draftPostIdeas` | `POST` | `/api/:tenantId/modules/social/posts/draft-ideas` | write | `low` |
 | social | `social.draftPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants/:variantId/draft-caption` | write | `low` |
 | social | `social.draftReport` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/reports` | write | `low` |
+| social | `social.editAudit` | `PATCH` | `/api/:tenantId/modules/social/audits/:auditId` | write | `low` |
 | social | `social.editIdea` | `PATCH` | `/api/:tenantId/modules/social/ideas/:ideaId` | write | `low` |
 | social | `social.editReport` | `PATCH` | `/api/:tenantId/modules/social/reports/:id` | write | `low` |
+| social | `social.editReportSchedule` | `PATCH` | `/api/:tenantId/modules/social/report-schedules/:id` | write | `medium` |
+| social | `social.finalizeAudit` | `POST` | `/api/:tenantId/modules/social/audits/:auditId/finalize` | write | `low` |
 | social | `social.generateReports` | `POST` | `/api/:tenantId/modules/social/reports/generate` | write | `medium` |
+| social | `social.getAudit` | `GET` | `/api/:tenantId/modules/social/audits/:auditId` | read | — |
 | social | `social.getBestTimeToPost` | `GET` | `/api/:tenantId/modules/social/accounts/:accountId/best-time` | read | — |
 | social | `social.getClientReview` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | read | — |
 | social | `social.getEngagementScope` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | read | — |
@@ -270,21 +276,27 @@ unfalsifiable after.
 | social | `social.listPosts` | `GET` | `/api/:tenantId/modules/social/posts` | read | — |
 | social | `social.listReports` | `GET` | `/api/:tenantId/modules/social/reports` | read | — |
 | social | `social.listThreadMessages` | `GET` | `/api/:tenantId/modules/social/threads/:threadId/messages` | read | — |
+| social | `social.onboarding` | `GET` | `/api/:tenantId/modules/social/onboarding` | read | — |
 | social | `social.planIdea` | `POST` | `/api/:tenantId/modules/social/ideas/:ideaId/plan` | write | `low` |
 | social | `social.provisionPublisherOrg` | `POST` | `/api/:tenantId/modules/social/publisher-orgs` | write | `medium` |
 | social | `social.publishPost` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish` | write | `high` |
 | social | `social.publishPostMetered` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish-metered` | write | `high` |
 | social | `social.reportRun` | `GET` | `/api/:tenantId/modules/social/reports/generate/:runId` | read | — |
+| social | `social.reportSchedules` | `GET` | `/api/:tenantId/modules/social/report-schedules` | read | — |
 | social | `social.requestBoost` | `POST` | `/api/:tenantId/modules/social/posts/:postId/boosts` | write | `high` |
 | social | `social.requestClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | write | `medium` |
 | social | `social.resetRules` | `POST` | `/api/:tenantId/modules/social/rules/:section/reset` | write | `medium` |
 | social | `social.rules` | `GET` | `/api/:tenantId/modules/social/rules` | read | — |
+| social | `social.runReportSchedule` | `POST` | `/api/:tenantId/modules/social/report-schedules/:id/run` | write | `medium` |
+| social | `social.saveAudit` | `POST` | `/api/:tenantId/modules/social/audits` | write | `low` |
 | social | `social.savedItems` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/saved` | read | — |
 | social | `social.saveItem` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/saved` | write | `low` |
+| social | `social.saveReportSchedule` | `POST` | `/api/:tenantId/modules/social/report-schedules` | write | `medium` |
 | social | `social.sendReply` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send` | write | `high` |
 | social | `social.setEngagementScope` | `PATCH` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | write | `medium` |
 | social | `social.setRules` | `PUT` | `/api/:tenantId/modules/social/rules/:section` | write | `medium` |
 | social | `social.shareIdea` | `POST` | `/api/:tenantId/modules/social/ideas/:ideaId/share` | write | `low` |
+| social | `social.startOnboarding` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/onboarding` | write | `medium` |
 | social | `social.syncConnectorRegistry` | `POST` | `/api/:tenantId/modules/social/publisher-orgs/:clientId/sync` | write | `low` |
 | social | `social.teamDashboard` | `GET` | `/api/:tenantId/modules/social/team` | read | — |
 | social | `social.updateReplyDraft` | `PATCH` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId` | write | `low` |

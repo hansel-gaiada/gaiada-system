@@ -305,6 +305,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/linkedin-oauth.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/accounts-summary.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/allocation.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/audit.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/boosts.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/calendar.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/cycles.controller.ts` |
@@ -313,8 +314,10 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/feed.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/ideas.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/metrics.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/onboarding.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/pipeline.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/report-runs.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/report-schedules.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/rules.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/saved.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/sheet-import.controller.ts` |
@@ -469,6 +472,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/messages`
 - `/departments/[deptId]/money`
 - `/departments/[deptId]/notices`
+- `/departments/[deptId]/onboarding`
 - `/departments/[deptId]/pacing`
 - `/departments/[deptId]/people`
 - `/departments/[deptId]/planner`
@@ -489,6 +493,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/requests/sent`
 - `/departments/[deptId]/revenue-plan`
 - `/departments/[deptId]/review`
+- `/departments/[deptId]/saved`
 - `/departments/[deptId]/schedule`
 - `/departments/[deptId]/search-terms`
 - `/departments/[deptId]/settings`
@@ -497,6 +502,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/sites/[slug]`
 - `/departments/[deptId]/sites/portfolio`
 - `/departments/[deptId]/sites/portfolio/[siteId]`
+- `/departments/[deptId]/social-audit`
+- `/departments/[deptId]/social-audit/[auditId]`
 - `/departments/[deptId]/social-reports`
 - `/departments/[deptId]/social-reports/[reportId]`
 - `/departments/[deptId]/studio`
