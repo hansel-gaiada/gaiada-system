@@ -13601,6 +13601,54 @@ An agent uses an item through `social.editPost` with `savedItemIds` (63.15, `low
 
 **63.26.5 Proofs:** each kind's CHECK with its NULL cases; the asset FK refusing another company's group; one `asset` item per client and group; the derived photos (a design's group shows as used without a saved row; removing the design makes a kept asset unused); `used`, `source` and `pillar` filters; the author edits and deletes their item, the officer and a seat anyone's, another member is 403 `not_officer_or_approver`; `savedItemIds` counted only when the edit applies, and refused for another client's item; the hashtag sets read from the brand book; nothing of the bank reachable from the portal.
 
+### 63.27 The monthly cycle as PM tasks (SCP-5f; plan §4.5, SCP-D4) — **STATUS: PLANNED (2026-10-30)**
+
+**What it is.** One client's month as six PM tasks per cycle, in the client's project beside 63.13's content-month task: the report, planning, copy lock, artwork, client approval and scheduling. They show on PM's board, Timeline, Ball and workload. The pipeline creates them, dates them and closes the ones it can see (SCP-Q31, default: all six). It is PM's task system, not a second one, and still no task is made per post (SCP-D4).
+
+**63.27.1 Data: `<prefix+3>_pm_task_cycle_steps.sql`** (core; `pm_tasks` keeps its plain wall; no DML; closing assertions):
+- `pm_tasks_linked_type_ck` (63.1 file 5) is redeclared, DROP and ADD in one ALTER, to admit `social_cycle_step`. It is a single-column CHECK, so nothing else is redeclared.
+- `linked_step text NULL`, with `pm_tasks_linked_step_ck CHECK ((linked_type IS NOT DISTINCT FROM 'social_cycle_step') = (linked_step IS NOT NULL))` and `pm_tasks_linked_step_value_ck CHECK (linked_step IS NULL OR linked_step IN ('report','planning','copy_lock','artwork','client_window','deploy'))`.
+- `ux_pm_tasks_social_cycle_step UNIQUE (tenant_id, linked_id, linked_step) WHERE linked_type = 'social_cycle_step' AND deleted_at IS NULL`: one task per step and cycle; `linked_id` is the cycle. The content-month task's index is untouched.
+- No social table changes: the steps are computed from the cycle, its posts, the allocation and the client's monthly report.
+
+**63.27.2 The steps** (fixture `cycleSteps`, both twins; neither side hard-codes them). For content month M with `R` its `ready_by`, a step's due date is `latestSafeHandoffFor(R, remaining)` (schedule-health.ts) with `remaining` the client's estimates for the steps after it: the rule a post's latest safe hand-off already follows. Counted posts exclude stories and extra posts; a blocked post counts from `blocked_from` and its change case.
+
+| Step (`linked_step`) | Title | Due | Closes itself when |
+|---|---|---|---|
+| `report` | "Monthly report for <M−2>" | the client's `report_due_day` in M−1, clamped to its last day (63.18's rule); none without one | the client's monthly report for period M−2 is `delivered` |
+| `planning` | "<M> plan" | R less all six estimates | the target is met (counted posts ≥ `posts_per_cycle`; at least one without a target) and no counted post is `planned` or `drafting` |
+| `copy_lock` | "<M> copy locked" | R less design, final, client and schedule | every counted post has passed the HoD approval: `design`, `final`, `client`, `approved`, `scheduled`, `live`, or a design change case (`final_design`, `client_design`) |
+| `artwork` | "<M> artwork" | R less final, client and schedule | every counted post has left Creative: `final`, `client`, `approved`, `scheduled`, `live`, or a copy change after design (`final_copy`, `client_copy`) |
+| `client_window` | "<M> client approval" | R less schedule | 63.13's content-month rule: every counted post `approved`, `scheduled` or `live`, and the target met |
+| `deploy` | "<M> scheduled" | R | every counted post `scheduled` or `live`, and the target met |
+
+Without estimates, every step but `report` falls due on R; the Team dashboard already lists "estimates not set". A step's `progress` is the share of counted posts meeting its condition, 0 to 99 until done; `report` is 0 until delivered. The report belongs to M−2 because content month M is planned during M−1, and the report sent early in M−1 feeds that plan's ideas (63.25); the titles say which month each step means.
+
+**63.27.3 Who writes them.** Only the pipeline, inside actions that are already authorized: no new route and no new Cerbos action.
+- **Created and re-dated** where the content-month task is (`syncContentMonthTask`): `PUT cycles` and the sheet import's cycles. Also re-dated, in the same transaction, by `PUT settings` (the buffer), the nightly `social-cycle-ready-by` job, and `PATCH engagements/:engagementId/allocation` when `stepEstimates`, `reportDueDay` or `officerId` change (the client's cycles from the report month on). Through PM's own `createPmTaskInTx` and `updateLinkedTaskScheduleInTx`, found again by link, never by title. With no project there are no step tasks, and each `PUT cycles` row says so: `stepTasks: {created, reason: 'no_project'|'project_not_found'|null}` (additive).
+- **The Ball and the Responsible** are the officer on every step: they carry the client's month. PM has no client or role assignee, so the client's approval step is the officer's to chase.
+- **Closed and reopened** through `setLinkedTaskProgressInTx`: by the stage action's transaction (a new fixture effect `cycle_steps`, after `content_month_progress`, on every action that changes a counted post's status, and on create, discard and archive), and by `POST reports/:id/deliver` for the `report` step of cycle M = period + 2. A step closed by hand reopens at the next recompute when its condition does not hold, as the content-month task does. A step whose fixture row carries `autoClose: false` (a ruling of SCP-Q31 (b) or (c)) is created and dated but never closed or reopened by the pipeline.
+- **Lock order:** the post, then the cycle's content-month task, then its step tasks in the table's order; the report's delivery takes only its step task. One direction only: moving a step task never moves a post.
+- **The link is locked:** a PM task route that changes a `social_cycle_step` task's link is 409 `task_link_locked`, as 63.13's. `GET pm/tasks/:taskId` and the task lists answer `linkedStep` (additive), and the task drawer links the step to the client's page.
+
+**63.27.4 Reads.**
+- `GET cycles/:cycleId/health` (63.5) gains `steps: [{step, title, taskId \| null, dueDate \| null, done, progress, autoClose, late}]` (additive; `late` once past due and not done).
+- The Team dashboard's `needsAttention` (63.19) gains `cycle_step_late` `{engagementId, clientName, step, dueDate}`, team-level with no person.
+- The client page's Plan tab draws the six steps as a strip above the grid (due, done or late), each linking to its PM task. No new page or key.
+
+**DEMO_MODE.** The demo cycles carry their six steps in each state, one late and one closed by hand, then reopened.
+
+**Agents.** No new tool: `social.cycleHealth` answers `steps`, and PM's own task tools reach the tasks.
+
+**63.27.5 Proofs:**
+- the migration: the CHECKs with their NULL cases (a `social_cycle_step` task without a step; a step on another link type), the unique index, the old link values still admitted, no row changed;
+- `PUT cycles` makes exactly six step tasks per cycle, a re-run none, and still no task per post;
+- the due dates against 63.5's golden working-day table: without and with estimates, a holiday, a month end, the year turn; `report` from `report_due_day`, and none without it;
+- each step closes on its condition and reopens: a design change reopens `artwork`; a reschedule reopens `client_window` and `deploy`; a new counted post reopens `planning`;
+- the `report` step closes on delivery of period M−2's report, not another period's;
+- a new officer on the allocation takes the Ball of every open step; new estimates re-date them;
+- no project: no steps, and the reason; the link locked; two stage actions on posts of one cycle at once never deadlock.
+
 
 ## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
 
