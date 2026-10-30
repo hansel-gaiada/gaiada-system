@@ -18,7 +18,8 @@
 --
 -- ── CHECKS: A CHECK PASSES ON NULL ───────────────────────────────────────────────────────────────────────────────────────────
 -- Every rule that must hold for a NULL too is written so NULL fails: the `scope` / `unit_node_id` / `mode` triple is ONE CHECK per
--- scope branch (company: unit and mode NULL; unit: unit set, mode in the vocabulary), and the figure is NOT NULL.
+-- scope branch (company: unit and mode NULL; unit: unit set, mode set AND in the vocabulary: `mode IN (..)` alone is NULL for a NULL mode,
+-- and a NULL inside a CHECK's OR passes), and the figure is NOT NULL.
 -- `mode` keeps the column DEFAULT 'report' (AIP-D7: report first) so a unit row that omits it is a report-mode row; a COMPANY row must
 -- therefore name `mode` NULL explicitly, and an insert that forgets is refused by ck_ai_budgets_scope_shape rather than stored wrongly.
 --
@@ -58,7 +59,7 @@ ALTER TABLE ai_budgets
   DROP CONSTRAINT IF EXISTS ck_ai_budgets_scope_shape,
   ADD CONSTRAINT ck_ai_budgets_scope_shape CHECK (
     (scope = 'company' AND unit_node_id IS NULL AND mode IS NULL)
-    OR (scope = 'unit' AND unit_node_id IS NOT NULL AND length(unit_node_id) BETWEEN 1 AND 120 AND mode IN ('report', 'soft_stop'))
+    OR (scope = 'unit' AND unit_node_id IS NOT NULL AND length(unit_node_id) BETWEEN 1 AND 120 AND mode IS NOT NULL AND mode IN ('report', 'soft_stop'))
   );
 ALTER TABLE ai_budgets
   DROP CONSTRAINT IF EXISTS ck_ai_budgets_monthly_usd,

@@ -14310,6 +14310,7 @@ division's rows add to its department).
   "unit": { "unitNodeId": "d-web", "name": "Web Dev" | null },       // the name from the company's org tree today
   "totals": {figures}, "bySurface": [...], "byModel": [{ "provider": "openai" | null, "model": "…" | null, ...figures }], "byDay": [...],
   "people": [{ "userId": "<uuid>", "name": "…" | null, ...figures }],   // ONLY with read_people or read_unit; otherwise the key is ABSENT
+  "budget": {unit budget line} | null,                                 // AIP-17b, 66.8: this unit's own budget, or null
   "capabilities": {...}
 }
 ```
@@ -14336,11 +14337,12 @@ division's rows add to its department).
                                                        // unitNodeId null = "No department recorded" (rows with a person but no node)
   "noPerson": [{ "surface": "knowledge", ...figures }], // "Company, no person": rows with neither a person nor a node, by surface
   "byModel": [...], "bySurface": [...], "byDay": [...],
+  "budgets": { "company": {line} | null, "units": [{line}] },   // AIP-17b, 66.8
   "capabilities": {...}
 }
 ```
 
-Each `byDepartment` line links to its unit view (66.4). The budget lines are added by AIP-17b.
+Each `byDepartment` line links to its unit view (66.4). The budget lines are 66.8.
 
 | Status | When |
 |---|---|
@@ -14350,8 +14352,8 @@ Each `byDepartment` line links to its unit view (66.4). The budget lines are add
 
 ### 66.6 Capability inventory and tools
 
-Three read routes under `/api/:tenantId/ai-usage/`, no MCP tool, no module tool, no n8n flow. No write route yet (`manage` and `lift_stop`
-arrive with AIP-17b and AIP-18).
+Three read routes under `/api/:tenantId/ai-usage/`, no MCP tool, no module tool, no n8n flow. AIP-17b adds the `manage` writes (66.9); `lift_stop`
+arrives with AIP-18.
 
 ### 66.7 The screens (AIP-16 and AIP-05, 2026-10-30, BUILT in `platform-ui`; no new route)
 
@@ -14372,3 +14374,78 @@ line "No department recorded"), "Company, no person" (`noPerson`), by person (th
 never 0; a cost is formatted from its decimal string (four decimals under a dollar, "under $0.0001" for a non-zero cost below that); tokens say "estimated" when
 `estimatedTokenCalls` > 0, a cost says "from our price table" when `tableCostCalls` > 0 and "partial" when `noCostCalls` > 0. An empty month says "No AI use recorded in <Month> <year>".
 The UI gate is cosmetic: the department screen asks the server whenever it is given a unit, so a seat the UI cannot see (the GM) is never turned away by a mirror.
+
+### 66.8 Budget lines on the reads (AIP-17b, 2026-10-30, BUILT server only)
+
+No new read action: a reader sees budgets exactly where they already see that scope's totals. `GET company` (66.5) gains `budgets`, and `GET units/:unitNodeId`
+(66.4) gains `budget`. Money is an exact decimal string; `spentUsd` is the month-to-date cost of the scope (a unit counts its whole subtree, the company
+counts every row, the UTC month the answer is about), `null` when no call in it had a cost. Calls with no cost are counted separately in `noCostCalls` and never
+in `spentUsd`, so unknown money cannot cross a budget.
+
+```
+GET company -> "budgets": {
+  "company": { "monthlyUsd": "250.0000", "spentUsd": "1.75000000" | null, "noCostCalls": 1, "percent": 87.5, "state": "over_80" } | null,
+  "units": [{ "unitNodeId": "d-web", "name": "Web Dev" | null, "monthlyUsd": "1.0000", "mode": "report" | "soft_stop",
+              "spentUsd": "0.80000000" | null, "noCostCalls": 1, "percent": 80, "state": "under" | "over_80" | "over_100", "stopLifted": false }]
+}                                                      // units sorted by node id; a node no longer in the tree keeps its line with name null
+GET units/:id -> "budget": { ...the same unit line } | null     // that unit's OWN budget (a division under a budgeted department shows null)
+```
+
+`percent` is floored to one decimal (it never shows a threshold it has not reached); `state` is `over_80` from exactly 80 percent and `over_100` from exactly 100
+(exact decimal arithmetic, never a float). `stopLifted` is true when the stop was lifted for the month the answer is about (AIP-18 writes it; false until then).
+`mode` is `report` for every budget until the owner picks `soft_stop`; AIP-18 enforces it, nothing in AIP-17b does.
+
+### 66.9 Budget and allowance writes (AIP-17b, 2026-10-30, BUILT server only)
+
+`platform-nest/src/modules/ai-usage/{budgets.controller,budgets.service,budgets}.ts`; migration `202610300400_ai_budgets.sql` (`ai_budgets`, `ai_person_allowances`,
+`ai_usage_alerts`, all FORCE RLS). Every route needs `manage` on `ai_usage`: **the owner and the superadmin only** (company_admin, the GM, a head, a member, a bot and
+another company's people are 403).
+
+| Method and path | Body | Answer |
+|---|---|---|
+| `PUT /api/:t/ai-usage/budgets/company` | `{ "monthlyUsd": "250.00" }` or `{ "monthlyUsd": null }` (removes the figure) | `{ month, changed, budget: <company line> or null }` |
+| `PUT /api/:t/ai-usage/budgets/units/:unitNodeId` | `{ "monthlyUsd": "40", "mode"?: "report" or "soft_stop" }` or `{ "monthlyUsd": null }` | `{ month, changed, budget: <unit line> or null }` |
+| `GET /api/:t/ai-usage/allowances` | | `{ defaultDailyReplies: 200, overrides: [{ userId, name or null, dailyReplies, updatedAt }] }` |
+| `PUT /api/:t/ai-usage/allowances/:userId` | `{ "dailyReplies": 350 }` or `{ "dailyReplies": null }` (back to the default) | `{ userId, changed, dailyReplies, isDefault }` |
+
+- **Money** is a STRING: a positive decimal with at most 4 places and at most `99999999.9999` (`"250"`, `"0.05"`). A number, zero, a negative, 5 places, an exponent,
+  a comma or a space is 400. A row with no figure does not exist: `null` deletes it. The answer's `monthlyUsd` is the stored form (4 places).
+- **Mode:** a new unit budget is `report` (AIP-D7). `mode` omitted on an update keeps the stored one. A `mode` with a `null` figure is 400. The company figure has no
+  mode (AIP-D8), so a `mode` in its body is 400.
+- **Allowance:** a whole number from 1 to 100000, or `null`. The default is `AI_DAILY_REPLY_ALLOWANCE` (200; an invalid or sub-1 value falls back to 200), shown as
+  `defaultDailyReplies`. The person must be an ACTIVE member of the company.
+- The tenant comes from the route and the actor from the principal; unknown body keys are 400.
+- **Activity:** every write that changes something writes ONE `activities` row in the same transaction: entity type `ai_budget` (entity id null; metadata has
+  `scope`, `unitNodeId`, `monthlyUsd`, `mode`, `previousMonthlyUsd`, `previousMode`) or `ai_allowance` (entity id the person; metadata `dailyReplies`,
+  `previousDailyReplies`); verbs `created`, `updated`, `removed`. Ids and figures only, no free text. Removing what is not there changes nothing, answers
+  `changed: false` and writes no row.
+
+| Status | When |
+|---|---|
+| 200 | the owner or the superadmin, a valid body (`changed` says whether anything moved) |
+| 400 | a malformed body, or a `userId` that is not a uuid (after the decision, before existence) |
+| 403 | everyone else, **before the body, the unit or the person is looked at**: a refused caller with a bad body or an unknown unit still gets 403 |
+| 404 `unit_not_found` | an authorized caller names a node that is not in this company's org tree |
+| 404 `person_not_found` | the person is not an active member of this company (a stranger's id too: it names no one) |
+
+### 66.10 The AI usage job: notices at 80 and 100 percent, and the runaway alert (AIP-17b and AIP-19, 2026-10-30, BUILT server only)
+
+`modules/ai-usage/usage-alerts-job.ts`, started from `main.ts` outside the Redis gate. Every 10 minutes (`AI_USAGE_JOB_INTERVAL_MS`, default 600000, minimum 60000;
+first tick 60 to 120 seconds after boot) and for every company; **it only sends notices** (report mode; a stop is AIP-18's). `AI_USAGE_JOB_ENABLED=0` turns it off.
+One session advisory lock per sweep keeps two sweeps from overlapping. One company's failure is logged and never stops the next.
+
+**Once.** Each notice is first CLAIMED in the ledger `ai_usage_alerts` (`INSERT .. ON CONFLICT DO NOTHING`, primary key tenant, kind, subject, period, threshold) and
+sent only if the insert happened, so a second runner, a repeat tick or a restart sends nothing twice. (A crash between the claim and the send loses that one notice,
+never duplicates it.)
+
+| Notice type | When | Goes to | `payload.href` |
+|---|---|---|---|
+| `ai_usage.budget_80`, `ai_usage.budget_100` (unit) | the unit's subtree spend this UTC month reaches 80 / 100 percent of its budget, once per month per threshold | the unit's head(s) (live lead-seat holders of that exact node) and the company's owner(s) | `/analytics/ai-usage/department?unit=<node>` |
+| `ai_usage.budget_80`, `ai_usage.budget_100` (company) | the company's spend reaches 80 / 100 percent of the alert figure | the owner(s) and the GM (lead-seat holders of the company's GM unit) | `/ai-usage` |
+| `ai_usage.runaway_person` | a person's calls today (all surfaces, UTC day) are at least 5 times their own average per ACTIVE day over the previous 14 UTC days, with at least 7 active days and at least 20 calls today; once per person per day | the owner(s) and the IT seat (lead-seat holders of the company's IT unit, workspace slug `it`) | `/ai-usage` |
+| `ai_usage.runaway_agent` | the same by surface `agent` grouped by `task` (the agent's name) | the owner(s) and the IT seat | `/ai-usage` |
+
+Payloads carry `title`, `body`, `href`, `entityType`, `severity` (`warning`; `critical` at 100 percent) plus the figures (`scope`, `unitNodeId`, `month`, `threshold`;
+or `day`, `calls`, `usualDaily`, `agent`). **A runaway notice NAMES the person** (AIP-D19: the owner and IT both see the name) with today's calls and the usual daily
+figure, and never a cost or any text. A budget that jumps past both thresholds in one pass sends both notices, once each. Owners are the holders of a company-scope
+`owner` grant on the company.

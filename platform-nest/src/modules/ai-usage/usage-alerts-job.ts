@@ -47,6 +47,8 @@ type NotifyFn = (tenantId: string, recipientId: string | null, actorId: string |
 
 export interface AlertsDeps {
   notify?: NotifyFn;
+  /** Test seam: one company's pass. Defaults to `runCompanyAlerts`. */
+  runCompany?: (tenantId: string, now: Date, deps: AlertsDeps) => Promise<CompanyAlertsResult>;
 }
 
 export interface CompanyAlertsResult {
@@ -285,7 +287,7 @@ export async function runUsageAlertsSweep(now: Date = new Date(), deps: AlertsDe
         for (const { id } of rows) {
           result.companies++;
           try {
-            const r = await runCompanyAlerts(id, now, deps);
+            const r = await (deps.runCompany ?? runCompanyAlerts)(id, now, deps);
             result.budgetNotices += r.budgetNotices;
             result.runawayNotices += r.runawayNotices;
           } catch (err) {
