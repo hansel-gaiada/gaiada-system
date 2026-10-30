@@ -84,6 +84,15 @@ Two facts the owner should know:
   - Clients: `gaiada-ui` (public, standard flow), `gaiada-platform`, the service-account clients
     `gaiada-provisioner` and `webdesk-control`, and Keycloak's own. Direct grants are on only for `admin-cli`.
   - No `amr` mapper: `infra/runbooks/enable-mfa.md` is PLANNED, not applied.
+- **The upgrade rehearsal (PID-1b, 2026-10-30, DEV-VERIFIED on sumopod): PASS.**
+  - Script: `infra/scripts/keycloak-upgrade-rehearsal.sh`. A copy of the live database (`pg_dump` by the owner) was
+    restored on an internal docker network; the copy was shredded afterwards.
+  - Path: 26.0.8 → 26.8.1 → revert. The schema migrated in about 7 s.
+  - Realm, flows, clients, all 75 accounts and their credentials came through identical, as did both service
+    accounts (provisioner list-users 200, `webdesk-control` 403, before and after). The only difference: the migration
+    adds the built-in required action `idp_link`.
+  - Password logins and the passkeys switch work. The revert is identical.
+  - The live procedure, the upgrade notes that matter and the revert are in `infra/runbooks/keycloak-upgrade.md`.
 - **Usernames:** only `platform-nest/src/auth/oidc.ts` reads `preferred_username`, and only as a fallback display
   name. Identity is `sub` plus the verified email, so usernames can differ from emails safely (§6, risk 14).
 - **The ERP's own session** is 12 h absolute (`platform-ui/src/lib/session.ts` `SESSION_TTL_SECONDS`).
@@ -157,6 +166,7 @@ Two facts the owner should know:
 | 12 | **The phone number is not proved** (PID-D8). Someone could register another person's number, or mistype their own. | Invite only, so only invited people can register. A number already in use is refused. IT can correct a number on the IT Accounts page (audited). Nobody gets access through a number: they still need the password and the passkey. |
 | 13 | **Brute-force protection is off on live** (measured 2026-10-30). Username or phone + password can be guessed with no slow-down. The passkey stops a guessed password from getting in, but only once it is required. | Turn on Keycloak's brute-force detection with **temporary** lockouts (never permanent: a permanent lockout of the owner is itself a lockout incident), in the first live realm step (PID-2i). Every headless test login stays a single attempt, as already ruled. |
 | 14 | **Usernames have always equalled emails** (all 75 live accounts). | Only one reader of `preferred_username` exists (a fallback display name). The proof checks that the IT Accounts page, the invite adoption (`findUserByEmail` with `exact=true`) and `sso-login.sh` all key on email or `sub`, never on the username. |
+| 15 | **The image bump upgrades live in whichever release carries it.** `deploy.yml`'s `up -d` recreates Keycloak, because the `auth` profile is deployed. Keycloak has no down-migration. | The compose change stays on its own branch until the owner picks a window. The backup (runbook §1) is taken first; then it rides a train **alone**. Revert = restore the dump **and** the old tag together. Never re-run an older release's deploy job afterwards (it would start 26.0 on the migrated database); `rollback-to.sh` is safe. |
 
 ## 7. Rollout order
 
