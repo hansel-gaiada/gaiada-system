@@ -380,14 +380,23 @@ services:
   #
   # NOT using `--optimized`: that flag skips Keycloak's own startup build step and REQUIRES the
   # image to have already been built with `kc build` baked in (a custom Dockerfile layer this repo
-  # does not have — `quay.io/keycloak/keycloak:26.0` here is the vanilla upstream image). Passing
+  # does not have — `quay.io/keycloak/keycloak` here is the vanilla upstream image). Passing
   # `--optimized` against an unbuilt image fails the KC_* config validation at boot. Plain `start`
   # runs the build step at container start instead — slower boot (still well inside the 300s
   # start_period this repo already budgets for platform/report-renderer's own slow-boot fix), but
   # correct against this image. Revisit `--optimized` only alongside a custom Keycloak build stage.
   keycloak:
     profiles: [auth]
-    image: quay.io/keycloak/keycloak:26.0
+    # PID-1c (2026-10-30): 26.0 (resolved 26.0.8) -> 26.8.1, the prerequisite for passkeys. Rehearsed on
+    # sumopod against a copy of the live database (PID-1b: schema migrated in ~7s, all 75 accounts,
+    # flows, clients and both service accounts unchanged, password logins and the revert proved).
+    # ⚠ The first start of a new version MIGRATES the database and there is no down-migration:
+    #   - take the `gaiada_keycloak` dump in infra/runbooks/keycloak-upgrade.md BEFORE the release that
+    #     carries this line is tagged;
+    #   - revert = restore that dump AND put the old tag back, together, never the image alone;
+    #   - never re-run an older release's deploy job afterwards: it would rsync the old compose and start
+    #     26.0 on the migrated database. `infra/scripts/rollback-to.sh` is safe (it keeps this file).
+    image: quay.io/keycloak/keycloak:26.8.1
     restart: unless-stopped
     # ⚠ HELD AT `start-dev` DELIBERATELY — this is the ONE line of finding 07 still open.
     # Everything else finding 07 needed is already correct below: KC_HOSTNAME,
@@ -417,6 +426,11 @@ services:
       # KC_HOSTNAME below already a full https:// URL, strict mode is what makes a wrong value FAIL
       # LOUD instead of silently minting a bad issuer — the behavior this finding exists to add.
       KC_HTTP_ENABLED: "true"
+      # Keycloak 26.6+ makes `start-dev` listen on localhost only by default. The PID-1b rehearsal saw
+      # the container still reachable over the docker network, but the published 127.0.0.1:8080 port
+      # (nginx) and platform-nest's JWKS fetch both need the container's own interface, so the
+      # all-interfaces default is stated here rather than left to a dev-mode heuristic.
+      KC_HTTP_HOST: "0.0.0.0"
       # Behind nginx: Keycloak must build absolute URLs (issuer, auth endpoint, redirects) for the
       # PUBLIC host, not the container. Without KC_PROXY_HEADERS it trusts its own socket and mints
       # http://localhost URLs that the browser cannot follow and the platform will not accept.
