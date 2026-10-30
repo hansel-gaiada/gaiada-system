@@ -13416,60 +13416,116 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 - **Cerbos** is asked once per distinct officer before the transaction, in apply only; a stale answer (the officer changed in between) is 409 `status_changed`. A denial of the machine's `create` is its own 403, which rolls the import back.
 - **The activity rows** are written after the commit, one per changed engagement (`updated`, `{allocation, via: "sheet_import", importId}`) and one per new post (`create`, the create's metadata with `via` and `importId`); a failed write is logged and never undoes the import.
 
-### 63.24 The weekly report (SCP-5b; plan §8 SCP-5) — on 63.18's rows, routes, states and gates — **STATUS: PLANNED (2026-10-30)**
+### 63.24 Periodic reports and "Generate with AI" (SCP-5b, SCP-Q37; plan §8 SCP-5) — on 63.18's rows, routes, states and gates — **STATUS: PLANNED (2026-10-30)**
 
-**What it is.** One short report per client and week: the week's numbers, a summary in one or two lines, and next week's plan. It is the existing `social_reports` row with the `weekly` kind that plan §4.2 reserved, on 63.18's routes. No new table, route family or Cerbos action.
+**What it is.** A client's report for a day, a week, a month, a quarter, a half year or a year: the period's numbers, the words that go with them, and what comes next. Each is a `social_reports` row of one kind, on 63.18's routes, its four states (Draft, HoD check, Ready, Sent) and its gates. The monthly report stays exactly as SCP-5a built it; the five other periodic kinds follow its pattern; `campaign` and `adhoc` keep SMM-23's rules. "Generate with AI" drafts them for one client or for every client the person may draft for (63.24.5), and an agent drafts them by chat (63.24.6), as the owner ruled (SCP-Q37).
 
-**Who** (SCP-Q25: as the monthly, SCP-Q20). The officer writes and submits it (`social_report` · `create`, `update`); one of the four checks it and sends it (`approve`, `deliver`), and sending publishes it to the client's portal reports (PV7-04a). A ruling of (b) is the rule change PERMISSION §57 names; (c) drops `deliver` for the weekly kind.
+**Who** (SCP-Q25, for every kind). The officer drafts, edits and submits (`social_report` · `create`, `update`); only the four check, send back and send (`approve`, `deliver`, PERMISSION §53.7). Sending renders the PDF and publishes the report to the client's portal reports (PV7-04a), as the monthly does.
 
-**63.24.1 Data: `<prefix>_social_reports_weekly.sql`** (social; the third wall unchanged; no DML; a closing DO block asserts the catalogue):
-- `kind`: 0105's inline CHECK (Postgres named it `social_reports_kind_check`; the file finds it by its definition and asserts exactly one CHECK on `kind` afterwards) becomes `social_reports_kind_ck CHECK (kind IN ('monthly','campaign','adhoc','weekly'))`.
-- `social_reports_weekly_period_ck CHECK (kind <> 'weekly' OR (period IS NOT NULL AND period ~ '^[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$'))`: an ISO 8601 week. `period IS NOT NULL` is written out because a CHECK passes on NULL.
-- `next_week text NULL`, `social_reports_next_week_ck CHECK (next_week IS NULL OR (kind = 'weekly' AND char_length(next_week) <= 1000))`. The week's summary is the existing `narrative_md` (at most 1,000 characters on a weekly report: the route's rule).
-- `ux_social_reports_weekly UNIQUE (tenant_id, engagement_id, period) WHERE kind = 'weekly' AND deleted_at IS NULL`. (Monthly rows get no such index: older rows may repeat a period; SCP-5a's advisory lock stays their rule.)
-- `social_engagements.weekly_report boolean NOT NULL DEFAULT false` (SCP-Q26): the client is due a weekly report. It drives Needs you and the dashboard only; a weekly report can be written for any client.
+**63.24.1 The kinds** (the fixture's `reports.kinds`, both twins; neither side hard-codes this table):
 
-**63.24.2 The week and its numbers.**
-- `period` is `YYYY-Www`, Monday to Sunday. `periodDateRange` (`social/reports.ts`) learns the form; 2026 has a week 53.
-- **Due** on the last working day of the week (`lastWorkingDayOnOrBefore` of the Sunday, the company's HR calendar; Friday without one).
-- **Numbers:** `readReportInputs` over the week, as 63.18 reads a month: posts that went live, people reached, engagement (likes, comments, saves and shares), posts the client approved that week (one per post, by the decision's time), the best post by reach, and the table `next_week`: the client's pipeline posts dated in the next week, `{postId, title, format, scheduledAt, phase}`, archived and deleted posts left out.
-- **Frozen at submit, not at create** (it is written during its week). While `draft`, `GET reports/:id` answers the live numbers with `live: true`. `draft → in_review` writes the snapshot into `metrics` in the same transaction as the status change, and from then on it is frozen as SMM-23 freezes. A send-back keeps it; the next submit takes it again. What the four check is what the client receives.
-- `simulated` is set by the snapshot, as 63.18 sets it.
+| Kind | `period` | Range (company days) | Due | Numbers frozen | What the person writes | The HoD check needs |
+|---|---|---|---|---|---|---|
+| `daily` | `YYYY-MM-DD` | the day | the next working day | at submit | a summary (≤ 1,000) and the next day's line (`next_period`, ≤ 1,000) | a summary (`summary_missing`) |
+| `weekly` | ISO `YYYY-Www` | Monday to Sunday | the week's last working day | at submit | a summary and next week's line | a summary |
+| `monthly` | `YYYY-MM` | the month | `report_due_day` of the next month (63.18) | at create, as built | the narrative, the three notes, the action plan | the notes (`notes_incomplete`, as built) |
+| `quarterly` | `YYYY-Qn` | three calendar months | `report_due_day` of the month after; none without one | at create | as the monthly | the notes |
+| `semester` | `YYYY-Hn` | January to June, or July to December | as quarterly | at create | as the monthly | the notes |
+| `yearly` | `YYYY` | the calendar year | as quarterly | at create | as the monthly | the notes |
+| `campaign`, `adhoc` | as built (SMM-23) | as built | none | at create | the narrative | nothing, as built |
 
-**63.24.3 Routes** (63.18's, gates unchanged, additions only; order of checks unchanged: 404, the gate's 403, 400, the status refusals):
+- **Calendar periods.** Quarters, halves and years are calendar ones; the social module has no fiscal year. Working days are the company's HR calendar, Monday to Friday without one.
+- **Live until submitted** (daily, weekly), because they are written during or just after their period. While `draft`, `GET reports/:id` answers the live numbers with `live: true`. Submitting writes the snapshot into `metrics` in the status change's transaction, frozen from then on; a send-back keeps it and the next submit takes it again. At submit the AI drafts' numbers guard (`findUngroundedNumbers`) runs on the summary against the new snapshot: a summary stating a number the snapshot no longer holds is 400 `summary_numbers_changed` with those numbers. What the four check is what the client receives.
+- **Frozen at create** (monthly, quarterly, semester, yearly), because they look back on a finished period. The monthly keeps SMM-23's create as built; the three longer kinds need their period to have ended (400 `period_not_over`).
+- **Notes and the action plan** belong to the monthly, quarterly, semester and yearly kinds: the same three areas (followers, engagement, audience) and at most ten actions, validated as 63.18. On a daily or weekly report they are 400 `{field}`; the summary and the `next_period` line take their place. `notes_incomplete` binds those four kinds, `summary_missing` the two short ones, and `campaign` and `adhoc` neither.
+- **What comes next.** A daily or weekly report carries the table `next_period`: the client's pipeline posts dated in the next day or week, `{postId, title, format, scheduledAt, phase}`, archived and deleted posts left out. The longer kinds carry their action plan instead.
+- **The numbers** are `readReportInputs` over the range, as 63.18, plus the short kinds' posts the client approved in the period (one per post, by the decision's time) and the best post by reach. `simulated` is set as 63.18 sets it.
+- `periodDateRange` (`social/reports.ts`) learns every form; `deliveredReportTitle` names each kind: "Daily report, 9 Nov 2026", "Weekly report, 9 to 15 Nov 2026", "Quarterly report, Q4 2026", "Half-year report, H2 2026", "Yearly report, 2026".
 
-| Route | For a weekly report |
+**63.24.2 Data: `<prefix>_social_reports_periodic.sql`** (social; the third wall unchanged; no DML; closing DO-block assertions):
+- `kind`: 0105's inline CHECK (Postgres named it `social_reports_kind_check`; the file finds it by its definition and asserts exactly one CHECK on `kind` afterwards) becomes `social_reports_kind_ck CHECK (kind IN ('daily','weekly','monthly','quarterly','semester','yearly','campaign','adhoc'))`.
+- `social_reports_period_ck`, one format per new kind: `CHECK (CASE kind WHEN 'daily' THEN coalesce(period ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$', false) WHEN 'weekly' THEN coalesce(period ~ '^[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$', false) WHEN 'quarterly' THEN coalesce(period ~ '^[0-9]{4}-Q[1-4]$', false) WHEN 'semester' THEN coalesce(period ~ '^[0-9]{4}-H[12]$', false) WHEN 'yearly' THEN coalesce(period ~ '^[0-9]{4}$', false) ELSE true END)`. Each branch is wrapped in `coalesce(…, false)` so that a NULL period fails instead of passing (a CHECK passes on NULL). The monthly, campaign and adhoc kinds are not checked: SMM-23 stored any `period`, and live rows must not break. The route also checks that a date or a week exists; a CHECK cannot know which years have a week 53.
+- `next_period text NULL`, `social_reports_next_period_ck CHECK (next_period IS NULL OR (kind IN ('daily','weekly') AND char_length(next_period) <= 1000))`. A short kind's summary is the existing `narrative_md` (≤ 1,000, the route's rule).
+- `ux_social_reports_periodic UNIQUE (tenant_id, engagement_id, kind, period) WHERE kind IN ('daily','weekly','quarterly','semester','yearly') AND deleted_at IS NULL`: one report per client, kind and period. The monthly keeps SCP-5a's advisory lock instead: older monthly rows may repeat a period, and an index on them would fail the boot.
+- `social_engagements.report_kinds text[] NOT NULL DEFAULT '{}'`, `CHECK (report_kinds <@ ARRAY['daily','weekly','quarterly','semester','yearly']::text[])`: the periodic kinds the client is due besides the monthly (SCP-Q26, applied per kind since SCP-Q37). It drives Needs you, the dashboard and "all clients" (63.24.5); any kind can still be written for any client.
+- `social_report_runs`, the bulk runs (63.24.5).
+
+**63.24.3 Routes** (63.18's; gates unchanged; additions only; the order is unchanged: 404, the gate's 403, 400, then the status refusals):
+
+| Route | What changes |
 |---|---|
-| `POST engagements/:engagementId/reports` | `kind: 'weekly'` needs `period`: a week that exists in its year (the CHECK admits `W53` for every year; the route knows which years have one), not after the current week (else 400 `invalid_field` `{field: 'period'}`). It writes an empty draft and calls no gateway (`draftedVia: 'none'`). One per client and week: an existing one is answered as it is (`draftedVia: 'existing'`) under the advisory lock `social_report:<engagementId>:weekly:<period>`, the unique index the backstop |
-| `GET reports?kind=&engagementId=&status=&period=` | `kind` is a new filter (400 `{field: 'kind'}` outside the four); `period` also takes `YYYY-Www`. Rows gain `due` and `summaryPresent` |
-| `GET reports/:id` | The row gains `nextWeek`, `due` and `live`; the document gains the summary, the week's KPIs and the `best_post` and `next_week` tables. `notes` and `actionPlan` stay empty |
-| `PATCH reports/:id` | Gains `nextWeek` (weekly only, ≤ 1,000, else 400 `{field: 'nextWeek'}`); `narrativeMd` ≤ 1,000 on a weekly report; `notes` or `actionPlan` on one is 400 `{field}`. Submitting needs a summary (400 `summary_missing`) and takes the snapshot |
-| `POST reports/:id/ai-draft` | Answers `{narrativeMd, nextWeek, draftedVia: 'ai'\|'template'}`: two sentences on the week and one on the next, from the numbers and the brand-draft lookup, under the same numbers guard. A proposal: nothing is saved |
-| `POST reports/:id/approve` | 400 `summary_missing` in place of `notes_incomplete`, re-checked in the UPDATE as the notes rule is |
-| `POST reports/:id/deliver` | Unchanged: the PDF and the PV7-04a publication; `deliveredReportTitle` reads "Weekly report, 9 to 15 Nov 2026" |
+| `POST engagements/:engagementId/reports` | Takes every kind. A new kind needs its `period` in its format, a real date or week, not in the future (400 `invalid_field` `{field: 'period'}`); quarterly, semester and yearly need it ended (400 `period_not_over`). Every kind is drafted with AI at create, as the monthly is, with the plain template when the gateway fails (`draftedVia: 'ai'\|'fallback'`): a short kind's summary and next-period line from its live numbers, a long kind's narrative, notes and action plan from its frozen ones. One per client, kind and period: an existing report is answered as it is (`draftedVia: 'existing'`) before any gateway call, under the advisory lock `social_report:<engagementId>:<kind>:<period>`, with the unique index as the new kinds' backstop. The internal client is refused as today |
+| `GET reports?kind=&engagementId=&status=&period=` | `kind` filters (400 `{field: 'kind'}` outside the eight); `period` takes every form. Rows gain `due`, `summaryPresent` and `live` |
+| `GET reports/:id` | The row gains `nextPeriod`, `due` and `live`; a short kind's document gains the summary, its KPIs and the `best_post` and `next_period` tables |
+| `PATCH reports/:id` | Gains `nextPeriod` (daily and weekly only, ≤ 1,000, else 400 `{field: 'nextPeriod'}`). On a short kind, `narrativeMd` ≤ 1,000 and `notes` or `actionPlan` are 400 `{field}`. Submitting a short kind needs a summary (400 `summary_missing`), takes the snapshot and runs the guard (400 `summary_numbers_changed`) |
+| `POST reports/:id/ai-draft` | A short kind answers `{narrativeMd, nextPeriod, draftedVia: 'ai'\|'template'}`; a long kind answers as the monthly (63.18). A proposal: nothing is saved |
+| `POST reports/:id/approve` | `summary_missing` on a short kind and `notes_incomplete` on a long one, each re-checked in the UPDATE, as 63.18's notes rule is |
+| `POST reports/:id/deliver` | Unchanged: the PDF and the PV7-04a publication, titled per kind |
 
-New code: 400 `summary_missing` (the module's `refuse()`). The fixture's `reports` block lists it and gains `kinds: {monthly: {checkRule: 'notes_complete', snapshotAt: 'create'}, weekly: {checkRule: 'summary_present', snapshotAt: 'submit', due: 'last_working_day_of_week'}}`, in both twins.
+New codes, all 400 through the module's `refuse()`: `summary_missing`, `summary_numbers_changed`, `period_not_over`; the fixture's `reports` block lists them.
 
 **63.24.4 Needs you, the allocation and the dashboard.**
-- The officer's Needs you (63.7) gains `weekly_report_due` for each client with `weekly_report` on, from the week's due day until its report is `delivered` (`due` the due day; `href` the report, or the create form when there is none). The four's "to check" and "ready to send" items already count every kind.
-- `AllocationRow` (63.4) gains `weeklyReport`, set by `PATCH engagements/:engagementId/allocation` (`plan`, the four). The sheet import does not read it.
-- The Team dashboard's `report_due` items (63.19) gain `reportKind: 'monthly'|'weekly'` (additive); a weekly one shows from the day after its due day until it is delivered, for clients with `weekly_report` on, whatever `month`.
+- The officer's Needs you (63.7) gains `periodic_report_due` for each client and each kind in its `report_kinds`, from the period's due day until the report is `delivered` (`due` the due day; `href` the report, or the create form when there is none). The monthly item stays as 63.18 built it. The four's "to check" and "ready to send" items already count every kind.
+- `AllocationRow` (63.4) gains `reportKinds`, set by `PATCH engagements/:engagementId/allocation` (`plan`, the four). The sheet import does not read it.
+- The Team dashboard's `report_due` items (63.19) gain `reportKind` (additive): a periodic report shows from the day after its due day until it is sent, for the clients due that kind, whatever `month`.
 
-**63.24.5 Pages.** `{D}/social-reports` (the `reports` row's `social` tab, 63.17) gains a Monthly and Weekly switch (`?kind=weekly`), and "Create weekly report" for a client and week (`?engagementId=&week=`). A weekly report opens at `{D}/social-reports/[reportId]` in the same area: the week's navigation, "This week", the best post, "Next week" from the pipeline, "What to tell the client" (the summary and the next-week line), Draft with AI, submit, and for the four send back, approve and send. No new row or key. The client reads it in `/portal/reports` (PV7-04b).
+**63.24.5 "Generate with AI"** (SCP-Q37).
+- **One client** is the create route of 63.24.3: one gateway call, answered in the request, as the monthly's create is today.
+- **All clients: `POST reports/generate`** `{id, kind, period}`.
+  - **The gate:** `social_report` · `create`, a company-level decision as in 63.18 (the report kind carries no client); without it, 403. **The clients the caller may draft for:** one of the four (`social_engagement` · `plan`, asked as a plain check) gets every active engagement; anyone else holding `create` gets the engagements they are the officer of. Nobody else is listed. The set is decided once, at the route, and the run drafts exactly those clients.
+  - **Left out or skipped:** an engagement that is not `active` is left out; for a kind other than the monthly, a client not due it is listed `skipped` with `kind_not_due`; the internal client `skipped` with `internal_client`.
+  - **Validation:** as the create route; the monthly also needs an ended month here (400 `period_not_over`), because it freezes at create and a run over a month still going would freeze half of it.
+  - **Refusals:** 409 `generation_running` `{runId}` while a run for the same company, kind and period is queued or running. A replayed `id` answers 200 with the run as it stands; otherwise 202 `{runId, kind, period, total, clients: [{engagementId, clientName}]}`.
+- **A background run, not one request:** about twenty clients at the gateway's latency (seconds to tens of seconds a draft) take minutes even four at a time, longer than a browser, the proxy or an agent's tool call should hold a request open; a run outlives a closed tab or a restart and reports its progress.
+- **`social_report_runs`** (third wall, in 63.24.2's migration):
 
-**DEMO_MODE.** `lib/demoSocial.ts` gains a weekly report in each state for one client and a missing week for another, its live numbers from the demo's metrics (63.16's clock pin applies).
+| Column | Type and rule |
+|---|---|
+| `id`, `tenant_id` | uuid PK, the caller's run id |
+| `kind`, `period` | as the reports': the kind's CHECK and format |
+| `requested_by` | `uuid NOT NULL → users`: the person, also when an agent asked for them |
+| `via` | `jsonb NULL`: the agent, as `metadata.via` |
+| `status` | `text NOT NULL DEFAULT 'queued'`: `queued`, `running`, `done`, `failed` |
+| `total`, `done_count` | `smallint NOT NULL` |
+| `results` | `jsonb NOT NULL DEFAULT '[]'`: `[{engagementId, clientName, reportId?, status: 'created'\|'existing'\|'skipped'\|'failed', draftedVia?, reason?, simulated?}]` |
+| `heartbeat_at`, `started_at`, `finished_at`, `created_at`, `origin_site` | |
 
-**Agents.** No new tool: `social.draftReport`, `social.editReport`, `social.approveReport` and `social.deliverReport` (63.15) take `kind: 'weekly'` and `nextWeek`, with their classes unchanged.
+CHECKs: `(status IN ('done','failed')) = (finished_at IS NOT NULL)`; `status = 'queued' OR started_at IS NOT NULL`; `done_count BETWEEN 0 AND total`; `jsonb_typeof(results) = 'array'`. `ux_social_report_runs_active UNIQUE (tenant_id, kind, period) WHERE status IN ('queued','running')`.
 
-**63.24.6 Proofs** (63.21's rules):
-- the migration: one CHECK on `kind` after it, admitting `weekly`; the period CHECK refusing NULL and `2026-W54` and admitting `2026-W53`; `next_week` refused on a monthly row; the unique index; the allocation column; no row changed;
-- one weekly report per client and week under two concurrent creates;
-- the week's range across the year turn, and a holiday Friday making Thursday the due day;
-- live numbers while `draft`; frozen at submit (a post going live afterwards does not move them); taken again after a send-back;
-- `summary_missing` on submit and on approve; `notes` refused on a weekly report; `notes_incomplete` still binds only the monthly;
-- the officer submits but cannot approve, send back or send; a `company_admin` cannot approve or send; each of the four can;
-- sending publishes through PV7-04a with the weekly title; the SIMULATED watermark when a number was simulated;
-- `weekly_report_due` only for clients switched on.
+- **The worker.** After the commit the route starts the run in the process without waiting for it; the job `social-report-runs` (every minute) starts runs still `queued` and resumes `running` ones whose `heartbeat_at` is more than five minutes old (their instance died).
+  - Each client goes through the create route's own path, as the person who asked; usage is attributed to them (AIP).
+  - At most four drafts in flight per run, and one running run per company (the job starts the next when the current one ends); the gateway's own limits apply on top.
+  - **Idempotent per client, kind and period:** a client whose report already exists, in any state, is `existing` and never redrafted; a resumed run skips the clients already in `results`.
+  - **One failure never stops the others:** a client whose draft throws is `failed` with its reason. A gateway that is down is not a failure: the template fills the draft (`created`, `draftedVia: 'fallback'`), as 63.18. A run ends `done` when every client has a result, and `failed` only when the run itself cannot go on, its results kept.
+  - Each report's `created` activity carries `metadata.runId`. When the run ends the person gets `social.reports.generated` ("12 drafts ready, 6 already there, 1 failed"), linking to the list filtered to the kind and period.
+- **Progress: `GET reports/generate/:runId`** (`social_report` · `read`; the run's person or one of the four, else 404 `run_not_found`) answers `{runId, kind, period, status, total, done, results, startedAt, finishedAt}`. `GET reports/generate` lists the last 30 days' runs: the company's for the four, one's own for anyone else.
+
+**63.24.6 By chat** (SCP-Q37; 63.15's on-behalf-of model). The agent arrives as the person who asked, so the gate, the narrowing to their clients and every refusal are theirs; the run's `via` and each report's activity record the agent.
+
+| Tool | Route | Class |
+|---|---|---|
+| `social.draftReport` (existing) | `POST engagements/:engagementId/reports`, any kind | `write`, impact `low`, as today: one draft that reaches nobody |
+| `social.generateReports` (new) | `POST reports/generate` | `write`, impact `medium`: it spends a gateway call for each of the company's clients, so the person confirms in the thread (63.15's confirm step) |
+| `social.reportRun` (new) | `GET reports/generate/:runId` | read |
+
+These tools only draft. Approving, sending back and sending stay `social.approveReport` and `social.deliverReport` (63.15, unchanged), under the four's gates and the confirm step. An unattended automation is refused, as every social write is (63.15), so there is no scheduled generation: it would have no person behind it.
+
+**63.24.7 Pages.** `{D}/social-reports` (the `reports` row's `social` tab, 63.17) gains a kind switch (Daily, Weekly, Monthly, Quarterly, Half-year, Yearly, Other), a period picker for the kind, and "Generate with AI": for one client it calls the create route; for "all my clients" ("all clients" for the four) it starts a run and shows its progress and each client's result in place, each linking to its report. A report opens at `{D}/social-reports/[reportId]` in the same area. A short kind shows its period's navigation, the numbers, the best post, the next period from the pipeline, and "What to tell the client" (the summary and the next-period line). A long kind shows the monthly's page over its range, with "Ideas for next month" (63.25) on the monthly only. Draft with AI, submit, and for the four send back, approve and send. No new row or key. The client reads them in `/portal/reports` (PV7-04b).
+
+**DEMO_MODE.** One client with a report of each kind in a mix of states and one client with none; "Generate with AI" runs in the demo store as a run that settles client by client, its results following the server's rules.
+
+**Simulated.** Each report's `simulated` as 63.18; the run's results carry each report's.
+
+**63.24.8 Proofs** (63.21's rules):
+- the migration: one CHECK on `kind`, admitting the eight; the period CHECK refusing a NULL or malformed period for each new kind (`2026-W54`, `2026-Q5`, `2026-H3`, `26`) and admitting `2026-W53`; a monthly, campaign or adhoc row with any period still admitted; `next_period` refused on a long kind; the unique index; `report_kinds`; the runs' CHECKs and one active run per company, kind and period; no row changed;
+- each kind's range and due day on a golden table: a holiday after a daily, a holiday Friday, a quarter's and a year's turn, no `report_due_day`;
+- one report per client, kind and period under two concurrent creates;
+- the short kinds live while a draft, frozen at submit, taken again after a send-back, and `summary_numbers_changed` when a stated number moved; the long kinds frozen at create, and `period_not_over`;
+- `summary_missing` and `notes_incomplete` each on its own kinds only; notes refused on a short kind;
+- the officer drafts and submits every kind but cannot approve, send back or send; a `company_admin` cannot approve or send; each of the four can;
+- the run: the four get every active client, an officer only their own, a member without `create` 403; skipped (`kind_not_due`, `internal_client`) and existing clients reported and never redrafted; a client whose draft throws `failed` while the rest finish; the gateway down gives `fallback` drafts; never more than four drafts in flight; a killed worker's run resumed with no client drafted twice; `generation_running`; the progress read only for the run's person and the four;
+- by chat: `social.generateReports` through the OBO envelope narrows to the person's clients, asks the confirm, records `via`; no tool approves or sends; an automation principal is refused;
+- sending publishes through PV7-04a with each kind's title, and the PDF carries the SIMULATED watermark when a number was simulated.
 
 ### 63.25 Ideas for next month (SCP-5c) — **STATUS: PLANNED (2026-10-30)**
 
