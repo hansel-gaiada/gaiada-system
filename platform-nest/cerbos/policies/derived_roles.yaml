@@ -209,6 +209,21 @@ derivedRoles:
             has(request.resource.attr.approverIds) &&
             request.resource.attr.approverIds.exists(id, id == request.principal.id)
 
+    # ai_usage_gm_seat -- AIP-15 (owner ruling AIP-D18, docs/PERMISSION-CONTRACT.md §58): the GM, for the `ai_usage` kind's `read_company`
+    #   (company totals, never people). The principal is one of `gmIds`, the live lead-seat holders of the company's GM unit(s), computed
+    #   by the handler per company from that company's own positions (modules/ai-usage/authz.ts loadGmSeatIds: gmUnitIds +
+    #   loadSeatHoldersByNode, the SCP-1b shape), never from a grant or a body. A seat is a relationship, not a grant: DIRECT maps it to
+    #   no real role and no perm_* mirror reads it. Written in the social_approver_seat shape (a top-level attribute gate before the
+    #   `.exists`, no g.role literal), so the hazard scan classes it on the attribute-gate axis. An unfed list ([]) contains nobody. Every
+    #   rule naming it keeps `variables.inTenant`, so another company's GM never reaches here.
+    - name: ai_usage_gm_seat
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.gmIds) &&
+            request.resource.attr.gmIds.exists(id, id == request.principal.id)
+
     # ═══════ M5-W1a -- the writers' room: four editorial roles as SCOPED grants ═══════════════════════════════
     # docs/plans/2026-10-11-m5-writers-room-design.md §2.2. The ROLES `webdesk_writer`, `webdesk_translator`,
     # `webdesk_seo_reviewer`, `webdesk_editor` are grants stored as data: a `user_roles` row at scopeType
@@ -794,6 +809,44 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "core.dept_assistant_preamble.manage" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_ai_usage_* — AIP-15 (2026-10-30, docs/PERMISSION-CONTRACT.md §58, docs/FRONTEND-BFF-CONTRACT.md §66). Generic global-or-company
+    # mirrors for read_own, read_company, read_people and manage. read_own and read_company are reached in the role arm only through
+    # scope-only rules (company_admin, manager, member, viewer), so a mirror grants exactly the role arm's reach. read_people and manage are
+    # named by NO role rule: their keys ride OWNER_EXTENSION (uiGrantable false), so the mirror is the owner's only way in (the AIP-D16 /
+    # SCP-1b owner-only pattern). NO read_unit / lift_stop mirror, on purpose: both are reached by an org_unit_lead rule (attribute-dependent:
+    # the grant's one unit, via unitAncestors), and a flat `perms` mirror would let a head reach every unit (iam-04-reg1-mirror-reach-invariant).
+    - name: perm_ai_usage_read_own
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.ai_usage.read_own" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_ai_usage_read_company
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.ai_usage.read_company" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_ai_usage_read_people
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.ai_usage.read_people" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_ai_usage_manage
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.ai_usage.manage" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_creative_asset_* — DW-6h (2026-10-13, docs/FRONTEND-BFF-CONTRACT.md §35.4). One generic global-or-company

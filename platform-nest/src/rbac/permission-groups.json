@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 176,
-      "grantablePermissionsInCatalog": 487,
-      "permissionsCoveredByGroups": 448,
+      "groups": 177,
+      "grantablePermissionsInCatalog": 493,
+      "permissionsCoveredByGroups": 454,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 117
@@ -2052,6 +2052,21 @@
         "core.dept_assistant_preamble.read",
         "core.dept_assistant_preamble.edit",
         "core.dept_assistant_preamble.manage"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "ai_usage",
+      "name": "AI usage",
+      "domain": "core",
+      "description": "Who sees and manages the company's AI usage (AIP-15; owner rulings AIP-D6 and AIP-D18). Counts and money only, never any text. Every staff member reads their own figures; a department head reads their own unit's totals and people and lifts its soft stop through their lead rules; company admins and the GM read company totals without people; only the owner reads every person and manages budgets and allowances (read_people and manage are not UI-grantable). Agents and automation never manage or lift a stop.",
+      "permissions": [
+        "core.ai_usage.read_own",
+        "core.ai_usage.read_unit",
+        "core.ai_usage.read_company",
+        "core.ai_usage.read_people",
+        "core.ai_usage.manage",
+        "core.ai_usage.lift_stop"
       ],
       "sensitive": false
     }

@@ -3360,3 +3360,88 @@ and nothing widens. The automation DENY covers `author`, `approve`, `manage` and
 
 **Proof** (in the BFF sections' lists, on the Linux CI gate with the live Cerbos): every route above refuses the actors its row
 leaves out, with the codes the BFF sections name; §53.14's static pins pass unchanged, because no rule is added.
+
+## 58. AIP-15 — the `ai_usage` kind: who sees and manages the company's AI usage (2026-10-30, BUILT, PROTOTYPED)
+
+Owner rulings **AIP-D6** ("the department head and the owner only" for per-person lines; nobody sees peers or any text) and **AIP-D18**
+("owner, gm, company admin, and superadmin, the rest can see their own usage"), and the **AIP-D16** owner-only pattern; plan
+`docs/plans/2026-10-27-ai-plan.md` §6.3 items 2 and 3. BFF rows: `docs/FRONTEND-BFF-CONTRACT.md` §66. Status: **BUILT, PROTOTYPED.** The policy,
+the derived roles, `cerbos.ts`, catalog, group, bundles, the IAM seed `202610300310_iam_ai_usage_permissions.sql`, the routes and the static and
+unit suites are in the repo. The live Cerbos matrix (`cerbos-ai-usage.test.ts`), the HTTP suite (`modules/ai-usage/reads.http.test.ts`) and the
+DB suites run on the Linux CI gate and skip without Postgres and Cerbos. **Restart Cerbos at the deploy** (a new policy file is not hot-reloaded)
+and probe it: a head of `d-web` `read_unit` allowed on `d-web` and refused on a sibling; company_admin `read_company` allowed and `read_people`
+refused; the owner `read_people` and `manage` allowed.
+
+**A new core kind, `ai_usage` (no module), with six actions.** One resource is ONE company's usage record, narrowed to one unit when the handler
+feeds `unitAncestors`. Attributes, all computed by the handler (`modules/ai-usage/authz.ts`), never from a body: `tenantId` (the route's
+company); `unitAncestors` (`loadUnitAncestors(c, tenantId, unitNodeId)`, WITH the tenant; the unit route only, `[]` elsewhere); and the NEW
+attribute **`gmIds`**: the live lead-seat holders of the company's GM unit(s) (`gmUnitIds` + `loadSeatHoldersByNode`, the SCP-1b shape),
+added to `Resource` AND to the `resourcePayload()` allow-list (an attribute missing there silently vanishes). Keys `core.ai_usage.<action>`.
+
+| Action | Reach | What it opens |
+|---|---|---|
+| `read_own` | `company_admin`, `manager`, `member`, `viewer` (one rule); the owner through `perm_ai_usage_read_own` | the caller's OWN figures; the route reads only `user_id = caller` |
+| `read_unit` | **its own rule** for `org_unit_lead` (the grant's scopeId in `unitAncestors`) | one unit's totals AND per-person lines, its whole subtree |
+| `read_company` | `company_admin`; **its own rule** for the new seat role `ai_usage_gm_seat` (the GM); the owner through `perm_ai_usage_read_company` | company totals by department, model, surface and day; NO per-person lines |
+| `read_people` | the owner ONLY, through `perm_ai_usage_read_people` (no role rule) | per-person lines in EVERY unit |
+| `manage` | the owner ONLY, through `perm_ai_usage_manage` (no role rule) | budgets, the alert figure, modes, allowances, lifting any stop (routes: AIP-17b, AIP-18) |
+| `lift_stop` | **its own rule** for `org_unit_lead` over `unitAncestors` | lift one unit's soft stop (route: AIP-18; the handler asks `manage` first) |
+
+Every rule but the wildcard is `variables.inTenant && variables.notLow` (the four mirrors add `inRoot`). **`platform_admin`** keeps the house
+wildcard (the superadmin of AIP-D16 and AIP-D18). **Nobody reads a peer:** a member reads only their own line, a head reads the people of their
+own subtree, the GM and company admins read totals and never people, only the owner and the superadmin read every person.
+
+**Authoring rules:**
+- Each attribute-dependent rule stands alone (HIER-2): `org_unit_lead` on `read_unit` and on `lift_stop` are separate rules; the GM seat is its own rule on `read_company`.
+- **`EFFECT_DENY` on `manage` and `lift_stop`** for `principal.attr.kind in ["automation","bot"]`, the `resource_dept_notice.yaml` shape (`roles: ["user"]`, `has()`-guarded): it beats the wildcard, the lead rule and the mirror. The four reads stay allowed.
+- The tenant trap: every rule keeps `inTenant`; the head's ancestry and the GM list are computed per company, so the head of company A's `d-web` never reads company B's `d-web`, and a GM of another company never matches even if its id were in the list.
+
+**The GM is a seat, not a grant.** `ai_usage_gm_seat` (`derived_roles.yaml`) is `has(resource.attr.gmIds) && resource.attr.gmIds.exists(id, id ==
+principal.id)`, the `social_approver_seat` shape (a top-level attribute gate, no `g.role` literal, no scope). `DIRECT` maps it to no real role in
+both resolvers (`generate-role-bundles.mjs`, `role-permission-parity.db.test.ts`), so no bundle carries a key through it and no mirror reads it.
+An unfed list contains nobody. The GM is found BY NAME (the department of the company's own tree whose workspace slug is `gm` for its vertical),
+never by a hard-coded node id (PV-D13).
+
+**The owner, and the owner-only keys.** `owner` is permission-native (zero role rules). `read_own` and `read_company` are reached in the role arm
+only through scope-only rules, so their mirrors grant exactly the role arm's reach and the owner holds both keys through company_admin's
+envelope. `read_people` and `manage` are named by **no role rule**: both keys join **`OWNER_EXTENSION`** (`scripts/generate-role-bundles.mjs`),
+both are **`uiGrantable: false`** (no role edit, position or request can hand them out), and the mirror is the owner's only way in: the AIP-D16 /
+SCP-1b pattern. company_admin reaches neither. **No `read_unit` or `lift_stop` mirror**: both are reached by `org_unit_lead` through an
+attribute-dependent rule and the lead holds both keys in its bundle, so a flat mirror would let a head read every unit
+(`iam-04-reg1-mirror-reach-invariant`, `permission-arm-hazard-scan` Pattern B; both pass).
+
+**Handlers** (`modules/ai-usage/reads.controller.ts`, BFF §66): one advisory `checkActions` over the six actions, then `authorize()` on the
+action that decides (so the denial, its audit row and the delegation intersection are the house ones); the month is validated after it (a
+refused caller always gets 403, never 400). The unit route decides `read_people`, else `read_unit`, else `read_company` (no `people` key), else 403.
+
+**Bundles:**
+
+| Role | Holds |
+|---|---|
+| `platform_admin` | all six |
+| `company_admin` | `read_own`, `read_company` |
+| `owner` | `read_own`, `read_company`, `read_people`, `manage` (company_admin's two + OWNER_EXTENSION's two; `owner-role.db.test.ts`) |
+| `manager`, `member`, `viewer` | `read_own` |
+| `org_unit_lead` | `read_unit`, `lift_stop`, unit-scoped (resolved at `org_unit` scope) |
+| the GM | nothing: a seat |
+| everyone else | nothing |
+
+No key is `sensitive` (counts and money, never text; `read_people` and `manage` cannot be granted at all, and flagging `read_unit` or
+`lift_stop` would route every head's grant through the override path) and none is self-scoped (`read_own`'s "only my rows" is the route's SQL,
+not a rule comparing an attribute to the caller).
+
+**The six artifacts** (the §36 template, copied from §56): the policy (+ `ai_usage_gm_seat` and four `perm_ai_usage_*` mirrors in
+`derived_roles.yaml`); `cerbos.ts` (`gmIds` in `Resource` and the allow-list); the catalog (+6 entries); the groups (+1 group `ai_usage`); the
+migration `202610300310` with its DO-block self-assertion (per-role counts, `read_people` and `manage` held by platform_admin and owner only on any
+role, `read_unit` and `lift_stop` by platform_admin and org_unit_lead only, nothing self-scoped, `owner` ≡ `company_admin` + OWNER_EXTENSION over
+EVERY key in both directions, 17 rows in all); the bundles, regenerated (the generator's `DIRECT` gains `ai_usage_gm_seat: []` and
+`OWNER_EXTENSION` the two keys).
+
+**Counts:** 115 kinds, 508 pairs, 493 grantable, 15 relationship, 218 sensitive; uiGrantable 473 true / 35 false; 177 groups; bundles 2209 pairs
+(`platform_admin` 493, `company_admin` 438, `owner` 446, `manager` 223, `member` 127, `viewer` 42, `org_unit_lead` 29).
+
+**Proof:** `cerbos-ai-usage.test.ts` (static pin of the rules, the seat, the mirrors, the DENY, `gmIds` in the payload, the bundles, the catalog,
+OWNER_EXTENSION, DIRECT and the seed's pairs; the live matrix, every action against member, viewer, manager, company_admin, the owner with its live
+bundle, platform_admin, the head of the unit, of an enclosing unit, of a sibling and below, the same node id in another company, the GM seat, a GM
+of another company, bot and automation, low assurance, unfed resources, and each mirrored key alone); `reads.http.test.ts` (the routes);
+`ai-usage-unit-node.db.test.ts` (the column, AIP-15a).

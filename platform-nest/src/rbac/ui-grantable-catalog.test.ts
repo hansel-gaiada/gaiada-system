@@ -117,8 +117,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // AIP-08b (2026-10-28, AIP-D5): +1 grantable / +1 total on the NEW assistant_brain kind (`choose_provider`; uiGrantable TRUE: a role edit grants it). 498 -> 499 / 483 -> 484.
     // AIP-D5 holders (2026-10-29, §55.1): `assistant.brain.choose_provider` flips uiGrantable TRUE -> FALSE (superadmin and owner only). No count change.
     // AIP-13b (2026-10-29, AIP-D10): +3 grantable / +3 total on the NEW core dept_assistant_preamble kind (`read`, `edit`, `manage`; all uiGrantable TRUE). 499 -> 502 / 484 -> 487.
-    expect(permissions.length).toBe(502);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(487);
+    // AIP-15 (2026-10-30, AIP-D6/AIP-D18): +6 grantable / +6 total on the NEW core ai_usage kind (read_own, read_unit, read_company, lift_stop uiGrantable TRUE; read_people and manage FALSE: the owner only, OWNER_EXTENSION). 502 -> 508 / 487 -> 493.
+    expect(permissions.length).toBe(508);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(493);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

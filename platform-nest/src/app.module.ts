@@ -270,6 +270,8 @@ import { MailThreadController } from "./mail/thread.controller";
 // defaults 0 so this stays dark until the staging SLO gate (§15 R5) closes.
 import { MagicLinkController } from "./mail/magic-link/controller";
 import { AiUsageIngestController } from "./modules/ai-usage/ingest.controller";
+// AIP-15 (FRONTEND-BFF-CONTRACT §66, PERMISSION-CONTRACT §58): the three AI usage reads behind the core Cerbos kind `ai_usage`.
+import { AiUsageReadsController } from "./modules/ai-usage/reads.controller";
 
 @Module({
   controllers: [
@@ -400,6 +402,8 @@ import { AiUsageIngestController } from "./modules/ai-usage/ingest.controller";
     MagicLinkController,
     // AIP-03b: AI callers outside platform-nest report their usage here (service token only).
     AiUsageIngestController,
+    // AIP-15: GET /api/:t/ai-usage/{me,units/:unitNodeId,company} (Cerbos kind ai_usage).
+    AiUsageReadsController,
   ],
 })
 export class AppModule {}

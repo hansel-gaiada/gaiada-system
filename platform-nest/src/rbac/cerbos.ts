@@ -53,7 +53,9 @@ export interface Resource {
    *  handler (dept-kpis.controller.ts) feeds the TARGET unit's chain. No allow-list change was needed: the line
    *  below already carries it.
    *  AIP-13b: `dept_assistant_preamble` (resource_dept_assistant_preamble.yaml) reads it for the head's `read` and `edit` rules; the
-   *  handler (dept-assistant-preamble.controller.ts) feeds the route's unit chain, computed WITH the tenant. Again no allow-list change. */
+   *  handler (dept-assistant-preamble.controller.ts) feeds the route's unit chain, computed WITH the tenant. Again no allow-list change.
+   *  AIP-15: `ai_usage` (resource_ai_usage.yaml) reads it for the head's `read_unit` and `lift_stop` rules; the handler
+   *  (modules/ai-usage/reads.controller.ts) feeds the route's unit chain, computed WITH the tenant. No allow-list change. */
   unitAncestors?: string[];
   /** P2-02/P2-06 — the person BEING acted upon, as distinct from the resource's owner or subject:
    *  the target of a `position` assign or a `role_grant` create/revoke. Backs the self-target DENY
@@ -189,6 +191,12 @@ export interface Resource {
    *  DENY matches nobody (fail-open for a DENY: an unfed caller loses nothing it had). A dropped allow-list line below makes the
    *  DENY never fire. */
   touchedLeadHolderIds?: string[];
+  /** AIP-15 (docs/PERMISSION-CONTRACT.md §58, owner ruling AIP-D18) -- the company's live lead-seat holders of its GM unit(s), for the
+   *  `ai_usage` kind's `read_company` (company totals, never people). Backs the `ai_usage_gm_seat` derived role
+   *  (`gmIds.exists(id, id == principal.id)`). Computed BY THE HANDLER per company (`modules/ai-usage/authz.ts` loadGmSeatIds: gmUnitIds +
+   *  loadSeatHoldersByNode), never from a body. Omitted -> [] -> contains nobody, so no GM matches (fail closed). A dropped allow-list line
+   *  below would silently deny the GM, so cerbos-ai-usage.test.ts pins that it is carried. */
+  gmIds?: string[];
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -348,6 +356,9 @@ function resourcePayload(r: Resource) {
       // unit self-edit DENY never fires, which is the unsafe direction, so a test pins that it is carried
       // (cerbos-org-structure-self-edit.test.ts).
       touchedLeadHolderIds: r.touchedLeadHolderIds ?? [],
+      // AIP-15. Listed here or it never reaches derived_roles.yaml's ai_usage_gm_seat (this is an allow-list; the handler builds the
+      // Resource through an object spread, where TypeScript's excess-property check does not fire). Fails closed: [] contains nobody.
+      gmIds: r.gmIds ?? [],
     },
   };
 }

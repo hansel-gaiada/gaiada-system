@@ -166,8 +166,13 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     // AIP-13b (2026-10-29) added `core.dept_assistant_preamble.{read,edit}`: a department head reads and edits their own unit's assistant
     // preamble (PERMISSION-CONTRACT §56). Unit-bounded like the rest; `manage` (the company tier's, how the owner reaches every unit) is
     // not in this bundle.
+    //
+    // AIP-15 (2026-10-30) added `core.ai_usage.{read_unit,lift_stop}`: a department head reads their own unit's AI usage (totals and
+    // people) and lifts its soft stop (PERMISSION-CONTRACT §58). Unit-bounded like the rest; `read_company` (company admins, the GM seat, the
+    // owner), `read_people` and `manage` (the owner's only) are not in this bundle.
     expect(keys).toEqual([
       "agency.campaign_part.update",
+      "core.ai_usage.lift_stop", "core.ai_usage.read_unit",
       "core.creative_asset.decide_review",
       "core.dept_assistant_preamble.edit", "core.dept_assistant_preamble.read",
       "core.dept_notice.edit", "core.dept_notice.post", "core.dept_notice.withdraw",
@@ -202,6 +207,9 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     expect(keys).not.toContain("reports.dept_kpi_target.appraisal_assess");
     expect(keys).not.toContain("core.dept_notice.read");
     expect(keys).not.toContain("core.dept_assistant_preamble.manage");
+    expect(keys).not.toContain("core.ai_usage.read_company");
+    expect(keys).not.toContain("core.ai_usage.read_people");
+    expect(keys).not.toContain("core.ai_usage.manage");
   });
 
   it("ACCEPTANCE: a legitimate client@company grant is completely unaffected", async () => {

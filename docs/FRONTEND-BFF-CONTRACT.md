@@ -14044,7 +14044,7 @@ At phone width the sections stack. By keyboard every control is in order and foc
 - the routes refuse an officer and a `company_admin` (403); the preview saves nothing; the history shows its diffs;
 - the page: phone width, keyboard, axe in light and dark, DEMO_MODE.
 
-## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
+## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrived with AIP-15 (§66, which also adds `unit_node_id` to every row) and the price editor comes later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
 
 ### 64.1 Who writes a row, and how a caller cannot forget
 
@@ -14183,3 +14183,122 @@ text. `unit_node_id` is an org-blob node id (no FK; the application validates it
 ### 65.6 Capability inventory and tools
 
 Two routes under `/api/:tenantId/departments/:unitNodeId/`, no MCP tool, no module tool, no n8n flow.
+
+## 66. AI usage reads: your own, a department's, the company's (AIP-15a and AIP-15, 2026-10-30; plan `docs/plans/2026-10-27-ai-plan.md` §6.3 items 0 to 3, AIP-D6, AIP-D18) — `platform-nest/src/modules/ai-usage/{reads.controller,reads.service,authz}.ts` (new), `modules/ai-usage/{writer,gateway-usage,ingest}.ts`; migrations `202610300300_ai_usage_unit_node.sql` and `202610300310_iam_ai_usage_permissions.sql` — **STATUS: BUILT, PROTOTYPED (server only: the pure suites `reads.service.test.ts`, `ai-usage-unit-node-migration.test.ts`, `writer.test.ts`, `gateway-usage.test.ts`, `ingest.test.ts` and the static half of `cerbos-ai-usage.test.ts` ran locally; the HTTP, DB and live-Cerbos suites `reads.http.test.ts`, `ai-usage-unit-node.db.test.ts`, `ingest.http.test.ts`, `ai-usage.db.test.ts` and `cerbos-ai-usage.test.ts` run on the Linux CI gate). The screens are AIP-16 and AIP-05. The authorization is PERMISSION-CONTRACT §58**
+
+Three reads of `ai_usage_events` (§64) for the usage screens, by **UTC calendar month**. Counts and money only: no answer ever carries text, a
+thread or run id, or the `task` label. Every route is `GET`, tenant-scoped, and answers 401 without credentials.
+
+### 66.1 Every row records the person's home department (AIP-15a)
+
+- New column `ai_usage_events.unit_node_id text NULL` (CHECK: NULL or 1 to 120 characters; index `(tenant_id, unit_node_id, occurred_at)`): the
+  org node id of the person's **primary placement on the day of the call** (`org_unit_memberships.unit_node_id`), whether or not the node has an
+  `org_units` row. Measured live before the change: 0 of 41,993 rows had a department, because `org_unit_id` is filled only for a node with an
+  `org_units` row.
+- **The bill goes to the person's HOME department, never the page the turn came from.** Both writers fill it from the same cached read
+  (`resolvePrimaryPlacement`, 10 minutes, never throws, never slows a call): `recordGatewayCall` and the ingest route (§64.6). A call site's own
+  `orgUnitId` still wins for `org_unit_id` but never changes `unit_node_id`; the ingest route ignores a supplied `unitNodeId` as it ignores
+  `orgUnitId`. A node id that is not a label (`LABEL_PATTERN`) is recorded as null rather than costing the row.
+- The writer accepts `unitNodeId` (a label) and writes it as the LAST insert column. `org_unit_id` is written exactly as before.
+- Append-only is unchanged and covers the new column (an UPDATE that sets, changes or clears it is refused); erasure keeps it.
+- `ai_usage_daily` gains `unit_node_id` as its last column (and in its grouping), still `security_invoker`.
+- **No backfill.** Old rows have no node; the reads below count an old row through `org_units.node_id` of its `org_unit_id` when it has one, and
+  otherwise show it as "No department recorded".
+
+### 66.2 The month, and the figures
+
+`?month=YYYY-MM` (UTC: `[YYYY-MM-01T00:00Z, first instant of the next month)`); absent, the current UTC month. Anything else is **400**
+`{ message, field: "month" }`: empty, repeated, a day, a month outside 01 to 12, a year outside 1970 to 9998. Validated **after**
+authorization: a refused caller always gets 403.
+
+Every group carries the same figures:
+
+```
+{
+  "calls": 12,
+  "promptTokens": 3400 | null,        // a SUM; null when no call in the group reported tokens (unknown, never 0)
+  "completionTokens": 900 | null,
+  "costUsd": "0.00106000" | null,     // an exact decimal string; null when no call in the group had a cost
+  "estimatedTokenCalls": 2,           // calls whose tokens are a 4-characters-per-token estimate: mark the tokens as estimated when > 0
+  "noTokenCalls": 1,                  // calls with no token counts at all
+  "noCostCalls": 3,                   // calls with no cost: the part of costUsd that is unknown
+  "providerCostCalls": 8,             // costs from the provider's own figure (AIP-D11 "provider")
+  "tableCostCalls": 1                 // costs our price table filled ("table")
+}
+```
+
+Days are UTC days, listed only when they have a row (`byDay`: `[{ "day": "2026-10-03", ...figures }]`, oldest first). Surfaces are the closed
+vocabulary (`assistant`, `compaction`, `title`, `agent`, `knowledge`, `search`, `bot`, `other`); split by surface, because one "calls" total over
+embeds and replies means nothing.
+
+Every answer carries `"capabilities": { "canSeePeople": bool, "canManage": bool, "canLiftStop": bool }` for the screens (advisory; every real
+action is authorized again). `canSeePeople`: on a unit, the answer has `people`; elsewhere, the caller holds `read_people` (the owner, the
+superadmin). `canManage`: `manage`. `canLiftStop`: on a unit, `manage` or `lift_stop` on that unit; elsewhere `manage` (lifting any stop).
+
+### 66.3 `GET /api/:tenantId/ai-usage/me`
+
+`read_own` (every staff member; PERMISSION §58). Only rows with `user_id = caller`.
+
+```
+{ "month": "2026-10", "totals": {figures}, "bySurface": [{ "surface": "assistant", ...figures }], "byDay": [...], "capabilities": {...} }
+```
+
+| Status | When |
+|---|---|
+| 200 | a staff member of the company (company_admin, manager, member, viewer, the owner, the superadmin) |
+| 400 | a bad `month` |
+| 403 | not staff of this company (another company's people, a client contact), or low assurance |
+
+### 66.4 `GET /api/:tenantId/ai-usage/units/:unitNodeId`
+
+The unit counts its **whole subtree** (every row whose home node is a descendant of the unit in the per-tenant closure, the unit included: a
+division's rows add to its department).
+
+```
+{
+  "month": "2026-10",
+  "unit": { "unitNodeId": "d-web", "name": "Web Dev" | null },       // the name from the company's org tree today
+  "totals": {figures}, "bySurface": [...], "byModel": [{ "provider": "openai" | null, "model": "…" | null, ...figures }], "byDay": [...],
+  "people": [{ "userId": "<uuid>", "name": "…" | null, ...figures }],   // ONLY with read_people or read_unit; otherwise the key is ABSENT
+  "capabilities": {...}
+}
+```
+
+`people` lists the persons of the subtree's rows, by name. A row whose person was erased counts in the totals and never as a person.
+
+| Status | When |
+|---|---|
+| 200 with `people` | the owner or the superadmin (`read_people`); the head of the unit or of an enclosing unit (`read_unit`) |
+| 200 without `people` | company_admin or the GM (`read_company`) |
+| 400 | a bad `month` (after the decision) |
+| 403 | anyone else: a member, a head of a sibling or only of a unit below, another company's people. **A head is refused before anything says whether the unit exists**: an unknown id has no ancestry, so no lead grant matches |
+| 404 `unit_not_found` | an authorized company-tier caller names a node that is not in this company's org tree |
+
+### 66.5 `GET /api/:tenantId/ai-usage/company`
+
+`read_company` or `read_people`: company_admin, the GM, the owner, the superadmin (AIP-D18). Never a person.
+
+```
+{
+  "month": "2026-10",
+  "totals": {figures},
+  "byDepartment": [{ "unitNodeId": "d-web" | null, "name": "Web Dev" | null, ...figures }],  // per HOME node (the exact node, not rolled up);
+                                                       // unitNodeId null = "No department recorded" (rows with a person but no node)
+  "noPerson": [{ "surface": "knowledge", ...figures }], // "Company, no person": rows with neither a person nor a node, by surface
+  "byModel": [...], "bySurface": [...], "byDay": [...],
+  "capabilities": {...}
+}
+```
+
+Each `byDepartment` line links to its unit view (66.4). The budget lines are added by AIP-17b.
+
+| Status | When |
+|---|---|
+| 200 | company_admin, the GM (the live lead seat of the company's GM unit), the owner, the superadmin |
+| 400 | a bad `month` (after the decision) |
+| 403 | anyone else: a department head (heads read their own unit, 66.4), a member, another company's people |
+
+### 66.6 Capability inventory and tools
+
+Three read routes under `/api/:tenantId/ai-usage/`, no MCP tool, no module tool, no n8n flow. No write route yet (`manage` and `lift_stop`
+arrive with AIP-17b and AIP-18).

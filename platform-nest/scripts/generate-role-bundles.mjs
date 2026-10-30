@@ -110,9 +110,14 @@ const REAL_ROLES = [
  *  Each has a perm_* mirror, is uiGrantable:false, is named by no real role's rule, and is absent from company_admin's
  *  bundle: cerbos-social-pipeline.test.ts pins all four. Kept byte-aligned with the migration's DO block.
  *  AIP-D5 holders (PERMISSION-CONTRACT §55.1, owner ruling 2026-10-29: "only superadmin and owner"): + the named-provider key,
- *  on the same four terms; cerbos-assistant-brain.test.ts pins it and 202610291200 is its migration. */
+ *  on the same four terms; cerbos-assistant-brain.test.ts pins it and 202610291200 is its migration.
+ *  AIP-15 (PERMISSION-CONTRACT §58, owner rulings AIP-D6 and AIP-D18): + `core.ai_usage.read_people` (per-person usage in every unit)
+ *  and `core.ai_usage.manage` (budgets, allowances, lifting any stop), on the same four terms; cerbos-ai-usage.test.ts pins both and
+ *  202610300310 is their migration. */
 const OWNER_EXTENSION = [
   "assistant.brain.choose_provider",
+  "core.ai_usage.manage",
+  "core.ai_usage.read_people",
   "social.engagement.budget",
   "social.engagement.plan",
   "social.post.approve",
@@ -241,6 +246,11 @@ const DIRECT = {
   social_copywriter: ["social_copywriter"],
   social_designer: ["social_designer"],
   social_approver_seat: [],
+  // AIP-15 (PERMISSION-CONTRACT §58): the GM seat on the `ai_usage` kind maps to NO real role, exactly as social_approver_seat: a seat is a
+  // relationship computed per company from that company's own positions (fed as `gmIds`), not a grant, so no bundle carries a key through
+  // it; its reach is proved by the live matrix (cerbos-ai-usage.test.ts). Kept byte-aligned across generate-role-bundles.mjs and
+  // role-permission-parity.db.test.ts.
+  ai_usage_gm_seat: [],
 };
 
 const LMS_KINDS = new Set(["lms_course", "lms_enrollment"]);
@@ -582,7 +592,8 @@ export function generate() {
   if (!roles.company_admin) {
     throw new Error("generate-role-bundles: company_admin missing — cannot derive the owner envelope");
   }
-  // SCP-1b (§53.11): plus OWNER_EXTENSION (the five approver-only keys, and AIP-D5's named-provider key, §55.1). Each must be a
+  // SCP-1b (§53.11): plus OWNER_EXTENSION (the five approver-only keys, AIP-D5's named-provider key, §55.1, and AIP-15's two owner-only
+  // ai_usage keys, §58). Each must be a
   // catalog key and must NOT already be in company_admin's envelope (else the extension would be a silent no-op hiding a widened
   // company_admin).
   for (const k of OWNER_EXTENSION) {

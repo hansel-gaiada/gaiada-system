@@ -143,7 +143,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // M5-W1q (2026-10-27): +1 grantable (webdev.webdesk_media_asset.review on the EXISTING webdesk_media_asset kind, in the existing `webdesk_media_library` group). 482 -> 483.
     // AIP-08b (2026-10-28, AIP-D5): +1 grantable (assistant.brain.choose_provider on the NEW assistant_brain kind, in 1 NEW authoring group `assistant_choose_provider`, not sensitive, not advancedOnly). 483 -> 484.
     // AIP-13b (2026-10-29, AIP-D10): +3 grantable (core.dept_assistant_preamble.{read,edit,manage} on the NEW dept_assistant_preamble kind, in 1 NEW authoring group `assistant_dept_preamble`, not sensitive, not advancedOnly). 484 -> 487.
-    expect(grantable.length).toBe(487);
+    // AIP-15 (2026-10-30, AIP-D6/AIP-D18): +6 grantable (core.ai_usage.{read_own,read_unit,read_company,read_people,manage,lift_stop} on the NEW ai_usage kind, in 1 NEW authoring group `ai_usage`, not sensitive, not advancedOnly; read_people and manage are uiGrantable false). 487 -> 493.
+    expect(grantable.length).toBe(493);
     expect(relationshipKeys.size).toBe(15);
   });
 

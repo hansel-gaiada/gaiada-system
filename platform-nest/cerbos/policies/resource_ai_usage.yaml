@@ -1,0 +1,126 @@
+# AIP-15 (docs/plans/2026-10-27-ai-plan.md §6.3 items 2 and 3; owner rulings AIP-D6, AIP-D16, AIP-D18; docs/PERMISSION-CONTRACT.md §58;
+# docs/FRONTEND-BFF-CONTRACT.md §66) — authz for the NEW `ai_usage` resource kind (core, no module): ONE company's AI usage record
+# (ai_usage_events: counts, labels and money, never any text), narrowed to one org unit when the handler feeds `unitAncestors`. Six actions:
+#   read_own     — the caller's OWN figures. Every staff member of the company: company_admin, manager, member, viewer (one role rule);
+#                  the permission-native owner through its mirror. The ROUTE reads only `user_id = caller`, so this key never shows a peer.
+#   read_unit    — one unit's totals AND its per-person lines. The `org_unit_lead` of the unit or of an enclosing unit (its OWN rule over
+#                  `unitAncestors`, computed WITH the tenant by the handler). No mirror.
+#   read_company — company totals by department, model, surface and day; NO per-person lines. company_admin (role rule); the GM (the seat,
+#                  `ai_usage_gm_seat`, its own rule); the owner through its mirror.
+#   read_people  — per-person lines in EVERY unit. The OWNER ONLY (OWNER_EXTENSION, uiGrantable false, the AIP-D16 pattern): no role rule;
+#                  reached by its mirror alone. company_admin never holds it.
+#   manage       — budgets, the company alert figure, department modes, person allowances, lifting ANY stop (routes in a later ticket;
+#                  the key and the rule ship now). The OWNER ONLY, exactly as `read_people`.
+#   lift_stop    — lift one unit's soft stop (later ticket). The `org_unit_lead` of the unit or an enclosing unit (its own rule). No mirror.
+#                  The handler asks `manage` first (AIP-13b's key split), so the owner lifts any stop through `manage`.
+# The superadmin is `platform_admin`'s wildcard, as on every kind (AIP-D16 and AIP-D18 both name the superadmin).
+# NOBODY READS A PEER: a member reads only their own line (the route's `user_id = caller`); a head reads the people of their own subtree;
+# the GM and company admins read totals, never people; only the owner and the superadmin read every person.
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── EVERY ATTRIBUTE-DEPENDENT RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
+# `org_unit_lead` is its own rule on `read_unit` and on `lift_stop`, never mixed with a scope role and never with another action. Containment
+# is the derived role's: the grant's scopeId must be in `resource.attr.unitAncestors` (the unit and every ancestor, `loadUnitAncestors`), fed
+# by the HANDLER from the route's `:unitNodeId`. An id that is not in the org tree has no closure rows, so its ancestors are [] and no lead
+# grant matches: a head is refused (403) before anything says whether the unit exists. The GM seat is its own rule on `read_company`.
+#
+# ── THE TENANT TRAP ─────────────────────────────────────────────────────────────────────────────
+# An `org_unit` grant carries no tenant (the derived role checks the grant's own `tenantIds`), and node ids repeat across companies. So
+# EVERY rule keeps `variables.inTenant`, the handler computes `unitAncestors` WITH the tenant (the closure is per tenant), and `gmIds` is
+# computed per company from that company's own seats. The head of company A's `d-web` cannot read company B's `d-web`; the GM of company A
+# is not in company B's `gmIds`.
+#
+# ── THE GM IS A SEAT, NOT A GRANT (`ai_usage_gm_seat`, derived_roles.yaml) ─────────────────────────
+# `gmIds` = the live lead-seat holders of the company's GM unit(s) (`gmUnitIds` + `loadSeatHoldersByNode`, the SCP-1b shape), computed by
+# the handler (modules/ai-usage/authz.ts `loadGmSeatIds`), never from a body. A seat is a relationship: no bundle carries a key through it
+# (DIRECT maps it to no real role) and no perm_* mirror reads it. An unfed list ([]) contains nobody (fail closed). It reaches
+# `read_company` only: the GM reads totals, never people (AIP-D18).
+#
+# ── NO AUTOMATION OR BOT PRINCIPAL MANAGES OR LIFTS A STOP (the dept_notice / AIP-13b shape) ──────
+# `roles: ["user"]`, which every principal carries, so under deny-overrides it beats every ALLOW below, the platform_admin wildcard and
+# the perm mirror included. It reads `principal.attr.kind`; `has()` makes a raw caller that omits the attribute evaluate to false. The reads
+# are deliberately NOT listed.
+#
+# ── THE OWNER AND THE PERMISSION ARM ────────────────────────────────────────────────────────────
+# `owner` is permission-native (IAM-04c §3: ZERO policy rules; its reach is its bundle through a `perm_*` mirror). Four mirrors:
+#   read_own, read_company — reached in the role arm only through scope-only rules (company_admin, manager, member, viewer, all
+#                            `inTenant && notLow`), so a flat mirror grants exactly the role arm's reach; the owner holds both keys
+#                            through company_admin's envelope.
+#   read_people, manage    — named by NO role rule at all; the key is in OWNER_EXTENSION (scripts/generate-role-bundles.mjs), uiGrantable
+#                            false, so no role edit, position or request can hand it out. The mirror is the only way in (the AIP-D16 /
+#                            SCP-1b owner-only pattern).
+# NO read_unit / lift_stop mirror, on purpose: both are reached by `org_unit_lead` through an attribute-dependent rule, the lead holds both
+# keys in its bundle, and a flat `perms` mirror cannot tell "holds the key through a lead grant over ONE unit" from a company-wide grant
+# (permission-arm-hazard-scan Pattern B, iam-04-reg1-mirror-reach-invariant): a mirror would let a head read EVERY unit.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: ai_usage
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # Every staff member of the company reads their OWN figures (AIP-D18: "the rest can see their own usage").
+    - actions: ["read_own"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # company_admin reads the company's totals (AIP-D18). Never read_people, never manage.
+    - actions: ["read_company"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The GM (the live lead seat of the company's GM unit) reads the company's totals. Its OWN rule, never mixed.
+    - actions: ["read_company"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["ai_usage_gm_seat"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Department head of the unit or an enclosing one: OWN rule per action, never mixed (HIER-2 §1.4). The unit's subtree only: an unfed
+    # `unitAncestors` contains nothing, so an unfed resource denies.
+    - actions: ["read_unit"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["lift_stop"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════ automation and bot principals never manage or lift a stop ══════════════
+    # Same `roles: ["user"]` DENY shape as resource_dept_notice.yaml, so it beats the platform_admin wildcard and every ALLOW (the
+    # perm mirror too) under deny-overrides. The four reads are deliberately NOT listed.
+    - actions: ["manage", "lift_stop"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # =========== permission-matching arm: read_own, read_company, read_people, manage (see the header) =====================
+    # Generic global-or-company mirrors, one per action, each its own rule. The platform_admin wildcard is deliberately NOT mirrored (IAM-04c:
+    # the tier bypass never enters the permission catalog). NO read_unit / lift_stop mirror.
+    - actions: ["read_own"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_ai_usage_read_own"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["read_company"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_ai_usage_read_company"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["read_people"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_ai_usage_read_people"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["manage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_ai_usage_manage"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
