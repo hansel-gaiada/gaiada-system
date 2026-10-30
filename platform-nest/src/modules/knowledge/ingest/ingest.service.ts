@@ -104,8 +104,10 @@ export async function runPublicIngest(): Promise<IngestRunResult> {
   }
 
   let docs: IngestDocument[] = [];
+  const crawlStarted = Date.now();
   try {
     const pages = await crawlSite({ sites: cfg.publicSites, maxPages: cfg.publicMaxPages, tenantId: cfg.publicTenantId });
+    result.crawlMs = Date.now() - crawlStarted;
     docs = pagesToDocuments(pages, cfg.publicTenantId);
   } catch (err) {
     result.errors.push(`crawl failed: ${(err as Error).message}`);

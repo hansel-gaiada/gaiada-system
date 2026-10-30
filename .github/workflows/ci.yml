@@ -209,10 +209,22 @@ jobs:
           npm ci
           npm run typecheck
           npm test
+      # AIP-03d (2026-10-30): ai-agents' knowledge, graph and episodic suites self-skip without a test DB, and this step gave them
+      # none, so 31 of 34 store tests never ran here and 5 service tests that failed on pgvector went unseen. They now get pgvector
+      # on Postgres 15, the live knowledge store's own major version (live: 15.18 + pgvector 0.8.5; 0.8.1 is the nearest image).
       - name: ai-agents — ci, typecheck, test
         if: ${{ !cancelled() && needs.plan.outputs.ai_agents == 'true' }}
         working-directory: ai-agents
+        env:
+          DATABASE_URL_TEST: postgres://postgres:postgres@localhost:55433/postgres
         run: |
+          docker run -d --name ai-agents-pg -p 55433:5432 -e POSTGRES_PASSWORD=postgres \
+            pgvector/pgvector:0.8.1-pg15 -c fsync=off -c max_connections=100
+          # pg_isready can pass during initdb's temporary server, so retry the extension until the real one answers.
+          for i in $(seq 1 60); do
+            docker exec ai-agents-pg psql -U postgres -qc "CREATE EXTENSION IF NOT EXISTS vector" 2>/dev/null && break || sleep 1
+          done
+          docker exec ai-agents-pg psql -U postgres -tAc "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
           npm ci
           npm run typecheck
           npm test

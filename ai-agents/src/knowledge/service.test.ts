@@ -9,13 +9,18 @@ import { TEST_DB_URL as url, testDbReachable } from "./testdb";
 const dbUp = await testDbReachable();
 const T_A = "bbbbbbbb-0000-4000-8000-000000000001";
 
+/** The embedding width these tests use. The store must be built with the SAME `dim`: on pgvector the column is `vector(dim)` and
+ *  a vector of another length is a hard INSERT error, while plain Postgres (a float array) accepts any length. Until AIP-03d
+ *  (2026-10-30) the stores here took the default 768 against 32-wide vectors, so this file passed only on plain Postgres. */
+const DIMS = 32;
 async function hashEmbed(text: string): Promise<number[]> {
-  const v = new Array<number>(32).fill(0);
+  const v = new Array<number>(DIMS).fill(0);
   for (const t of text.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length > 2)) {
     let h = 0;
     for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
-    v[h % 32] += 1;
+    v[h % DIMS] += 1;
   }
+  if (!v.some((x) => x !== 0)) v[DIMS - 1] = 1; // pgvector's cosine of an all-zero vector is NaN
   return v;
 }
 
@@ -26,7 +31,9 @@ describe.skipIf(!dbUp)("knowledge service", () => {
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: url });
-    const store = new KnowledgeStore(pool, hashEmbed);
+    // The suites share one test database and run one file at a time; store.test.ts leaves a table of ITS width behind.
+    await pool.query("DROP TABLE IF EXISTS knowledge_chunks");
+    const store = new KnowledgeStore(pool, hashEmbed, { dim: DIMS });
     await store.init();
     const graph = new KnowledgeGraph(pool);
     await pool.query("DROP TABLE IF EXISTS graph_nodes, graph_edges, agent_episodes, agent_episode_feedback");
@@ -190,6 +197,7 @@ describe.skipIf(!dbUp)("knowledge service: embedding budget refusal", () => {
         if (refuse) throw new GatewayBudgetError();
         return hashEmbed(t);
       },
+      { dim: DIMS },
     );
     await store.init();
     knowledgeConfig.serviceToken = "know-token";

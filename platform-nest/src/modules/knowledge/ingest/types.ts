@@ -44,6 +44,9 @@ export interface IngestRunResult {
    *  the tiers after it did not run. */
   aborted?: boolean;
   abortReason?: AbortReason;
+  /** Public tier only: milliseconds the crawl took before the first `/ingest` (AIP-03e). The crawl fetches every page before
+   *  it writes anything, so without this a slow site and a slow store look the same from the outside. */
+  crawlMs?: number;
   startedAt: string;
   finishedAt: string;
 }
