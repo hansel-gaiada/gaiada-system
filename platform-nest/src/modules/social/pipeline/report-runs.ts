@@ -84,7 +84,7 @@ async function loadRun(c: PoolClient, tenantId: string, runId: string): Promise<
 const approverIdsOf = (tenantId: string): Promise<string[]> => withTenants([tenantId], (c) => loadSocialApproverIds(c, tenantId), SOCIAL);
 
 /** One of the four (`social_engagement` · `plan`), asked as a plain check (never a throw); a persona acting for a person needs both. */
-async function mayPlan(principal: Principal, tenantId: string, approverIds: string[]): Promise<boolean> {
+export async function mayPlan(principal: Principal, tenantId: string, approverIds: string[]): Promise<boolean> {
   const resource = socialEngagementResource(tenantId, approverIds);
   if (!(await check(principal, resource, "plan")).allow) return false;
   if (principal.actFor && principal.actFor.userId !== principal.userId) {
@@ -95,7 +95,7 @@ async function mayPlan(principal: Principal, tenantId: string, approverIds: stri
 }
 
 /** The person a principal stands for: the person a persona acts for, else the principal itself. */
-const personOf = (p: Principal): string | null => (p.actFor && p.actFor.userId !== p.userId ? p.actFor.userId : p.userId);
+export const personOf = (p: Principal): string | null => (p.actFor && p.actFor.userId !== p.userId ? p.actFor.userId : p.userId);
 
 /** The run as the progress read answers it (§63.24.5), with the run's spend summed from `ai_usage_events` by `run_id` (SCP-Q40). */
 export interface RunProgress {
@@ -145,6 +145,8 @@ export interface StartRunOptions {
   scheduleId?: string | null;
   /** The run's `via` when it is not the request's (a schedule's `{automation: 'report_schedule', scheduleId, missed?}`). */
   via?: Record<string, unknown> | null;
+  /** False for a schedule's `chosen` list: a chosen engagement deleted since is left out instead of a 400 (`planReportRun`). */
+  strictChosen?: boolean;
 }
 export type StartRunAnswer =
   | { status: 202; body: { runId: string; kind: string; period: string; total: number; clients: Array<{ engagementId: string; clientName: string }> } }
@@ -153,7 +155,7 @@ export type StartRunAnswer =
 const clientsOf = (entries: readonly RunEntry[]) => entries.map((e) => ({ engagementId: e.engagementId, clientName: e.clientName }));
 
 /** The run's `via`: the request's channel and agent (as `metadata.via`), and the person a persona acted for. */
-function viaOfRequest(principal: Principal): Record<string, unknown> | null {
+export function viaOfRequest(principal: Principal): Record<string, unknown> | null {
   const via: Record<string, unknown> = principal.via ? { ...principal.via } : {};
   if (principal.actFor && principal.actFor.userId !== principal.userId) via.actFor = principal.actFor.userId;
   return Object.keys(via).length > 0 ? via : null;
@@ -179,8 +181,46 @@ export async function startReportRun(principal: Principal, tenantId: string, bod
     }
   }
 
-  // 400: the kind, the period (every kind frozen at create needs it ended, the monthly included: a run over a period still going would
-  // freeze half of it), the chosen clients.
+  const plan = await planReportRun(principal, tenantId, approverIds, body, { strictChosen: opts.strictChosen !== false });
+  const { kind, period, entries } = plan;
+
+  const trigger = opts.trigger ?? "person";
+  const via = opts.via !== undefined ? opts.via : viaOfRequest(principal);
+  try {
+    await withTenants([tenantId], (c) => insertReportRun(c, tenantId, plan, {
+      runId, requestedBy: principal.userId!, via, trigger, scheduleId: opts.scheduleId ?? null,
+    }), SOCIAL);
+  } catch (e) {
+    if (isUniqueViolation(e, "social_report_runs_pkey") && body.id !== undefined) {
+      // The same id replayed at the same moment: answer the run the first one made.
+      const prior = await withTenants([tenantId], (c) => loadRun(c, tenantId, runId), SOCIAL);
+      if (prior && (await maySeeRun(principal, tenantId, prior))) {
+        return { status: 200, body: { ...progressOf(prior, await runUsage(tenantId, runId)), clients: clientsOf(prior.results ?? []) } };
+      }
+      throw new NotFoundException({ message: "run_not_found" });
+    }
+    throw e;
+  }
+
+  // Make it the company's running run, or leave it queued behind the one that is; either way the work is not awaited.
+  await launchReportRun(tenantId, runId);
+  return { status: 202, body: { runId, kind, period, total: entries.length, clients: clientsOf(entries) } };
+}
+
+/** A run decided but not yet written: its kind and period, its listing (decided once) and the company's rules it is made under. */
+export interface PlannedRun { kind: PeriodicKind; period: string; entries: RunEntry[]; rulesRef: string }
+
+/**
+ * The checks after the gate and the listing, with no write (shared by `POST reports/generate`, a schedule's "Run now" and the schedule
+ * job, W5-A5): 400 for the kind, the period (every kind frozen at create needs it ended, the monthly included: a run over a period still
+ * going would freeze half of it) and the chosen clients; 409 `report_kind_off` / `ai_drafting_off` from the company's current rules; then
+ * the clients `principal` may draft for (report-run-plan.ts). With `strictChosen` false (a schedule's `chosen` list, whose clients may have
+ * been deleted since it was set), a chosen engagement that no longer exists is left out instead of a 400.
+ */
+export async function planReportRun(
+  principal: Principal, tenantId: string, approverIds: string[], body: Pick<StartRunBody, "kind" | "period" | "engagementIds">,
+  o: { strictChosen?: boolean } = {},
+): Promise<PlannedRun> {
   if (typeof body.kind !== "string" || !(PERIODIC_KINDS as readonly string[]).includes(body.kind)) invalidField("kind");
   const kind = body.kind as PeriodicKind;
   const company = await withTenants([tenantId], (c) => socialRules(c, tenantId), SOCIAL);
@@ -218,50 +258,63 @@ export async function startReportRun(principal: Principal, tenantId: string, bod
       [tenantId, chosen, planner, person?.toLowerCase() ?? null]);
     return r.rows;
   }, SOCIAL);
-  if (chosen && chosen.some((id) => !candidates.some((c) => c.id.toLowerCase() === id))) invalidField("engagementIds");
+  if (o.strictChosen !== false && chosen && chosen.some((id) => !candidates.some((c) => c.id.toLowerCase() === id))) invalidField("engagementIds");
   const entries = planRunEntries(
     candidates.map((c): RunCandidate => ({
       engagementId: c.id, clientName: c.client_name, status: c.status, isInternal: c.is_internal === true, ownerId: c.owner_id, reportKinds: c.report_kinds ?? [],
     })),
     { kind, mayPlan: planner, personId: person, chosen },
   );
+  return { kind, period, entries, rulesRef: rulesRefFor(company) };
+}
 
-  const trigger = opts.trigger ?? "person";
-  const via = opts.via !== undefined ? opts.via : viaOfRequest(principal);
-  const done = entries.length - pendingEntries(entries).length;
+export interface RunInsert {
+  runId: string;
+  /** The person the run acts as (`requested_by`): the caller, or a schedule's owner. */
+  requestedBy: string;
+  via: Record<string, unknown> | null;
+  trigger: RunTrigger;
+  scheduleId: string | null;
+}
+
+/**
+ * Write a planned run `queued` on `c`, inside the caller's transaction (the schedule job's row transaction, W5-A5), under a savepoint so a
+ * refusal leaves that transaction usable: 409 `generation_running` `{runId}` while a run of the same company, kind and period is queued or
+ * running (`ux_social_report_runs_active`), 409 `schedule_period_has_run` `{runId}` when the schedule already has a run of the period
+ * (`ux_social_report_runs_schedule`). Any other error (a replayed primary key included) is thrown as it is. Nothing is started here: after
+ * the transaction commits, `launchReportRun`.
+ */
+export async function insertReportRun(c: PoolClient, tenantId: string, plan: PlannedRun, ins: RunInsert): Promise<void> {
+  const done = plan.entries.length - pendingEntries(plan.entries).length;
+  await c.query("SAVEPOINT social_report_run_insert");
   try {
-    await withTenants([tenantId], (c) => c.query(
+    await c.query(
       `INSERT INTO social_report_runs (id, tenant_id, kind, period, requested_by, via, rules_ref, trigger, schedule_id, status, total, done_count, results, origin_site)
        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13)`,
-      [runId, tenantId, kind, period, principal.userId, via === null ? null : JSON.stringify(via), rulesRefFor(company), trigger,
-        opts.scheduleId ?? null, entries.length, done, JSON.stringify(entries), config.originSite]), SOCIAL);
+      [ins.runId, tenantId, plan.kind, plan.period, ins.requestedBy, ins.via === null ? null : JSON.stringify(ins.via), plan.rulesRef, ins.trigger,
+        ins.scheduleId, plan.entries.length, done, JSON.stringify(plan.entries), config.originSite]);
   } catch (e) {
+    await c.query("ROLLBACK TO SAVEPOINT social_report_run_insert");
     if (isUniqueViolation(e, "ux_social_report_runs_active")) {
-      const active = await withTenants([tenantId], (c) => c.query<{ id: string }>(
+      const active = await c.query<{ id: string }>(
         `SELECT id::text AS id FROM social_report_runs WHERE tenant_id = $1 AND kind = $2 AND period = $3 AND status IN ('queued','running') LIMIT 1`,
-        [tenantId, kind, period]), SOCIAL);
+        [tenantId, plan.kind, plan.period]);
       throw new ConflictException({ message: "generation_running", detail: { runId: active.rows[0]?.id ?? null } });
     }
     if (isUniqueViolation(e, "ux_social_report_runs_schedule")) {
-      const prior = await withTenants([tenantId], (c) => c.query<{ id: string }>(
+      const prior = await c.query<{ id: string }>(
         `SELECT id::text AS id FROM social_report_runs WHERE tenant_id = $1 AND schedule_id = $2 AND period = $3 LIMIT 1`,
-        [tenantId, opts.scheduleId ?? null, period]), SOCIAL);
+        [tenantId, ins.scheduleId, plan.period]);
       throw new ConflictException({ message: "schedule_period_has_run", detail: { runId: prior.rows[0]?.id ?? null } });
-    }
-    if (isUniqueViolation(e, "social_report_runs_pkey") && body.id !== undefined) {
-      // The same id replayed at the same moment: answer the run the first one made.
-      const prior = await withTenants([tenantId], (c) => loadRun(c, tenantId, runId), SOCIAL);
-      if (prior && (await maySeeRun(principal, tenantId, prior))) {
-        return { status: 200, body: { ...progressOf(prior, await runUsage(tenantId, runId)), clients: clientsOf(prior.results ?? []) } };
-      }
-      throw new NotFoundException({ message: "run_not_found" });
     }
     throw e;
   }
+  await c.query("RELEASE SAVEPOINT social_report_run_insert");
+}
 
-  // Make it the company's running run, or leave it queued behind the one that is; either way the work is not awaited.
+/** Start a committed run: make it the company's running run and work it in this process, or leave it queued behind the one that runs. */
+export async function launchReportRun(tenantId: string, runId: string): Promise<void> {
   if (await promoteRun(tenantId, runId)) void executeReportRun(tenantId, runId);
-  return { status: 202, body: { runId, kind, period, total: entries.length, clients: clientsOf(entries) } };
 }
 
 /** queued -> running, when the company has no running run (`ux_social_report_runs_running` decides). True when this call promoted it. */
