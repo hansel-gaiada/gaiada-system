@@ -9,7 +9,10 @@
 //     labels, counts or money, and never a database error's text (a CHECK violation's detail echoes the failing row).
 //   * Written under the event's own company through withTenants([tenantId]), the one way to touch tenant data. The table is core (no
 //     module wall), so no `modules` option is needed from any caller.
-//   * Reads are not here. They arrive with AIP-15 behind a Cerbos kind `ai_usage`; by AIP-D6 a person never reads their own line.
+//   * Reads are not here: AIP-15's routes (reads.controller.ts) read the table behind the Cerbos kind `ai_usage` (AIP-D18: a person reads
+//     their own figures; a head their unit's people; the owner every person).
+//   * AIP-15a: `unitNodeId` is the person's HOME org node, a label like the others. The bill goes to the department the person works in,
+//     never the page the turn came from, so no caller takes it from a request.
 //
 // AIP-04: an event with both token counts, a provider and a model but NO cost is costed from the price table (prices.ts) and labelled
 // cost_source 'table'. A cost the caller supplied is never overwritten. No price in force leaves the cost NULL.
@@ -41,6 +44,9 @@ export interface AiUsageEvent {
   userId?: string | null;
   /** The department (an org_units id), when known. */
   orgUnitId?: string | null;
+  /** AIP-15a: the org node id of the person's HOME placement (org_unit_memberships.unit_node_id), with or without an org_units row. A label
+   *  (LABEL_PATTERN, 1 to 120 characters). The callers resolve it from the person, never from the page the call came from. */
+  unitNodeId?: string | null;
   surface: AiUsageSurface;
   capability: AiUsageCapability;
   /** The routing class and tier (AIP-06): labels. */
@@ -64,6 +70,7 @@ export interface AiUsageEvent {
 export const AI_USAGE_EVENT_KEYS = [
   "tenantId", "occurredAt", "userId", "orgUnitId", "surface", "capability", "task", "tier", "provider", "model",
   "promptTokens", "completionTokens", "tokensSource", "costUsd", "costSource", "outcome", "threadId", "runId", "gatewayProviderHint",
+  "unitNodeId",
 ] as const;
 
 const KEY_SET: ReadonlySet<string> = new Set(AI_USAGE_EVENT_KEYS);
@@ -105,7 +112,7 @@ export function validateAiUsageEvent(input: unknown): ValidationResult {
     return fail("costSource is not in its vocabulary");
   }
 
-  for (const f of ["task", "tier", "provider", "model", "gatewayProviderHint"] as const) {
+  for (const f of ["task", "tier", "provider", "model", "gatewayProviderHint", "unitNodeId"] as const) {
     if (!absent(e[f]) && (typeof e[f] !== "string" || !LABEL_PATTERN.test(e[f] as string))) {
       return fail(`${f} must be a label of 1 to 120 characters from A-Z a-z 0-9 . _ : / @ + - (no spaces)`);
     }
@@ -140,8 +147,8 @@ export interface AiUsageInsert {
 export const AI_USAGE_INSERT_SQL =
   `INSERT INTO ai_usage_events
      (id, tenant_id, occurred_at, user_id, org_unit_id, surface, capability, task, tier, provider, model,
-      prompt_tokens, completion_tokens, tokens_source, cost_usd, cost_source, outcome, thread_id, run_id, gateway_provider_hint)
-   VALUES ($1, $2, COALESCE($3::timestamptz, now()), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`;
+      prompt_tokens, completion_tokens, tokens_source, cost_usd, cost_source, outcome, thread_id, run_id, gateway_provider_hint, unit_node_id)
+   VALUES ($1, $2, COALESCE($3::timestamptz, now()), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`;
 
 /** The parameters of the one INSERT, in column order. Pure. Assumes a validated event. Absent fields are NULL (unknown, never zero). */
 export function buildAiUsageInsert(event: AiUsageEvent, id: string): AiUsageInsert {
@@ -172,6 +179,8 @@ export function buildAiUsageInsert(event: AiUsageEvent, id: string): AiUsageInse
       n(event.threadId),
       n(event.runId),
       n(event.gatewayProviderHint),
+      // AIP-15a: appended LAST, so every earlier parameter keeps its position.
+      n(event.unitNodeId),
     ],
   };
 }
@@ -255,6 +264,8 @@ export interface AiUsageContext {
   tenantId: string;
   userId?: string | null;
   orgUnitId?: string | null;
+  /** AIP-15a: the person's home org node (see AiUsageEvent.unitNodeId). */
+  unitNodeId?: string | null;
   surface: AiUsageSurface;
   threadId?: string | null;
   runId?: string | null;
@@ -285,6 +296,7 @@ export function buildAiUsageEvent(ctx: AiUsageContext, call: AiUsageCall): AiUsa
     tenantId: ctx.tenantId,
     userId: ctx.userId ?? null,
     orgUnitId: ctx.orgUnitId ?? null,
+    unitNodeId: ctx.unitNodeId ?? null,
     surface: ctx.surface,
     threadId: ctx.threadId ?? null,
     runId: ctx.runId ?? null,

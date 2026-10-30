@@ -66,6 +66,18 @@ describe("AIP-01 · recordAiUsage · what it refuses", () => {
     for (const k of AI_USAGE_EVENT_KEYS) expect(k).not.toMatch(/prompt$|answer|content|message|text|body|tool|transcript|summary/i);
   });
 
+  it("AIP-15a: unitNodeId is a label: an org node id passes, a sentence, an empty string, 121 characters or a number is refused", () => {
+    for (const ok of ["d-webdev", "dv-fe", "n-12", "0197c0de-0000-7000-8000-000000000001", "x".repeat(120)]) {
+      expect(validateAiUsageEvent(valid({ unitNodeId: ok })).ok, ok).toBe(true);
+    }
+    expect(validateAiUsageEvent(valid({ unitNodeId: null })).ok).toBe(true);
+    for (const bad of ["Web Dev team", "", "x".repeat(121), 7 as never]) {
+      const r = validateAiUsageEvent(valid({ unitNodeId: bad }));
+      expect(r.ok, String(bad)).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/^unitNodeId must be a label/);
+    }
+  });
+
   it("rejects a bad vocabulary value for each closed vocabulary", () => {
     expect(validateAiUsageEvent(valid({ surface: "email" as never })).ok).toBe(false);
     expect(validateAiUsageEvent(valid({ capability: "image" as never })).ok).toBe(false);
@@ -197,6 +209,7 @@ describe("AIP-01 · recordAiUsage · the INSERT it produces", () => {
         userId: U, orgUnitId: D, task: "title.generate", tier: "cheap", provider: "openai", model: "glm-5.3-flash",
         promptTokens: 120, completionTokens: 30, tokensSource: "estimate", costUsd: 0.0123, costSource: "table",
         outcome: "ok", threadId: TH, runId: RUN, gatewayProviderHint: "openrouter", occurredAt: new Date("2026-10-27T08:30:00.000Z"),
+        unitNodeId: "d-webdev",
       }),
       f.deps,
     );
@@ -206,19 +219,21 @@ describe("AIP-01 · recordAiUsage · the INSERT it produces", () => {
     expect(f.queries[0].text).toBe(AI_USAGE_INSERT_SQL);
     expect(f.queries[0].values).toEqual([
       ID, T, "2026-10-27T08:30:00.000Z", U, D, "assistant", "chat", "title.generate", "cheap", "openai", "glm-5.3-flash",
-      120, 30, "estimate", "0.01230000", "table", "ok", TH, RUN, "openrouter",
+      120, 30, "estimate", "0.01230000", "table", "ok", TH, RUN, "openrouter", "d-webdev",
     ]);
   });
 
   it("absent optional fields become NULL (unknown), never 0 or an empty string", () => {
     const { values } = buildAiUsageInsert(valid({ tokensSource: "none" }), ID);
-    expect(values).toEqual([ID, T, null, null, null, "assistant", "chat", null, null, null, null, null, null, "none", null, null, "ok", null, null, null]);
+    expect(values).toEqual([ID, T, null, null, null, "assistant", "chat", null, null, null, null, null, null, "none", null, null, "ok", null, null, null, null]);
   });
 
-  it("the INSERT names exactly 20 columns and 20 parameters, and no text column", () => {
+  // AIP-15a (202610300300): + unit_node_id, appended LAST so every earlier parameter keeps its position. 20 -> 21.
+  it("the INSERT names exactly 21 columns and 21 parameters, and no text column; unit_node_id is the last", () => {
     const cols = /INSERT INTO ai_usage_events\s*\(([^)]*)\)/.exec(AI_USAGE_INSERT_SQL)![1].split(",").map((c) => c.trim());
-    expect(cols).toHaveLength(20);
-    expect(AI_USAGE_INSERT_SQL.match(/\$\d+/g)).toHaveLength(20);
+    expect(cols).toHaveLength(21);
+    expect(cols[20]).toBe("unit_node_id");
+    expect(AI_USAGE_INSERT_SQL.match(/\$\d+/g)).toHaveLength(21);
     for (const c of cols) expect(c).not.toMatch(/prompt$|answer|content|message|text|body/);
   });
 
@@ -233,7 +248,8 @@ describe("AIP-01 · the typed helper for callers", () => {
 
   it("combines a request's context with one call's result", () => {
     const e = buildAiUsageEvent(ctx, { capability: "chat", outcome: "ok", provider: "openai", model: "m", promptTokens: 5, completionTokens: 2, tokensSource: "provider", costUsd: 0.001, costSource: "provider" });
-    expect(e).toMatchObject({ tenantId: T, userId: U, orgUnitId: D, surface: "compaction", threadId: TH, runId: null, capability: "chat", tokensSource: "provider", costSource: "provider" });
+    expect(e).toMatchObject({ tenantId: T, userId: U, orgUnitId: D, unitNodeId: null, surface: "compaction", threadId: TH, runId: null, capability: "chat", tokensSource: "provider", costSource: "provider" });
+    expect(buildAiUsageEvent({ ...ctx, unitNodeId: "d-seo" }, { capability: "chat", outcome: "ok" }).unitNodeId).toBe("d-seo");
     expect(validateAiUsageEvent(e).ok).toBe(true);
   });
 

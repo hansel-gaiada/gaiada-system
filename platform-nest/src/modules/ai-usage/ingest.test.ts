@@ -5,6 +5,8 @@
 // unknown company are each refused per index with a short code that echoes nothing the caller sent; a person who is not a member of the
 // company is stored as NULL and counted, never rejected; a caller-supplied department is never trusted; one bad event never fails the
 // batch; and a failing membership read or department read costs the person, never the row.
+// AIP-15a: the member's HOME org node (unit_node_id) comes from the same placement read, with or without an org_units row; a supplied
+// unitNodeId is never trusted either.
 import { describe, it, expect, vi } from "vitest";
 import { INGEST_SURFACES, ingestAiUsage, reasonCode, type IngestDeps } from "./ingest";
 import type { AiUsageEvent } from "./writer";
@@ -26,7 +28,7 @@ function harness(over: Partial<IngestDeps> = {}) {
   const deps: IngestDeps = {
     existingCompanies: async (ids) => new Set(ids.filter((i) => i === T1)),
     members: async (_t, users) => new Set(users.filter((u) => u === U1)),
-    resolveUnit: async () => UNIT,
+    resolvePlacement: async () => ({ orgUnitId: UNIT, unitNodeId: "d-home" }),
     record: async (e) => { written.push(e); return { ok: true, id: "id" }; },
     ...over,
   };
@@ -92,13 +94,24 @@ describe("AIP-03b · ingestAiUsage", () => {
     expect(members).toHaveBeenCalledWith(T2, [U1]);
   });
 
-  it("the department is the member's own primary placement; a supplied department is never trusted", async () => {
-    const resolveUnit = vi.fn(async () => UNIT);
-    const h = harness({ resolveUnit });
-    await ingestAiUsage([ev({ userId: U1, orgUnitId: FOREIGN_UNIT }), ev({ orgUnitId: FOREIGN_UNIT }), ev({ userId: U2, orgUnitId: FOREIGN_UNIT })], h.deps);
+  it("the department is the member's own primary placement; a supplied department (orgUnitId or unitNodeId) is never trusted", async () => {
+    const resolvePlacement = vi.fn(async () => ({ orgUnitId: UNIT, unitNodeId: "d-home" }));
+    const h = harness({ resolvePlacement });
+    await ingestAiUsage([
+      ev({ userId: U1, orgUnitId: FOREIGN_UNIT, unitNodeId: "d-foreign" }),
+      ev({ orgUnitId: FOREIGN_UNIT, unitNodeId: "d-foreign" }),
+      ev({ userId: U2, orgUnitId: FOREIGN_UNIT, unitNodeId: "d-foreign" }),
+    ], h.deps);
     expect(h.written.map((e) => e.orgUnitId)).toEqual([UNIT, null, null]);
-    expect(resolveUnit).toHaveBeenCalledTimes(1);
-    expect(resolveUnit).toHaveBeenCalledWith(T1, U1);
+    expect(h.written.map((e) => e.unitNodeId)).toEqual(["d-home", null, null]);
+    expect(resolvePlacement).toHaveBeenCalledTimes(1);
+    expect(resolvePlacement).toHaveBeenCalledWith(T1, U1);
+  });
+
+  it("AIP-15a: a placement with NO org_units row still records the home node (org_unit_id stays null)", async () => {
+    const h = harness({ resolvePlacement: async () => ({ orgUnitId: null, unitNodeId: "d-seo" }) });
+    expect(await ingestAiUsage([ev({ userId: U1 })], h.deps)).toEqual({ accepted: 1, rejected: [], counted: {} });
+    expect(h.written[0]).toMatchObject({ userId: U1, orgUnitId: null, unitNodeId: "d-seo" });
   });
 
   it("a failing membership read stores no person, and a failing department read stores no department; the row is still written", async () => {
@@ -106,9 +119,9 @@ describe("AIP-03b · ingestAiUsage", () => {
     expect(await ingestAiUsage([ev({ userId: U1 })], h.deps)).toEqual({ accepted: 1, rejected: [], counted: { user_not_member: 1 } });
     expect(h.written[0].userId).toBeNull();
 
-    const h2 = harness({ resolveUnit: async () => { throw new Error("db down"); } });
+    const h2 = harness({ resolvePlacement: async () => { throw new Error("db down"); } });
     expect((await ingestAiUsage([ev({ userId: U1 })], h2.deps)).accepted).toBe(1);
-    expect(h2.written[0]).toMatchObject({ userId: U1, orgUnitId: null });
+    expect(h2.written[0]).toMatchObject({ userId: U1, orgUnitId: null, unitNodeId: null });
   });
 
   it("a write the writer refuses is rejected for that index only", async () => {

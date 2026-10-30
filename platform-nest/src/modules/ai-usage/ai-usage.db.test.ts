@@ -363,11 +363,13 @@ describe.skipIf(!TEST_URL)("AIP-01 · ai_usage_events", () => {
       await expect(put({ tenant_id: newId() })).rejects.toThrow(/foreign key/);
     });
 
-    it("the column set is closed: exactly 20 columns, none text-shaped", async () => {
+    // AIP-15a (202610300300): + unit_node_id (the home org node, a 120-character label). 20 -> 21.
+    it("the column set is closed: exactly 21 columns, none text-shaped", async () => {
       const r = await admin().query<{ column_name: string; data_type: string }>(
         `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'ai_usage_events' ORDER BY column_name`,
       );
-      expect(r.rows).toHaveLength(20);
+      expect(r.rows).toHaveLength(21);
+      expect(r.rows.map((c) => c.column_name)).toContain("unit_node_id");
       for (const c of r.rows) expect(c.column_name).not.toMatch(/prompt$|answer|content|message|body|text|transcript|args|payload/);
       expect(r.rows.filter((c) => c.data_type === "jsonb" || c.data_type === "json")).toHaveLength(0);
     });

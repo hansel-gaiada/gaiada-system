@@ -4,11 +4,13 @@
 // counts and cost are labelled 'provider', an estimate 'estimate', nothing 'none'; a free-text name cannot cost the whole row; the person's
 // department is resolved from the primary placement, cached for 10 minutes (a null too), never cached on failure, and a call site's own
 // department wins; and recordGatewayCall never rejects, whatever fails.
+// AIP-15a: the same read answers the HOME org node (unit_node_id) with or without an org_units row; it is written last in the INSERT, is
+// always the person's own (a call site's orgUnitId never changes it), and a node id that is not a label is recorded as null.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PoolClient } from "pg";
 import {
-  aiAttribution, clearUnitCacheForTests, outcomeForGatewayStatus, readGatewayUsage, recordGatewayCall, resolvePrimaryUnitId, statusFromError,
-  toAiUsageCall, type AiCallAttribution,
+  aiAttribution, clearUnitCacheForTests, outcomeForGatewayStatus, readGatewayUsage, recordGatewayCall, resolvePrimaryPlacement, resolvePrimaryUnitId,
+  statusFromError, toAiUsageCall, type AiCallAttribution, type PrimaryPlacement,
 } from "./gateway-usage";
 import type { AiUsageDeps } from "./writer";
 
@@ -103,7 +105,7 @@ describe("AIP-03a · aiAttribution", () => {
 
 describe("AIP-03a · the department of a person", () => {
   /** A fake withTenants whose client answers the placement query with `rows` (or throws). */
-  function placement(rows: Array<{ id: string }> | Error) {
+  function placement(rows: Array<{ id: string | null; unit_node_id?: string | null }> | Error) {
     const calls: Array<{ tenants: string[]; values: unknown[] }> = [];
     const fn = (async (tenants: string[], cb: (c: PoolClient) => Promise<unknown>) => {
       calls.push({ tenants, values: [] });
@@ -146,6 +148,40 @@ describe("AIP-03a · the department of a person", () => {
     expect(await resolvePrimaryUnitId(T, U, { withTenants: good.fn })).toBe(D);
   });
 
+  it("AIP-15a: one read answers the org_units id AND the home node; the query is a LEFT JOIN, so a node with no org_units row still answers", async () => {
+    let sql = "";
+    const fn = (async (_t: string[], cb: (c: PoolClient) => Promise<unknown>) =>
+      cb({ query: async (text: string) => { sql = text; return { rows: [{ id: null, unit_node_id: "d-seo" }] }; } } as unknown as PoolClient)) as never;
+    expect(await resolvePrimaryPlacement(T, U, { withTenants: fn })).toEqual({ orgUnitId: null, unitNodeId: "d-seo" });
+    expect(sql).toMatch(/LEFT JOIN org_units/);
+    expect(sql).toMatch(/m\.unit_node_id/);
+    // the same cached answer serves resolvePrimaryUnitId: no second read, and its half is the org_units id (null here)
+    expect(await resolvePrimaryUnitId(T, U, { withTenants: (async () => { throw new Error("must not read"); }) as never })).toBeNull();
+  });
+
+  it("AIP-15a: a placement that HAS an org_units row answers both ids", async () => {
+    const p = placement([{ id: D, unit_node_id: "d-webdev" }]);
+    expect(await resolvePrimaryPlacement(T, U, { withTenants: p.fn })).toEqual({ orgUnitId: D, unitNodeId: "d-webdev" });
+  });
+
+  it("AIP-15a: a node id that is not a label (a space, over 120 characters) is recorded as null, the org_units id survives", async () => {
+    const p = placement([{ id: D, unit_node_id: "Web Dev team" }]);
+    expect(await resolvePrimaryPlacement(T, U, { withTenants: p.fn })).toEqual({ orgUnitId: D, unitNodeId: null });
+    clearUnitCacheForTests();
+    const q = placement([{ id: null, unit_node_id: "x".repeat(121) }]);
+    expect(await resolvePrimaryPlacement(T, U, { withTenants: q.fn })).toEqual({ orgUnitId: null, unitNodeId: null });
+  });
+
+  it("AIP-15a: no placement and a failure both answer { null, null }; only the first is cached", async () => {
+    const none = placement([]);
+    expect(await resolvePrimaryPlacement(T, U, { withTenants: none.fn })).toEqual({ orgUnitId: null, unitNodeId: null });
+    clearUnitCacheForTests();
+    const bad = placement(new Error("db down"));
+    expect(await resolvePrimaryPlacement(T, U, { withTenants: bad.fn })).toEqual({ orgUnitId: null, unitNodeId: null });
+    const good = placement([{ id: null, unit_node_id: "d-hr" }]);
+    expect((await resolvePrimaryPlacement(T, U, { withTenants: good.fn })).unitNodeId).toBe("d-hr");
+  });
+
   it("is keyed by company AND person", async () => {
     const p = placement([{ id: D }]);
     await resolvePrimaryUnitId(T, U, { withTenants: p.fn });
@@ -169,65 +205,74 @@ describe("AIP-03a · recordGatewayCall", () => {
     };
     return { writer, queries, warn };
   }
-  // INSERT parameter order: id, tenant, occurred_at, user, org_unit, surface, capability, task, tier, provider, model, prompt, completion, tokens_source, cost, cost_source, outcome, thread, run, hint
-  const V = { tenant: 1, user: 3, unit: 4, surface: 5, capability: 6, task: 7, provider: 9, model: 10, prompt: 11, completion: 12, tokensSource: 13, cost: 14, costSource: 15, outcome: 16, thread: 17, run: 18, hint: 19 };
+  // INSERT parameter order: id, tenant, occurred_at, user, org_unit, surface, capability, task, tier, provider, model, prompt, completion, tokens_source, cost, cost_source, outcome, thread, run, hint, unit_node (AIP-15a)
+  const V = { tenant: 1, user: 3, unit: 4, surface: 5, capability: 6, task: 7, provider: 9, model: 10, prompt: 11, completion: 12, tokensSource: 13, cost: 14, costSource: 15, outcome: 16, thread: 17, run: 18, hint: 19, node: 20 };
+  const at = (orgUnitId: string | null, unitNodeId: string | null = null) => async (): Promise<PrimaryPlacement> => ({ orgUnitId, unitNodeId });
 
   it("writes ONE row with the attribution, the provider tokens and the provider cost", async () => {
     const w = writerDeps();
-    await recordGatewayCall(attr({ threadId: TH }), { capability: "llm", outcome: "ok", provider: "openai", model: "z-ai/glm-5.3-flash", usage: { promptTokens: 11, completionTokens: 7, costUsd: 0.000123 }, providerHint: "claude" }, { resolveUnit: async () => D, writer: w.writer });
+    await recordGatewayCall(attr({ threadId: TH }), { capability: "llm", outcome: "ok", provider: "openai", model: "z-ai/glm-5.3-flash", usage: { promptTokens: 11, completionTokens: 7, costUsd: 0.000123 }, providerHint: "claude" }, { resolvePlacement: at(D, "d-search"), writer: w.writer });
     expect(w.queries).toHaveLength(1);
     const v = w.queries[0].values;
-    expect([v[V.tenant], v[V.user], v[V.unit], v[V.surface], v[V.capability], v[V.task], v[V.thread], v[V.hint]]).toEqual([T, U, D, "search", "llm", "search.brief_draft", TH, "claude"]);
+    expect([v[V.tenant], v[V.user], v[V.unit], v[V.surface], v[V.capability], v[V.task], v[V.thread], v[V.hint], v[V.node]]).toEqual([T, U, D, "search", "llm", "search.brief_draft", TH, "claude", "d-search"]);
     expect([v[V.provider], v[V.model], v[V.prompt], v[V.completion], v[V.tokensSource], v[V.cost], v[V.costSource], v[V.outcome]]).toEqual(["openai", "z-ai/glm-5.3-flash", 11, 7, "provider", "0.00012300", "provider", "ok"]);
   });
 
   it("a call with no usage writes 'none'; with an estimate writes 'estimate'", async () => {
     const a = writerDeps();
-    await recordGatewayCall(attr(), { capability: "embed", outcome: "ok" }, { resolveUnit: async () => null, writer: a.writer });
+    await recordGatewayCall(attr(), { capability: "embed", outcome: "ok" }, { resolvePlacement: at(null), writer: a.writer });
     expect(a.queries[0].values[V.tokensSource]).toBe("none");
     expect(a.queries[0].values[V.prompt]).toBeNull();
     const b = writerDeps();
-    await recordGatewayCall(attr(), { capability: "llm", outcome: "ok", estimate: { promptTokens: 40, completionTokens: 10 } }, { resolveUnit: async () => null, writer: b.writer });
+    await recordGatewayCall(attr(), { capability: "llm", outcome: "ok", estimate: { promptTokens: 40, completionTokens: 10 } }, { resolvePlacement: at(null), writer: b.writer });
     expect([b.queries[0].values[V.tokensSource], b.queries[0].values[V.prompt], b.queries[0].values[V.completion]]).toEqual(["estimate", 40, 10]);
   });
 
   it("a refused call writes its outcome with no tokens", async () => {
     const w = writerDeps();
-    await recordGatewayCall(attr(), { capability: "llm", outcome: "blocked_dlp" }, { resolveUnit: async () => null, writer: w.writer });
+    await recordGatewayCall(attr(), { capability: "llm", outcome: "blocked_dlp" }, { resolvePlacement: at(null), writer: w.writer });
     expect([w.queries[0].values[V.outcome], w.queries[0].values[V.tokensSource], w.queries[0].values[V.cost]]).toEqual(["blocked_dlp", "none", null]);
   });
 
-  it("the call site's own department wins and nothing is resolved; an explicit null means 'none', also not resolved", async () => {
-    const resolveUnit = vi.fn(async () => D);
+  it("the call site's own department wins for org_unit_id (an explicit null too); the home node is still the person's own (AIP-15a)", async () => {
+    const resolvePlacement = vi.fn(at(D, "d-home"));
     const a = writerDeps();
-    await recordGatewayCall(attr({ orgUnitId: "88888888-8888-4888-8888-888888888888" }), { capability: "llm", outcome: "ok" }, { resolveUnit, writer: a.writer });
+    await recordGatewayCall(attr({ orgUnitId: "88888888-8888-4888-8888-888888888888" }), { capability: "llm", outcome: "ok" }, { resolvePlacement, writer: a.writer });
     expect(a.queries[0].values[V.unit]).toBe("88888888-8888-4888-8888-888888888888");
+    expect(a.queries[0].values[V.node]).toBe("d-home");
     const b = writerDeps();
-    await recordGatewayCall(attr({ orgUnitId: null }), { capability: "llm", outcome: "ok" }, { resolveUnit, writer: b.writer });
+    await recordGatewayCall(attr({ orgUnitId: null }), { capability: "llm", outcome: "ok" }, { resolvePlacement, writer: b.writer });
     expect(b.queries[0].values[V.unit]).toBeNull();
-    expect(resolveUnit).not.toHaveBeenCalled();
+    expect(b.queries[0].values[V.node]).toBe("d-home");
+    expect(resolvePlacement).toHaveBeenCalledTimes(2);
+  });
+
+  it("AIP-15a: a placement with no org_units row writes the home node and a null org_unit_id", async () => {
+    const w = writerDeps();
+    await recordGatewayCall(attr(), { capability: "llm", outcome: "ok" }, { resolvePlacement: at(null, "d-seo"), writer: w.writer });
+    expect([w.queries[0].values[V.unit], w.queries[0].values[V.node]]).toEqual([null, "d-seo"]);
   });
 
   it("a call with no person has no department and resolves nothing; the row is still written (a bot or a job)", async () => {
-    const resolveUnit = vi.fn(async () => D);
+    const resolvePlacement = vi.fn(at(D, "d-home"));
     const w = writerDeps();
-    await recordGatewayCall(attr({ userId: null }), { capability: "llm", outcome: "ok" }, { resolveUnit, writer: w.writer });
-    expect(resolveUnit).not.toHaveBeenCalled();
-    expect([w.queries[0].values[V.user], w.queries[0].values[V.unit]]).toEqual([null, null]);
+    await recordGatewayCall(attr({ userId: null }), { capability: "llm", outcome: "ok" }, { resolvePlacement, writer: w.writer });
+    expect(resolvePlacement).not.toHaveBeenCalled();
+    expect([w.queries[0].values[V.user], w.queries[0].values[V.unit], w.queries[0].values[V.node]]).toEqual([null, null, null]);
   });
 
   it("a bot is recorded with its own user id", async () => {
     const w = writerDeps();
-    await recordGatewayCall(attr({ userId: U }), { capability: "llm", outcome: "ok" }, { resolveUnit: async () => null, writer: w.writer });
+    await recordGatewayCall(attr({ userId: U }), { capability: "llm", outcome: "ok" }, { resolvePlacement: at(null), writer: w.writer });
     expect(w.queries[0].values[V.user]).toBe(U);
   });
 
   it("never rejects: the writer failing, the resolver throwing, a bad company, a malformed attribution", async () => {
     const failing = writerDeps(new Error("db down"));
-    await expect(recordGatewayCall(attr(), { capability: "llm", outcome: "ok" }, { resolveUnit: async () => D, writer: failing.writer })).resolves.toMatchObject({ ok: false });
+    await expect(recordGatewayCall(attr(), { capability: "llm", outcome: "ok" }, { resolvePlacement: at(D, "d-x"), writer: failing.writer })).resolves.toMatchObject({ ok: false });
     expect(failing.warn).toHaveBeenCalledTimes(1);
     const ok = writerDeps();
-    await expect(recordGatewayCall(attr(), { capability: "llm", outcome: "ok" }, { resolveUnit: async () => { throw new Error("x"); }, writer: ok.writer })).resolves.toBeNull();
+    await expect(recordGatewayCall(attr(), { capability: "llm", outcome: "ok" }, { resolvePlacement: async () => { throw new Error("x"); }, writer: ok.writer })).resolves.toBeNull();
     await expect(recordGatewayCall(attr({ tenantId: "no-company" }), { capability: "llm", outcome: "ok" }, { writer: ok.writer })).resolves.toBeNull();
     await expect(recordGatewayCall(undefined as never, { capability: "llm", outcome: "ok" })).resolves.toBeNull();
     expect(ok.queries).toHaveLength(0);

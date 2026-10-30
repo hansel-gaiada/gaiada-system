@@ -17,6 +17,13 @@
 //   mapped to its org_units row. Cached per process for 10 minutes. Null when the person has no placement, or the placement is not an
 //   org_units row, or there is no person. A failure to resolve is a null, never an error: it must never fail or slow the call.
 //
+// THE HOME NODE (ai_usage_events.unit_node_id, AIP-15a, plan §6.3 item 1)
+//   The SAME primary placement's node id (org_unit_memberships.unit_node_id), whether or not that node has an org_units row: most
+//   departments exist only as nodes of company_org_structure, which is why org_unit_id was empty on every live row. It is ALWAYS the
+//   person's home: a call site's own `orgUnitId` (the page it came from) never changes it, because the bill goes to the department the
+//   person works in. The same one read and the same 10-minute cache resolve both ids. A node id that is not a label (LABEL_PATTERN) is
+//   recorded as null rather than costing the row.
+//
 // NEVER LET RECORDING BREAK OR SLOW A CALL
 //   `recordGatewayCall` returns a promise that NEVER rejects, and callers do not await it (`void recordGatewayCall(...)`). It runs after the
 //   answer is in hand. The writer it ends in (writer.ts) has the same never-throw contract.
@@ -146,7 +153,13 @@ export function toAiUsageCall(facts: GatewayCallFacts, attr: Pick<AiCallAttribut
 
 const UNIT_TTL_MS = 10 * 60 * 1000;
 const UNIT_CACHE_MAX = 5000;
-const unitCache = new Map<string, { unitId: string | null; at: number }>();
+/** The person's primary placement today: its org_units id (or null) and its org node id (or null). */
+export interface PrimaryPlacement {
+  orgUnitId: string | null;
+  unitNodeId: string | null;
+}
+const NO_PLACEMENT: PrimaryPlacement = { orgUnitId: null, unitNodeId: null };
+const unitCache = new Map<string, { placement: PrimaryPlacement; at: number }>();
 
 /** Tests only: forget every cached department. */
 export function clearUnitCacheForTests(): void {
@@ -160,44 +173,56 @@ export interface UnitDeps {
 }
 
 /**
- * The org_units id of the person's primary placement today, or null. One read under the company's tenant context, cached per
- * (company, person) for 10 minutes (a null answer is cached too, so a person with no placement is not re-read on every call).
- * A failure is a null and is NOT cached. Never throws.
+ * The person's primary placement today: the org_units id (when the node has an ACTIVE org_units row) and the org node id itself (always,
+ * when there is a placement). One read under the company's tenant context, cached per (company, person) for 10 minutes (an empty answer
+ * is cached too, so a person with no placement is not re-read on every call). A failure is { null, null } and is NOT cached. Never throws.
+ *
+ * At most one primary membership is valid on a day (0055's EXCLUDE constraint), so the LEFT JOIN picks the same row the earlier
+ * inner-join read did whenever that row has an org_units match: `orgUnitId` is exactly what it was before AIP-15a.
  */
-export async function resolvePrimaryUnitId(tenantId: string, userId: string, deps: UnitDeps = {}): Promise<string | null> {
+export async function resolvePrimaryPlacement(tenantId: string, userId: string, deps: UnitDeps = {}): Promise<PrimaryPlacement> {
   const now = (deps.now ?? Date.now)();
   const key = `${tenantId}:${userId}`;
   const hit = unitCache.get(key);
-  if (hit && now - hit.at < UNIT_TTL_MS) return hit.unitId;
+  if (hit && now - hit.at < UNIT_TTL_MS) return hit.placement;
   try {
     const rows = await (deps.withTenants ?? withTenants)([tenantId], async (c) => {
-      const r = await c.query<{ id: string }>(
-        `SELECT ou.id
+      const r = await c.query<{ id: string | null; unit_node_id?: string | null }>(
+        `SELECT ou.id, m.unit_node_id
            FROM org_unit_memberships m
-           JOIN org_units ou ON ou.tenant_id = m.tenant_id AND ou.node_id = m.unit_node_id AND ou.status = 'active'
+           LEFT JOIN org_units ou ON ou.tenant_id = m.tenant_id AND ou.node_id = m.unit_node_id AND ou.status = 'active'
           WHERE m.tenant_id = $1 AND m.user_id = $2 AND m.is_primary
             AND m.valid_from <= (now() AT TIME ZONE 'UTC')::date
             AND (m.valid_to IS NULL OR m.valid_to >= (now() AT TIME ZONE 'UTC')::date)
-          ORDER BY m.valid_from DESC, ou.id
+          ORDER BY m.valid_from DESC, ou.id NULLS LAST
           LIMIT 1`,
         [tenantId, userId],
       );
       return r.rows;
     });
-    const unitId = rows[0]?.id ?? null;
+    const row = rows[0];
+    const node = row?.unit_node_id;
+    const placement: PrimaryPlacement = row
+      ? { orgUnitId: row.id ?? null, unitNodeId: typeof node === "string" && LABEL_PATTERN.test(node) ? node : null }
+      : NO_PLACEMENT;
     if (unitCache.size >= UNIT_CACHE_MAX) unitCache.delete(unitCache.keys().next().value as string);
-    unitCache.set(key, { unitId, at: now });
-    return unitId;
+    unitCache.set(key, { placement, at: now });
+    return placement;
   } catch {
-    return null;
+    return NO_PLACEMENT;
   }
+}
+
+/** The org_units id of the person's primary placement today, or null (resolvePrimaryPlacement's first half; the same read and cache). */
+export async function resolvePrimaryUnitId(tenantId: string, userId: string, deps: UnitDeps = {}): Promise<string | null> {
+  return (await resolvePrimaryPlacement(tenantId, userId, deps)).orgUnitId;
 }
 
 // ── the recorder ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface GatewayUsageDeps {
-  /** Overrides how a person's department is resolved (tests). */
-  resolveUnit?: (tenantId: string, userId: string) => Promise<string | null>;
+  /** Overrides how a person's primary placement (org_units id and home node) is resolved (tests). */
+  resolvePlacement?: (tenantId: string, userId: string) => Promise<PrimaryPlacement>;
   /** Passed through to the writer (tests). */
   writer?: AiUsageDeps;
 }
@@ -211,13 +236,18 @@ export async function recordGatewayCall(attr: AiCallAttribution, facts: GatewayC
   try {
     if (!attr || typeof attr.tenantId !== "string" || !UUID_PATTERN.test(attr.tenantId)) return null;
     let orgUnitId: string | null = attr.orgUnitId ?? null;
-    if (attr.orgUnitId === undefined && typeof attr.userId === "string" && UUID_PATTERN.test(attr.userId)) {
-      orgUnitId = await (deps.resolveUnit ?? resolvePrimaryUnitId)(attr.tenantId, attr.userId);
+    let unitNodeId: string | null = null;
+    if (typeof attr.userId === "string" && UUID_PATTERN.test(attr.userId)) {
+      // One cached read answers both. The home node is ALWAYS the person's (AIP-15a); a call site's own orgUnitId still wins for org_unit_id.
+      const placement = await (deps.resolvePlacement ?? resolvePrimaryPlacement)(attr.tenantId, attr.userId);
+      if (attr.orgUnitId === undefined) orgUnitId = placement.orgUnitId;
+      unitNodeId = placement.unitNodeId;
     }
     const ctx: AiUsageContext = {
       tenantId: attr.tenantId,
       userId: attr.userId ?? null,
       orgUnitId,
+      unitNodeId,
       surface: attr.surface,
       threadId: attr.threadId ?? null,
       runId: attr.runId ?? null,

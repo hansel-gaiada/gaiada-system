@@ -7,6 +7,8 @@
 // an unknown key and an unknown company are each rejected per index (the rest of the batch still lands); a person from another company is
 // stored as NULL and counted while a member is kept; a supplied department is ignored; the price table costs an event with tokens but no
 // cost (cost_source 'table') and a provider cost is kept; more than 100 events, or none, is 400 and writes nothing.
+// AIP-15a: a member whose primary placement is a node with NO org_units row is stored with that node in unit_node_id (org_unit_id NULL),
+// and a supplied unitNodeId is ignored.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { randomUUID } from "node:crypto";
@@ -14,6 +16,7 @@ import { config } from "../../config";
 import { buildApp } from "../../main";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
 import { createCompany, createUser, addMembership } from "../../testing/fixtures";
+import { clearUnitCacheForTests } from "./gateway-usage";
 
 const TOKEN = "aip03b-http-service-token";
 const URL = "/api/internal/ai-usage";
@@ -34,7 +37,7 @@ describe.skipIf(!TEST_URL)("AIP-03b · POST /api/internal/ai-usage (HTTP, real P
   });
   const rows = async (where = "true", args: unknown[] = []) =>
     (await adminPool().query(
-      `SELECT tenant_id, user_id, org_unit_id, surface, capability, task, provider, model, prompt_tokens, completion_tokens, tokens_source,
+      `SELECT tenant_id, user_id, org_unit_id, unit_node_id, surface, capability, task, provider, model, prompt_tokens, completion_tokens, tokens_source,
               cost_usd::text AS cost_usd, cost_source, outcome, run_id FROM ai_usage_events WHERE ${where} ORDER BY occurred_at, id`, args,
     )).rows;
   const total = async () => Number((await adminPool().query(`SELECT count(*)::int AS n FROM ai_usage_events`)).rows[0].n);
@@ -120,6 +123,25 @@ describe.skipIf(!TEST_URL)("AIP-03b · POST /api/internal/ai-usage (HTTP, real P
     const stored = await rows();
     expect(stored.map((s) => s.user_id).sort()).toEqual([memberA, null, null].sort());
     expect(stored.every((s) => s.org_unit_id === null)).toBe(true);
+  });
+
+  it("AIP-15a: records the member's HOME node from a placement with no org_units row, and ignores a supplied unitNodeId", async () => {
+    await adminPool().query(
+      `INSERT INTO org_unit_memberships (tenant_id, user_id, unit_node_id, is_primary, valid_from, origin_site)
+       VALUES ($1, $2, 'd-aip15a-home', true, current_date - 3, $3)`,
+      [A, memberA, config.originSite],
+    );
+    clearUnitCacheForTests(); // an earlier test cached memberA's (empty) placement for 10 minutes
+    try {
+      const r = await post({ events: [ev({ userId: memberA, unitNodeId: "d-forged" }), ev({ unitNodeId: "d-forged" })] });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json()).toEqual({ accepted: 2, rejected: [], counted: {} });
+      const stored = await rows();
+      expect(stored.map((x) => [x.user_id, x.org_unit_id, x.unit_node_id])).toEqual([[memberA, null, "d-aip15a-home"], [null, null, null]]);
+    } finally {
+      await adminPool().query(`DELETE FROM org_unit_memberships WHERE tenant_id = $1 AND user_id = $2`, [A, memberA]);
+      clearUnitCacheForTests();
+    }
   });
 
   it("costs an event with tokens and no cost from the price table, and keeps a provider cost", async () => {

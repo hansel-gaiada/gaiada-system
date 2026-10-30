@@ -8,8 +8,9 @@
 //   * The company must exist. A tenant id that is not a live company is rejected for that event (`unknown_tenant`).
 //   * A `userId` must be a member of THAT company. When it is not, the event is stored with user_id NULL and counted, never rejected:
 //     the money still happened.
-//   * The department is never taken from the caller. A supplied `orgUnitId` is ignored; the department is the member's primary placement
-//     today (resolvePrimaryUnitId, the same read every platform-nest caller gets), or null.
+//   * The department is never taken from the caller. A supplied `orgUnitId` or `unitNodeId` is ignored; both are the member's primary
+//     placement today (resolvePrimaryPlacement, the same read and cache every platform-nest caller gets), or null. AIP-15a: `unitNodeId` is
+//     that placement's org node, with or without an org_units row (the person's HOME department, which the bill goes to).
 //   * `tier` (AIP-07), when present, must be exactly fast, standard or strong (the gateway's tiers): anything else is rejected for that event
 //     as `invalid_tier`, like any other bad field. The writer itself accepts any label; this route is the strict one.
 //   * Reasons are short codes. Nothing the caller sent (a key name, a label, a value) is echoed back.
@@ -17,7 +18,7 @@
 // One event failing never fails the batch: the answer is `{accepted, rejected: [{index, reason}], counted}`.
 import { withGlobal, withTenants } from "../../db";
 import { AI_USAGE_EVENT_KEYS, UUID_PATTERN, recordAiUsage, validateAiUsageEvent, type AiUsageEvent, type RecordResult } from "./writer";
-import { resolvePrimaryUnitId } from "./gateway-usage";
+import { resolvePrimaryPlacement, type PrimaryPlacement } from "./gateway-usage";
 import { readGatewayTier } from "./routing";
 import type { AiUsageSurface } from "./vocab";
 
@@ -37,8 +38,8 @@ export interface IngestDeps {
   existingCompanies?: (ids: string[]) => Promise<Set<string>>;
   /** Which of these users are active members of the company. Defaults to one read of `company_memberships` under that company. */
   members?: (tenantId: string, userIds: string[]) => Promise<Set<string>>;
-  /** The member's primary department. Defaults to resolvePrimaryUnitId. */
-  resolveUnit?: (tenantId: string, userId: string) => Promise<string | null>;
+  /** The member's primary placement (org_units id and home node). Defaults to resolvePrimaryPlacement. */
+  resolvePlacement?: (tenantId: string, userId: string) => Promise<PrimaryPlacement>;
   /** The writer. Defaults to recordAiUsage. */
   record?: (event: AiUsageEvent) => Promise<RecordResult>;
 }
@@ -73,7 +74,7 @@ export function reasonCode(error: string): string {
 export async function ingestAiUsage(events: unknown[], deps: IngestDeps = {}): Promise<IngestResult> {
   const existing = deps.existingCompanies ?? defaultExistingCompanies;
   const members = deps.members ?? defaultMembers;
-  const resolveUnit = deps.resolveUnit ?? resolvePrimaryUnitId;
+  const resolvePlacement = deps.resolvePlacement ?? resolvePrimaryPlacement;
   const record = deps.record ?? ((e: AiUsageEvent) => recordAiUsage(e));
 
   const rejected: IngestResult["rejected"] = [];
@@ -117,10 +118,18 @@ export async function ingestAiUsage(events: unknown[], deps: IngestDeps = {}): P
       counted.user_not_member = (counted.user_not_member ?? 0) + 1;
     }
     let orgUnitId: string | null = null;
+    let unitNodeId: string | null = null;
     if (userId !== null && UUID_PATTERN.test(userId)) {
-      try { orgUnitId = await resolveUnit(event.tenantId, userId); } catch { orgUnitId = null; }
+      try {
+        const placement = await resolvePlacement(event.tenantId, userId);
+        orgUnitId = placement.orgUnitId ?? null;
+        unitNodeId = placement.unitNodeId ?? null;
+      } catch {
+        orgUnitId = null;
+        unitNodeId = null;
+      }
     }
-    const result = await record({ ...event, userId, orgUnitId });
+    const result = await record({ ...event, userId, orgUnitId, unitNodeId });
     if (result.ok) accepted++;
     else rejected.push({ index, reason: "write_failed" });
   }
