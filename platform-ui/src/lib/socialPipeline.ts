@@ -273,6 +273,7 @@ export const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   officer_not_member: "The officer must be a member of the company.",
   officer_set_by_allocation: "The officer is set on the Allocation page.",
   rules_changed: "Someone else saved the rules first. Reload them, then make your change again.",
+  saved_item_not_found: "That saved item is gone. It may have been deleted. Reload Saved.",
 };
 
 /**
