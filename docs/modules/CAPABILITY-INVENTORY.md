@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **289** capabilities across **17** owners
-- **152** writes · 137 reads
-- Writes by impact: **high 28** · medium 44 · low 80
+- **291** capabilities across **17** owners
+- **153** writes · 138 reads
+- Writes by impact: **high 28** · medium 45 · low 80
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -52,9 +52,9 @@ unfalsifiable after.
 | lms | `lms` | 1 |
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 18 |
-| reports | `checkins` · `reports` | 24 |
+| reports | `checkins` · `reports` | 25 |
 | search | `search` | 31 |
-| social | `social` | 38 |
+| social | `social` | 39 |
 | webdev | `webdev` | 41 |
 
 ## Capabilities
@@ -252,6 +252,7 @@ unfalsifiable after.
 | social | `social.draftPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants/:variantId/draft-caption` | write | `low` |
 | social | `social.draftReport` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/reports` | write | `low` |
 | social | `social.editReport` | `PATCH` | `/api/:tenantId/modules/social/reports/:id` | write | `low` |
+| social | `social.generateReports` | `POST` | `/api/:tenantId/modules/social/reports/generate` | write | `medium` |
 | social | `social.getBestTimeToPost` | `GET` | `/api/:tenantId/modules/social/accounts/:accountId/best-time` | read | — |
 | social | `social.getClientReview` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | read | — |
 | social | `social.getEngagementScope` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | read | — |
@@ -269,6 +270,7 @@ unfalsifiable after.
 | social | `social.provisionPublisherOrg` | `POST` | `/api/:tenantId/modules/social/publisher-orgs` | write | `medium` |
 | social | `social.publishPost` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish` | write | `high` |
 | social | `social.publishPostMetered` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish-metered` | write | `high` |
+| social | `social.reportRun` | `GET` | `/api/:tenantId/modules/social/reports/generate/:runId` | read | — |
 | social | `social.requestBoost` | `POST` | `/api/:tenantId/modules/social/posts/:postId/boosts` | write | `high` |
 | social | `social.requestClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | write | `medium` |
 | social | `social.resetRules` | `POST` | `/api/:tenantId/modules/social/rules/:section/reset` | write | `medium` |

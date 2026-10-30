@@ -1229,8 +1229,15 @@ export const socialModule: ModuleContract = {
         properties: {
           tenantId: { type: "string", description: "Company id (route scope)." },
           engagementId: { type: "string", description: "The engagement this report covers." },
-          kind: { type: "string", enum: ["monthly", "campaign", "adhoc"], description: "Defaults to 'monthly'." },
-          period: { type: "string", description: "'YYYY-MM' for a monthly report; omit for a trailing 30-day window." },
+          kind: {
+            type: "string", enum: ["daily", "weekly", "monthly", "quarterly", "semester", "yearly", "campaign", "adhoc"],
+            description: "Defaults to 'monthly'. Any kind the company has on (BFF §63.24.6).",
+          },
+          period: {
+            type: "string",
+            description: "The kind's period: 'YYYY-MM-DD' daily, 'YYYY-Www' weekly, 'YYYY-MM' monthly, 'YYYY-Qn' quarterly, 'YYYY-Hn' semester, "
+              + "'YYYY' yearly. A monthly report may omit it for a trailing 30-day window.",
+          },
           id: { type: "string", description: "Optional caller-supplied uuid — the idempotency key for a retry." },
         },
         required: ["tenantId", "engagementId"],
@@ -1355,6 +1362,61 @@ export const socialModule: ModuleContract = {
         type: "object",
         properties: { tenantId: { type: "string", description: "Company id (route scope)." }, id: { type: "string", description: "The report." } },
         required: ["tenantId", "id"],
+      },
+    },
+    // ── SCP-5 W5-A3 (BFF §63.24.6): "Generate with AI" by chat. The agent arrives as the person who asked (63.15), so the gate, the
+    // narrowing to their clients and every refusal are theirs; the run's `via` and each report's activity record the agent. Drafts only:
+    // approving and sending stay `social.approveReport` / `social.deliverReport`. impact 'medium': it spends a gateway call for each of
+    // the person's clients, so the person confirms in the thread first (63.15's confirm step).
+    {
+      name: "social.generateReports",
+      description:
+        "Draft one report of a kind and period for EVERY client the person may draft for (the four social approvers: every active "
+        + "client; an officer: their own clients), as a background run, with AI and the plain template when the gateway fails. Answers "
+        + "202 {runId, total, clients} at once; read its progress with social.reportRun. Clients not due the kind are skipped "
+        + "(kind_not_due), the internal client too (internal_client); a client whose report of that kind and period already exists is "
+        + "'existing' and never redrafted. Only drafts: nothing is approved or sent. 409 generation_running {runId} while a run of the same "
+        + "kind and period is going. Pass a stable `id` to make a retry answer the same run. For one client use social.draftReport.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/reports/generate",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          kind: { type: "string", enum: ["daily", "weekly", "monthly", "quarterly", "semester", "yearly"], description: "The report kind." },
+          period: {
+            type: "string",
+            description: "The period to report on, in the kind's format ('YYYY-MM-DD', 'YYYY-Www', 'YYYY-MM', 'YYYY-Qn', 'YYYY-Hn', 'YYYY'). "
+              + "A monthly, quarterly, half-year or yearly period must have ended (400 period_not_over).",
+          },
+          engagementIds: {
+            type: "array", items: { type: "string" }, minItems: 1, maxItems: 200,
+            description: "Optional: only these clients' engagements. One the person may not draft for is listed skipped (not_allowed).",
+          },
+          id: { type: "string", description: "Optional caller-supplied uuid for the run: the idempotency key for a retry." },
+        },
+        required: ["tenantId", "kind", "period"],
+      },
+    },
+    {
+      name: "social.reportRun",
+      description:
+        "Read a \"Generate with AI\" run: its status (queued, running, done, failed), how many clients are done of the total, each "
+        + "finished client's result (created with draftedVia ai|fallback, existing, skipped or failed, with the reason and the report id), "
+        + "and its AI usage (calls, tokens, cost). Only the person who started it and the four social approvers may read it.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/reports/generate/:runId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          runId: { type: "string", description: "The run (social.generateReports' runId)." },
+        },
+        required: ["tenantId", "runId"],
       },
     },
     {
