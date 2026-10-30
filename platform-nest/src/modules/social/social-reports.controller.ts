@@ -593,7 +593,7 @@ export class SocialReportsController {
   // W5-A2 (§63.24.3): the report's own rules decide which parts it takes and their limits (a part its rules leave out is 400
   // `{field}`), and `nextPeriod` joins `narrativeMd`, `notes` and `actionPlan`. Submitting a report whose numbers freeze at submit
   // takes the snapshot in the status change's transaction and runs the numbers guard on the summary (400 `summary_numbers_changed`
-  // with the numbers); a send-back keeps the snapshot and the next submit takes it again.
+  // with the numbers in `detail.numbers`, the one extra field the error shape forwards for such a refusal: http-error.filter.ts); a send-back keeps the snapshot and the next submit takes it again.
   @Patch("reports/:id")
   @HttpCode(200)
   async updateReport(
@@ -656,7 +656,7 @@ export class SocialReportsController {
           const snap = await snapshotOf(c, { tenantId, engagementId: report.engagementId, clientId: report.clientId, kind: report.kind, range: freezeRange });
           const summary = narrativeMd ?? report.narrativeMd;
           const moved = findUngroundedNumbers(summary, groundingFactsOf(snap.frozen, { engagementName: report.engagementName, clientName: report.clientName }, []));
-          if (moved.length > 0) throw new BadRequestException({ message: "summary_numbers_changed", numbers: moved });
+          if (moved.length > 0) throw new BadRequestException({ message: "summary_numbers_changed", detail: { numbers: moved } });
           const keep = {
             ...(report.metrics.narrativeSource ? { narrativeSource: report.metrics.narrativeSource } : {}),
             ...(report.metrics.narrativeModel ? { narrativeModel: report.metrics.narrativeModel } : {}),
