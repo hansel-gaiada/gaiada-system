@@ -3319,3 +3319,52 @@ bundles, regenerated (the generator needed no resolver change: the kind names on
 the head of the unit, of an enclosing unit and of the root, a head of a sibling or only below, another company with the same node id, manager,
 member, viewer, HR, client, bot and automation, low assurance, an unfed resource, and the permission-native owner through `manage`);
 `dept-assistant-preamble.test.ts` (the routes); `assistant-dept-preambles-migration.db.test.ts` (the table and the seed).
+
+## 57. SCP-5 rest (5b, 5c, 5e to 5h): no new kind, no new action, no policy change (2026-10-30, PLANNED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §63.24 to §63.29, written on the defaults of SCP-Q25 to SCP-Q36
+(`docs/plans/scp5-rest-open-questions.md`). Nothing in §53 changes: no kind, action, attribute, role, mirror, catalogue key, group
+or bundle is added, so none of §53.13's six artifacts moves and the deploy needs no Cerbos restart. Every route reuses an action
+that §53, or the PM sections, already define:
+
+| Work (BFF) | Authorizes as | Who that is |
+|---|---|---|
+| The weekly report: draft, edit, submit (63.24) | `social_report` · `create`, `update` | the officer and the team, as the monthly |
+| The weekly report: send back, approve, send | `social_report` · `approve`, `deliver` (§53.7) | the four (SCP-Q25, default) |
+| The allocation's `weeklyReport` | `social_engagement` · `plan` (§53.6) | the four |
+| Ideas: read (63.25) | `social_post` · `read` | the team's read tier |
+| Ideas: add, edit, share, plan, delete | `social_post` · `create`, then `author` or `approve` on the client's would-be post, in one `checkMany` (§53.2's create check) | the client's officer and the four |
+| The content bank: read, add (63.26) | `social_post` · `read`; `create` on the client's would-be post | the team (its seats carry `social_staff`) |
+| The content bank: change or delete another's item | `social_post` · `manage` on the client's would-be post | the officer, the HoD and GM seats (SCP-Q29, default) |
+| Using a saved item in a post | the edit's own `social_post` · `author` (63.6.3) | the officer |
+| The monthly cycle's step tasks (63.27) | none of their own: the pipeline writes them inside actions already authorized (`PUT cycles` and `PUT settings` as `plan`, each stage action as its own, a report's delivery as `deliver`); PM's task routes keep their gates | — |
+| The audit: read (63.28) | `social_post` · `read` | the team |
+| A client's audit: write | `social_post` · `manage` on the client's would-be post | the officer, the HoD and GM seats (SCP-Q34, default) |
+| A prospect's audit: write, attach | `social_engagement` · `plan` | the four |
+| PM project templates (63.29) | `pm_task` · `manage` (unchanged, P3-01) | as today |
+| PM: apply a template, move its kickoff; read the applications | `pm_project` · `manage` on the project (as P3-02's duplicate); `pm_project` · `read` | as today |
+| Social: start a client's onboarding | `social_engagement` · `plan`, then `pm_project` · `manage` on the engagement's project | the four (SCP-Q36, default) |
+| Social: the company's onboarding template | `social_engagement` · `plan` | the four |
+
+**The would-be post.** Ideas, the content bank and a client's audit concern a client, not a post, so their handlers build the
+client's would-be post from the rows, as creating a pipeline post does (§53.2): `{kind: "social_post", tenantId, module: "social",
+ownerId: <the engagement's owner_id>, creatorId: "", approverIds, assigneeIds: [], creativeSource: ""}`. The maker/checker DENY
+(§53.3) still fires on `approve` for the officer (`ownerId`), who passes through `author` or `manage` instead, so nothing is lost
+and nothing widens. The automation DENY covers `author`, `approve`, `manage` and `plan` here as everywhere.
+
+**What a different ruling would change** (each a named, bounded edit):
+- **SCP-Q25 (b), the officer sends the weekly report:** `social_report` gains the attributes `kind` and `ownerId` (type and
+  `resourcePayload()` allow-list in `cerbos.ts`, fed by every report call site), and `resource_social_report.yaml` a `deliver`
+  rule for `member` with `variables.owns && request.resource.attr.kind == "weekly"` written inline (HIER-2), with no mirror
+  (Pattern B). No catalogue change: `deliver` stays one of the four's keys for the monthly. That is §53.13's artifacts 1 and 3,
+  the static pins and live matrix of §53.14, and a Cerbos restart at the deploy.
+- **SCP-Q28 (b) or (c), team-wide items:** an item with no client is changed or deleted under `plan`; no policy change.
+- **SCP-Q29 (b):** adding to the bank asks the ideas' check (`create`, then `author` or `approve`); no policy change. **(c)**
+  reaches Creatives designers, who hold no social read: that needs a new action, so the six artifacts.
+- **SCP-Q34 (b):** a client's audit under `plan`; **(c):** under `social_post` · `create`. No policy change.
+- **SCP-Q36 (b):** the officer would start onboarding through `author` on the would-be post, but an officer usually lacks
+  `pm_project` · `manage`, which the start also asks because it hands tasks to people. So (b) also needs the owner to decide
+  whether that PM gate is waived for this route.
+
+**Proof** (in the BFF sections' lists, on the Linux CI gate with the live Cerbos): every route above refuses the actors its row
+leaves out, with the codes the BFF sections name; §53.14's static pins pass unchanged, because no rule is added.
