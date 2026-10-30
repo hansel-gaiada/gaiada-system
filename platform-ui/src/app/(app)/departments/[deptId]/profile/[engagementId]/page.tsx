@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -16,6 +17,8 @@ import { getBoostBudget } from "@/lib/socialBoosts-data";
 import { getClientAccounts } from "@/lib/socialSimulatedAccounts-data";
 import { getAccountsSummary } from "@/lib/socialAccountsSummary-data";
 import type { AccountsSummaryRead } from "@/lib/socialAccountsSummary";
+import { savedHref } from "@/lib/socialSaved";
+import { auditListHref } from "@/lib/socialAudit";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { BrandBookForm } from "@/components/social/BrandBookForm";
@@ -118,6 +121,10 @@ export default async function SocialClientPage({ params, searchParams }: { param
         projectId={project.kind === "ok" ? project.data : null} askCreatives={askCreatives} openInitial={newMode}
       />
       <ClientTabs deptId={deptId} engagementId={engagementId} active={tab} />
+      {/* SCP-5e, SCP-5g: the client's content bank and the audits, two pages of their own (never tabs of this one). */}
+      <p className="scp-chead__meta">
+        More for this client: <Link className="scp-link" href={savedHref(deptId, { client: engagementId })}>Saved content bank</Link> · <Link className="scp-link" href={auditListHref(deptId, "client")}>Audit</Link>
+      </p>
 
       {tab === "brand" ? (
         <BrandBookForm

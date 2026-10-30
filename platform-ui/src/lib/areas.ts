@@ -138,6 +138,9 @@ const WORKSPACE: AreaRule[] = [
   rule("/departments/[deptId]/boosts", "workspace", false, "SCP-4b: the Social Media Boosting page (candidates, boosts running and waiting, totals); its own entry so the page sits in one area, the department's own"),
   rule("/departments/[deptId]/social-reports", "workspace", false, "SCP-5a: the Social Media Social reports list (each client's monthly report by month); the Reports row's \"Social reports\" tab, never /departments/[deptId]/reports, which is SEO's; its own entry so the page sits in one area, the department's"),
   rule("/departments/[deptId]/social-reports/[reportId]", "workspace", false, "SCP-5a: one monthly report (numbers, notes, action plan, the HoD check and sending), opened from the list and never a menu row; the department's own area"),
+  rule("/departments/[deptId]/saved", "workspace", false, "SCP-5e: the Social Media Saved page, each client's content bank (photos, approved posts, hashtag sets, captions, templates, references); its own entry so the page sits in one area, the department's; the registry tab comes with SCP-5 W5-H1"),
+  rule("/departments/[deptId]/social-audit", "workspace", false, "SCP-5g: the Social Media audit list (clients and prospects, worst first); never /departments/[deptId]/audit, which is SEO's Site Audit in every department; its own entry so the page sits in one area, the department's"),
+  rule("/departments/[deptId]/social-audit/[auditId]", "workspace", false, "SCP-5g: one audit's scorecard (the twelve dimensions, the fixes, the summary, Finalize), opened from the list and never a menu row; the department's own area"),
   ...WORKSPACES.flatMap((ws) =>
     ws.ownedRoutes.map((path): AreaRule => ({ path, subtree: true, kind: "workspace", slug: ws.key, why: `owned by the ${ws.label} workspace` })),
   ),
