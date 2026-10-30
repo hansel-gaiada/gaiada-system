@@ -36,6 +36,7 @@ export const TASK_CLASS_BY_LABEL: Readonly<Record<string, GatewayTask>> = {
   "social.draft_ideas": "draft",
   "social.report_narrative": "draft",
   "social.report_generate": "draft",
+  "social.audit_summary": "draft",
   "reports.narrative": "draft",
   "clients.account_summary": "draft",
   "webdev.assist": "draft",
