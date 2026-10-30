@@ -13723,6 +13723,74 @@ CHECKs (NULL-safe): `subject <> 'client' OR (engagement_id IS NOT NULL AND month
 
 **63.28.6 Proofs:** the fixture twins byte-equal; the six automatic rules on a golden table (no target, no allocated formats, no benchmark peers, no reels, a month touching six weeks, no agreed budget), each with its reason; the overall over the scored dimensions only, and the band edges; the CHECKs with their NULL cases, and one draft per client; a final audit refuses edits and deletion, and its `frozen` stays put when the pipeline moves; another client's officer 403, the client's officer and a seat allowed, the owner refused a client's audit and allowed a prospect's; Draft with AI saves nothing; attach once.
 
+### 63.29 Client onboarding as a PM project template (SCP-5h; plan §4.5, SCP-D4) — **STATUS: PLANNED (2026-10-30)**
+
+**What it is.** Every new client goes through the same checklist, as PM tasks in the client's own project (the client's ERP project is the project the team's checklist asked for), each due a number of working days after the kickoff. PM gains what it lacks for this, a project template and a way to apply it, for every department; Social adds the company's chosen template, starting it for a client, and the onboarding page.
+
+**63.29.1 PM: the project template** (BFF §5's templates, P3-01; migration `<prefix+5>_pm_project_templates.sql`, core, the plain wall of `pm_templates`, no DML, closing assertions):
+- `pm_templates.kind` admits `project`: 0041's inline CHECK (Postgres named it `pm_templates_kind_check`; found by its definition) becomes `pm_templates_kind_ck CHECK (kind IN ('task','doc','project'))`.
+- The `project` payload, checked by `validateTemplatePayload` (400 naming `payload.<path>`): `{title, phases: [{key, title}] (1 to 12), roles: [{key, label}] (1 to 10), tasks: [{key, title ≤ 200, description? ≤ 2,000, phase, role, dueOffsetWorkingDays: 0 to 250, subtasks?: string[] ≤ 20}] (1 to 80)}`; keys unique in each list, and `phase` and `role` naming the template's own.
+- `pm_template_applications` (new): what one application made, for the replay, the kickoff move and the onboarding read.
+
+| Column | Type and rule |
+|---|---|
+| `id`, `tenant_id` | uuid PK: the caller's application id |
+| `project_id` | `uuid NOT NULL`, composite FK to `projects (id, tenant_id)` (`ux_projects_id_tenant`, AD-1) |
+| `template_id`, `template_name` | `uuid NOT NULL → pm_templates`; the name as applied |
+| `kickoff` | `date NOT NULL` |
+| `people` | `jsonb NOT NULL`: `{<roleKey>: userId}` as applied |
+| `tasks`, `milestones` | `jsonb NOT NULL`: `[{key, taskId, phase}]` and `[{phase, milestoneId}]` |
+| `created_by`, `created_at`, `updated_at`, `deleted_at`, `origin_site` | as usual |
+
+`ux_pm_template_applications_once UNIQUE (project_id, template_id) WHERE deleted_at IS NULL`.
+
+PM's routes (under `api/:tenantId/pm`):
+
+| Route | Gate | What it does |
+|---|---|---|
+| `GET`, `POST`, `PATCH`, `DELETE templates` | `pm_task` · `manage` (unchanged) | Take `kind: 'project'` and its payload |
+| `POST projects/:projectId/apply-template` | `pm_project` · `manage` on the project, as P3-02's duplicate (it hands work to people) | `{id, templateId, kickoff: 'YYYY-MM-DD', people: {<roleKey>: userId}}`. One transaction: a PM milestone per phase (due on its last task's day) and a task per template task, due `dueOffsetWorkingDays` working days after the kickoff (the company's default HR holiday calendar, Monday to Friday without one; a kickoff on a day off counts from the next working day), starting on the kickoff, its Ball and Responsible the role's person (none for a role left unmapped), in the project's ready status, with the template's subtasks; then the application row. 201 `{applicationId, tasks: [{key, taskId, dueDate}], milestones}`. A replayed `id` answers 200 with the same ids; the template already applied to the project is 409 `template_already_applied` `{detail: {applicationId}}`; a template that is not `project` is 400 `{field: 'templateId'}`; a person who is not an active member is 400 `{field: 'people.<role>'}` |
+| `GET projects/:projectId/template-applications` | `pm_project` · `read` | `[{id, templateId, templateName, kickoff, people, progress: {done, total}, next: {taskId, title, dueDate, late} \| null}]` |
+| `PATCH template-applications/:applicationId` | `pm_project` · `manage` on its project | `{kickoff}`: moves the kickoff and re-dates the application's open tasks and its milestones by the same rule. 404 `application_not_found` |
+
+The tasks are ordinary PM tasks: people tick, reassign and discuss them through PM's own routes and gates. Nothing in PM knows about Social.
+
+**63.29.2 Social's setting: `<prefix+6>_social_settings_onboarding.sql`** (social; no DML): `social_settings.onboarding_template_id uuid NULL REFERENCES pm_templates (id)`, the company's onboarding template. The FK is single-column, so the route checks it is a live `project` template of the same company. `GET settings` (63.4) answers `onboardingTemplate: {id, name} | null`; `PUT settings` takes `onboardingTemplateId` (null clears it; anything else is 400 `{field: 'onboardingTemplateId'}`), under `plan`.
+
+**63.29.3 The checklist** (SCP-Q35, default). The mock seed makes "Social media client onboarding" from the team's fifteen steps, reworded, and sets it as the company's template; the four change it in PM's template editor.
+
+| Phase | Steps (role) |
+|---|---|
+| Kickoff | Kickoff meeting held and its notes shared (lead); the client's chat group and ours opened (lead) |
+| Access | Partner access to the client's Meta business tools (officer); access to the other networks in scope (officer); the client's shared Drive folder linked to this project (lead) |
+| Brand inputs | Logo, fonts and brand guide received (client); photo and video library, or the previous agency's handover, received (client); dos and don'ts, must-haves and approval contacts agreed (client) |
+| Baseline audit | The client's baseline audit finalized (officer; 63.28) |
+| Strategy | Pillars, tone and format mix agreed (lead); KPIs and the monthly report's format and day agreed (lead); officer, batch and monthly target set in the allocation (lead) |
+| First cycle | The first content plan approved by the client (officer); the client's portal contacts invited (lead); the first posts scheduled (officer) |
+
+Roles: `officer`, `lead` and `client`. A `client` step is the client's to provide; the start maps it to the officer, who chases it (PM has no client assignee). The seeded offsets are placeholders the team replaces: Kickoff 0, Access 2, Brand inputs 5, Baseline audit 8, Strategy 10, First cycle 15 to 20 working days.
+
+**63.29.4 Social's routes** (base 63.0):
+
+| Route | Gate | What it does |
+|---|---|---|
+| `GET onboarding` | `social_post` · `read` | `{template: {id, name} \| null, items: [{engagementId, clientName, engagementStatus, officer, applicationId \| null, kickoff, progress: {done, total}, next: {title, dueDate, late} \| null, baselineAudit: {auditId, status, overall} \| null}]}`: the engagements still in `draft`, and every engagement whose project carries the company template's application with a task open |
+| `POST engagements/:engagementId/onboarding` | `social_engagement` · `plan` (the four, SCP-Q36, default; 403 `not_a_social_approver`), then `pm_project` · `manage` on the engagement's project | `{id, kickoff, people?}`. Order: 404 `engagement_not_found`; the 403s; 400 `{field}`; 409 `no_project`; 409 `onboarding_template_not_set`; then PM's apply, whose refusals pass through (`template_already_applied` included). `people` defaults to the engagement's officer for `officer` and the caller for `lead`; the body may name others. Answers PM's 201, and writes the engagement's activity `onboarding_started` `{applicationId, kickoff}` |
+
+**63.29.5 Pages.** `{D}/onboarding`, "Onboarding": the clients being onboarded (client, officer, kickoff, progress, next step) and one client's checklist by phase (each step's role, due day, tick and late mark). Ticking closes the PM task through PM's own `PATCH pm/tasks/:taskId` and its gate. "Start onboarding" (the four: kickoff and people), "Move kickoff", "Open baseline audit" (creates or opens the client's audit, 63.28) and "Set the allocation" (63.4). Registry: a new row `onboarding` in More, ungated (the server decides). The Settings page gains the template picker.
+
+**DEMO_MODE.** The seeded template, one client mid-onboarding with two late steps, and one not started.
+
+**Agents:**
+
+| Tool | Route | Class |
+|---|---|---|
+| `social.onboarding` | `GET onboarding` | read |
+| `social.startOnboarding` | `POST engagements/:engagementId/onboarding` | `write`, impact `medium`: it hands about fifteen tasks to people, so the person confirms in the thread (63.15) |
+| `pm.applyTemplate` (PM's `mcpTools`) | `POST projects/:projectId/apply-template` | `write`, impact `medium`, for the same reason |
+
+**63.29.6 Proofs:** the payload's 400s (an unknown phase or role, a repeated key, an offset out of range); the apply's due dates on the golden working-day table (a kickoff on a holiday, a weekend, the year turn) and its milestones; one application per project and template, a replay answering the same ids; a kickoff move re-dating only the open tasks; the start refused to the officer and a `company_admin` (403 `not_a_social_approver`), `no_project` and `onboarding_template_not_set`; a `client` step assigned to the officer; the settings picker refusing another company's template and a `task` template.
+
 
 ## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
 
