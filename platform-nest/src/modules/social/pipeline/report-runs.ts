@@ -1,7 +1,8 @@
 // SCP-5 W5-A3 (docs/FRONTEND-BFF-CONTRACT.md §63.24.5, §63.24.6; owner rulings SCP-Q17, Q26, Q37, Q40) — "Generate with AI" for every
 // client the person may draft for: the background run, its progress read and the job `social-report-runs`. The listing and each client's
-// result are decided in report-run-plan.ts (pure); this file reads, writes and runs. W5-A5's schedules start runs through `startReportRun`
-// with `trigger: 'schedule'` (or `run_now`), the schedule's id and its `via`, and everything below holds for them too.
+// result are decided in report-run-plan.ts (pure); this file reads, writes and runs. W5-A5's schedules start runs through this engine: "Run
+// now" through `startReportRun` (`trigger: 'run_now'`), the schedule job through `planReportRun` + `insertReportRun` inside the schedule
+// row's transaction + `launchReportRun` (`trigger: 'schedule'`, the owner, `via` {automation, scheduleId, missed}); everything below holds.
 //
 // ── THE LIFE OF A RUN ────────────────────────────────────────────────────────────────────────────────────────────────────────
 //   start    The route checks (403 automation, the `create` gate, 400 validation, 409 refusals), lists the clients ONCE (report-run-plan.ts)
