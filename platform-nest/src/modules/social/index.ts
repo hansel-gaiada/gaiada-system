@@ -169,6 +169,10 @@ export const socialModule: ModuleContract = {
     "202610301102_social_audits.sql",
     // SCP-5h (BFF §63.29.2) — social_settings.onboarding_template_id, the company's client-onboarding PM project template.
     "202610301201_social_settings_onboarding.sql",
+    // SCP-5 W5-A0 (BFF §63.30.3, SCP-Q41) — the company rules: `social_rule_versions` (append-only, consecutive per company, third
+    // wall) and `rules_ref` on `social_reports` and `social_cycles` (existing rows read 'default:scp-5a'). Lands before the other
+    // wave-5 files.
+    "202610301000_social_rules.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
@@ -1392,6 +1396,70 @@ export const socialModule: ModuleContract = {
           month: { type: "string", description: "Optional content month, YYYY-MM. Default: this month in the company's report zone." },
         },
         required: ["tenantId"],
+      },
+    },
+    // ── SCP-5 W5-A0: the company rules (BFF §63.30.4) ─────────────────────────────────────────────────────────────────────
+    // The same routes, the same gates: the read is the team's; a change is the four's (`social_engagement · plan`). A change is
+    // `medium`: it changes how the whole department works from the next period, so the person confirms in the thread.
+    {
+      name: "social.rules",
+      description:
+        "Read the company's Social Media rules (BFF §63.30): per report kind (daily, weekly, monthly, quarterly, semester, yearly) whether it is "
+        + "on, its due rule, when its numbers freeze, what it holds and what the HoD check needs, and whether AI drafts it; the fiscal year's first "
+        + "month; the ideas settings; the monthly cycle's steps; the audit scorecard; and the Saved categories. Answers the version in force "
+        + "(0 means the seeded defaults), the defaults themselves, each section's last change, and `canEdit`. Who may act is a permission, never a rule.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/rules",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string", description: "Company id (route scope)." } },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "social.setRules",
+      description:
+        "Replace ONE section of the company's Social Media rules (`reports`, `ideas`, `cycle`, `audit` or `saved`) with `value`, the whole section "
+        + "in the shape `social.rules` answers. Pass the `version` `social.rules` answered as `expectedVersion`: another save in between is 409 "
+        + "`rules_changed` with the current version (read again, then retry). A value outside its rule is 400 `invalid_field` naming the field. "
+        + "The change applies to new periods and new records only; nothing made before it is rewritten. Only the four social approvers (the "
+        + "Social Media head, the GM, the owner, the superadmin) may change the rules: anyone else gets 403 `not_a_social_approver`.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "PUT",
+      pathTemplate: "/api/:tenantId/modules/social/rules/:section",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          section: { type: "string", enum: ["reports", "ideas", "cycle", "audit", "saved"], description: "The section to replace." },
+          expectedVersion: { type: "integer", minimum: 0, description: "The version the change was made against (`social.rules`'s `version`)." },
+          value: { type: "object", description: "The whole section, in the shape `social.rules` answers under `rules.<section>`." },
+        },
+        required: ["tenantId", "section", "expectedVersion", "value"],
+      },
+    },
+    {
+      name: "social.resetRules",
+      description:
+        "Set ONE section of the company's Social Media rules back to the seeded defaults (a new version marked `reset`). Pass `social.rules`'s "
+        + "`version` as `expectedVersion` (409 `rules_changed` when another save came first). Applies to new periods and new records only. The "
+        + "four social approvers only (403 `not_a_social_approver`).",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/rules/:section/reset",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          section: { type: "string", enum: ["reports", "ideas", "cycle", "audit", "saved"], description: "The section to reset." },
+          expectedVersion: { type: "integer", minimum: 0, description: "The version the reset was made against." },
+        },
+        required: ["tenantId", "section", "expectedVersion"],
       },
     },
   ],

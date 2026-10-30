@@ -14,6 +14,7 @@ import { loadWorkingCalendar, HOLIDAY_LOOKAHEAD_DAYS } from "../../reports/dept-
 import { addDays, type WorkingCalendar } from "../../hr/working-days";
 import { declareSocialModuleScope } from "../module-scope";
 import { pushReadyByToContentMonthTask, syncContentMonthTask, type ContentMonthTaskResult } from "./content-month";
+import { rulesRefFor, socialRules } from "./rules";
 import {
   APPROVAL_WINDOW_DAYS, averageApprovalDays, clientHealth, isClientSlower, lastDayOfMonth, looksLikeIsoDate, parseStepEstimates,
   postHealth, postHolder, postPhase, prefillDeadline, readyByFor, tallyCounts,
@@ -161,13 +162,16 @@ export async function writeCycleInTx(
   c: PoolClient,
   a: { tenantId: string; engagementId: string; month: string; deadline: string; readyBy: string; actorId: string | null },
 ): Promise<{ cycleId: string; task: ContentMonthTaskResult }> {
+  // SCP-5 W5-A0 (BFF §63.30.3): a new cycle keeps the company's rules it was made under; an existing one keeps its own (the
+  // upsert's UPDATE never touches `rules_ref`), so a rules change reaches new cycles only.
+  const rulesRef = rulesRefFor(await socialRules(c, a.tenantId));
   const { rows: out } = await c.query<{ id: string }>(
-    `INSERT INTO social_cycles (id, tenant_id, engagement_id, month, deadline, ready_by, created_by, updated_by, origin_site)
-     VALUES ($1, $2, $3, $4::date, $5::date, $6::date, $7, $7, $8)
+    `INSERT INTO social_cycles (id, tenant_id, engagement_id, month, deadline, ready_by, created_by, updated_by, origin_site, rules_ref)
+     VALUES ($1, $2, $3, $4::date, $5::date, $6::date, $7, $7, $8, $9)
      ON CONFLICT (tenant_id, engagement_id, month) WHERE deleted_at IS NULL
      DO UPDATE SET deadline = EXCLUDED.deadline, ready_by = EXCLUDED.ready_by, updated_by = EXCLUDED.updated_by, updated_at = now()
      RETURNING id`,
-    [newId(), a.tenantId, a.engagementId, `${a.month}-01`, a.deadline, a.readyBy, a.actorId, config.originSite],
+    [newId(), a.tenantId, a.engagementId, `${a.month}-01`, a.deadline, a.readyBy, a.actorId, config.originSite, rulesRef],
   );
   const cycleId = out[0].id;
   const task = await syncContentMonthTask(c, {

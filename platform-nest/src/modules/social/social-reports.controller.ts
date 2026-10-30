@@ -71,6 +71,7 @@ import { PdfRendererNotConfiguredError, mintPrintJobToken, renderPdfViaSidecar }
 // SCP-1b / SCP-5a (PERMISSION-CONTRACT §53.7, BFF §63.18): every social_report call site sends `module: "social"` and the
 // company's seat approvers (`approverIds`), because `approve` and `deliver` belong to the four social approvers only.
 import { loadSocialApproverIds, socialReportResource } from "./pipeline-authz";
+import { rulesRefFor, socialRules } from "./pipeline/rules";
 // PV7-04a (BFF §55.2): delivery publishes the report to the client, in the same transaction.
 import {
   announceClientReportPublished, deliveredReportTitle, discardStoredReportFile, publishDeliveredReport, storeClientReportFile,
@@ -324,11 +325,13 @@ export class SocialReportsController {
           const prior = await loadMonthlyFor(c, engagementId, monthlyPeriod);
           if (prior) return prior;
         }
+        // SCP-5 W5-A0 (BFF §63.30.3): the report keeps the company's rules it was made under for its whole life.
+        const rulesRef = rulesRefFor(await socialRules(c, tenantId));
         await c.query(
-          `INSERT INTO social_reports (id, tenant_id, engagement_id, period, kind, status, metrics, narrative_md, notes, action_plan, simulated, origin_site)
-           VALUES ($1,$2,$3,$4,$5,'draft',$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
+          `INSERT INTO social_reports (id, tenant_id, engagement_id, period, kind, status, metrics, narrative_md, notes, action_plan, simulated, origin_site, rules_ref)
+           VALUES ($1,$2,$3,$4,$5,'draft',$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`,
           [id, tenantId, engagementId, period, kind, JSON.stringify(frozen), narrativeText, JSON.stringify(notes), JSON.stringify(actionPlan),
-            inputs.simulated, config.originSite],
+            inputs.simulated, config.originSite, rulesRef],
         );
         return null;
       },

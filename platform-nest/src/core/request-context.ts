@@ -62,6 +62,8 @@ interface RequestStore {
    *  should never happen — MISSES the cache instead of returning a stale answer for the wrong
    *  user. The failure mode of a bug here is "one extra query", never "a wrong decision". */
   sessionCurrent?: { key: string; result: Promise<boolean> };
+  /** SCP-5 W5-A0: per-request memo of read-only lookups (`memoiseInRequest`), e.g. a company's social rules. */
+  memo?: Map<string, Promise<unknown>>;
 }
 
 const als = new AsyncLocalStorage<RequestStore>();
@@ -142,6 +144,34 @@ export function memoiseSessionCurrent(
   const result = compute();
   store.sessionCurrent = { key, result };
   return result;
+}
+
+/**
+ * SCP-5 W5-A0: memoise a READ-ONLY lookup for the life of the current HTTP request (the same per-request box as
+ * `memoiseSessionCurrent`, reset at `onRequest`), keyed by `key`. Used by `social/pipeline/rules.ts` so every route
+ * reads a company's rules once per request ("cached for the request", BFF §63.30.6). A rejected lookup is forgotten, so a
+ * failure is never cached. Outside a request (a job, a unit test) every call recomputes. A writer that changes what a key
+ * reads calls `forgetInRequest` with the key's prefix after its write.
+ */
+export function memoiseInRequest<T>(key: string, compute: () => Promise<T>): Promise<T> {
+  const store = als.getStore();
+  if (!store) return compute();
+  if (!store.memo) store.memo = new Map();
+  const hit = store.memo.get(key);
+  if (hit) return hit as Promise<T>;
+  const result = compute();
+  store.memo.set(key, result);
+  result.catch(() => {
+    if (store.memo?.get(key) === result) store.memo.delete(key);
+  });
+  return result;
+}
+
+/** SCP-5 W5-A0: drop every memoised lookup of the current request whose key starts with `prefix`. No-op outside a request. */
+export function forgetInRequest(prefix: string): void {
+  const memo = als.getStore()?.memo;
+  if (!memo) return;
+  for (const k of [...memo.keys()]) if (k.startsWith(prefix)) memo.delete(k);
 }
 
 /**
