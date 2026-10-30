@@ -44,6 +44,8 @@ import type { ContentMonthTaskResult } from "./content-month";
 import type { CycleStepTasksResult } from "./cycle-steps";
 import { composeCycleSteps, readCycleSteps, type CycleStepRow, type StepsReason } from "./cycle-steps-read";
 import { isMonthKey, lastDayOfMonth, readyByFor, looksLikeIsoDate } from "./schedule-health";
+import { isUuid } from "./onboarding";
+import { readOnboardingTemplate, readProjectTemplate } from "./onboarding-data";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_ROWS = 100;
@@ -84,12 +86,16 @@ async function canPlanOf(req: FastifyRequest, tenantId: string): Promise<boolean
 interface SettingsAnswer {
   bufferWorkingDays: number;
   boostCandidateFactor: number;
+  /** SCP-5h (BFF §63.29.2): the company's client-onboarding PM project template, or null for none (a deleted one reads as none). */
+  onboardingTemplate: { id: string; name: string } | null;
   holidayCalendar: { known: boolean; name: string | null };
   canPlan: boolean;
 }
 
-const settingsAnswer = (s: SocialSettings, info: Pick<CalendarInfo, "known" | "name">, canPlan: boolean): SettingsAnswer => ({
-  bufferWorkingDays: s.bufferWorkingDays, boostCandidateFactor: s.boostCandidateFactor,
+const settingsAnswer = (
+  s: SocialSettings, info: Pick<CalendarInfo, "known" | "name">, canPlan: boolean, onboardingTemplate: { id: string; name: string } | null,
+): SettingsAnswer => ({
+  bufferWorkingDays: s.bufferWorkingDays, boostCandidateFactor: s.boostCandidateFactor, onboardingTemplate,
   holidayCalendar: { known: info.known, name: info.name }, canPlan,
 });
 
@@ -117,9 +123,11 @@ export class SocialCyclesController {
   async getSettings(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string): Promise<SettingsAnswer> {
     await authorizeRead(req, tenantId);
     const today = todayIsoInTz(config.reportsTz);
-    const settings = await withTenants([tenantId], (c) => readSettings(c, tenantId), { modules: ["social"] });
+    const { settings, template } = await withTenants([tenantId], async (c) => ({
+      settings: await readSettings(c, tenantId), template: await readOnboardingTemplate(c, tenantId),
+    }), { modules: ["social"] });
     const info = await loadCalendarInfo(tenantId, [today], READY_BY_LOOKBACK_DAYS);
-    return settingsAnswer(settings, info, await canPlanOf(req, tenantId));
+    return settingsAnswer(settings, info, await canPlanOf(req, tenantId), template);
   }
 
   // ==================================================================== PUT settings
@@ -130,7 +138,7 @@ export class SocialCyclesController {
     // Validation, after the decision.
     if (body === null || typeof body !== "object" || Array.isArray(body)) invalid("body");
     const b = body as Record<string, unknown>;
-    for (const k of Object.keys(b)) if (k !== "bufferWorkingDays" && k !== "boostCandidateFactor") invalid(k, "unknown_field");
+    for (const k of Object.keys(b)) if (k !== "bufferWorkingDays" && k !== "boostCandidateFactor" && k !== "onboardingTemplateId") invalid(k, "unknown_field");
     let buffer: number | undefined;
     if (b.bufferWorkingDays !== undefined) {
       const v = b.bufferWorkingDays;
@@ -145,6 +153,14 @@ export class SocialCyclesController {
       factor = Math.round(v * 100) / 100;
     }
 
+    // SCP-5h (BFF §63.29.2): null clears the company's onboarding template; anything else is a template id, checked against the rows below.
+    let templateId: string | null | undefined;
+    if (b.onboardingTemplateId !== undefined) {
+      const v = b.onboardingTemplateId;
+      if (v !== null && !isUuid(v)) invalid("onboardingTemplateId");
+      templateId = v === null ? null : (v as string).toLowerCase();
+    }
+
     const today = todayIsoInTz(config.reportsTz);
     // The deadlines of the open cycles decide which holidays to read; the holidays are read before the transaction (the hr scope is its own).
     const range = await withTenants([tenantId], (c) => openCycleDeadlineRange(c, tenantId, today), { modules: ["social"] });
@@ -157,27 +173,30 @@ export class SocialCyclesController {
       async (c) => {
         await declareSocialModuleScope(c);
         const current = await readSettings(c, tenantId);
+        // A template that is not a live `project` template of THIS company is a 400 before anything is written (the FK is single-column and proves neither).
+        if (typeof templateId === "string" && !(await readProjectTemplate(c, tenantId, templateId))) invalid("onboardingTemplateId");
         const next: SocialSettings = {
           bufferWorkingDays: buffer ?? current.bufferWorkingDays,
           boostCandidateFactor: factor ?? current.boostCandidateFactor,
+          onboardingTemplateId: templateId === undefined ? current.onboardingTemplateId : templateId,
         };
         await c.query(
-          `INSERT INTO social_settings (tenant_id, buffer_working_days, boost_candidate_factor, updated_by, updated_at, origin_site)
-           VALUES ($1, $2, $3, $4, now(), $5)
+          `INSERT INTO social_settings (tenant_id, buffer_working_days, boost_candidate_factor, onboarding_template_id, updated_by, updated_at, origin_site)
+           VALUES ($1, $2, $3, $4, $5, now(), $6)
            ON CONFLICT (tenant_id) DO UPDATE
               SET buffer_working_days = EXCLUDED.buffer_working_days, boost_candidate_factor = EXCLUDED.boost_candidate_factor,
-                  updated_by = EXCLUDED.updated_by, updated_at = now()`,
-          [tenantId, next.bufferWorkingDays, next.boostCandidateFactor, actorId, config.originSite],
+                  onboarding_template_id = EXCLUDED.onboarding_template_id, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+          [tenantId, next.bufferWorkingDays, next.boostCandidateFactor, next.onboardingTemplateId, actorId, config.originSite],
         );
         // The same transaction: every open cycle's ready_by follows the new buffer.
         const recomputed = range
           ? await recomputeOpenReadyBy(c, { tenantId, today, bufferWorkingDays: next.bufferWorkingDays, calendar: info.calendar, range, actorId })
           : { checked: 0, updated: 0, skipped: 0 };
-        return { next, recomputed };
+        return { next, recomputed, template: await readOnboardingTemplate(c, tenantId) };
       },
       { modules: ["social"] },
     );
-    return { ...settingsAnswer(result.next, info, true), cyclesRecomputed: result.recomputed.updated };
+    return { ...settingsAnswer(result.next, info, true, result.template), cyclesRecomputed: result.recomputed.updated };
   }
 
   // ==================================================================== GET cycles

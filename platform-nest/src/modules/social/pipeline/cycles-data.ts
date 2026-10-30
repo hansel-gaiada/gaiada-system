@@ -31,19 +31,21 @@ export const DEFAULT_BOOST_CANDIDATE_FACTOR = 1.25;
 export interface SocialSettings {
   bufferWorkingDays: number;
   boostCandidateFactor: number;
+  /** SCP-5h (BFF §63.29.2): the company's client-onboarding PM project template, or null for none. */
+  onboardingTemplateId: string | null;
 }
 
 /** The company's settings, or the defaults when it has no row. */
 export async function readSettings(c: PoolClient, tenantId: string): Promise<SocialSettings> {
   await declareSocialModuleScope(c);
-  const { rows } = await c.query<{ buffer_working_days: number; boost_candidate_factor: string }>(
-    `SELECT buffer_working_days, boost_candidate_factor FROM social_settings WHERE tenant_id = $1`,
+  const { rows } = await c.query<{ buffer_working_days: number; boost_candidate_factor: string; onboarding_template_id: string | null }>(
+    `SELECT buffer_working_days, boost_candidate_factor, onboarding_template_id::text AS onboarding_template_id FROM social_settings WHERE tenant_id = $1`,
     [tenantId],
   );
   const r = rows[0];
   return r
-    ? { bufferWorkingDays: Number(r.buffer_working_days), boostCandidateFactor: Number(r.boost_candidate_factor) }
-    : { bufferWorkingDays: DEFAULT_BUFFER_WORKING_DAYS, boostCandidateFactor: DEFAULT_BOOST_CANDIDATE_FACTOR };
+    ? { bufferWorkingDays: Number(r.buffer_working_days), boostCandidateFactor: Number(r.boost_candidate_factor), onboardingTemplateId: r.onboarding_template_id }
+    : { bufferWorkingDays: DEFAULT_BUFFER_WORKING_DAYS, boostCandidateFactor: DEFAULT_BOOST_CANDIDATE_FACTOR, onboardingTemplateId: null };
 }
 
 // ── The company's calendar ─────────────────────────────────────────────────────────────────────────────────────────────────
