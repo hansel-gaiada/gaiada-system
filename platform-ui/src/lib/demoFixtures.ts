@@ -31,6 +31,7 @@ import { lmsDemo } from "./demoLms";
 import { deptKpisDemo } from "./demoDeptKpis";
 import { noticesDemo } from "./demoNotices";
 import { assistantGuidanceDemo } from "./demoAssistantGuidance";
+import { aiUsageDemo } from "./demoAiUsage";
 import { deptCalendarDemo } from "./demoDeptCalendar";
 import { deptAppraisalsDemo } from "./demoDeptAppraisals";
 import { financeDemo } from "./demoFinance";
@@ -2540,6 +2541,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // placed high so no later catch-all answers it with an empty body, which the page would read as "no text".
   const guidance = assistantGuidanceDemo(method, p, body, userId);
   if (guidance) return guidance;
+
+  // AIP-16 and AIP-05 — the AI usage reads (`/ai-usage/me`, `/units/:id`, `/company`, BFF §66). Read-only and deterministic (lib/demoAiUsage.ts), placed
+  // high so no later catch-all answers one with an empty body, which a screen would read as "No AI use recorded".
+  const aiUsage = aiUsageDemo(method, p, url.searchParams, userId);
+  if (aiUsage) return aiUsage;
 
   // DW-10c-3 — the department calendar (`/departments/:unitNodeId/calendar`, BFF §59.1). Answers in the server's order of checks (read gate,
   // window, unit narrowing, existence) and reads its events leg from the calendar-event store below (lib/demoCalendarEvents.ts). Placed

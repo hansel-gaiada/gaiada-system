@@ -1,0 +1,27 @@
+/* AIP-16 and AIP-05: the AI usage screens (BFF §66). Tokens only (src/styles/tokens.test.ts); a mark is said in words, never by colour alone. */
+.aiu { display: flex; flex-direction: column; gap: var(--space-16); }
+.aiu a { color: var(--accent); }
+.aiu a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.aiu-total { margin: 0; display: grid; gap: var(--space-8) var(--space-20); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.aiu-total > div { display: flex; flex-direction: column; gap: var(--space-4); }
+.aiu-total dt { font: 600 12px var(--font-body); letter-spacing: 0.04em; color: var(--ink-muted); }
+.aiu-total dd { margin: 0; font: 700 20px var(--font-display); color: var(--text-primary); overflow-wrap: anywhere; }
+.aiu-notes { margin: var(--space-12) 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-4); font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+.aiu-mark { font: 400 11px var(--font-body); color: var(--ink-muted); white-space: nowrap; }
+.aiu-state { margin: 0; font: 400 14px/1.6 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
+.aiu-units { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-8); }
+.aiu-units a { color: var(--accent); }
+
+/* The month picker: links and a plain GET form, so it works before hydration. */
+.aiu-month { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12) var(--space-20); margin-bottom: var(--space-16); }
+.aiu-month__nav { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); font: 600 13px var(--font-body); }
+.aiu-month__now { color: var(--text-primary); font: 700 14px var(--font-display); }
+.aiu-month__link { color: var(--accent); text-decoration: none; }
+.aiu-month__link:hover { text-decoration: underline; }
+.aiu-month__link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.aiu-month__form { display: inline-flex; align-items: center; gap: var(--space-8); }
+.aiu-month__label { display: inline-flex; align-items: center; gap: var(--space-8); font: 400 13px var(--font-body); color: var(--ink-muted); }
+.aiu-month__select { height: 32px; padding: 0 var(--space-8); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); font: 400 13px var(--font-body); }
+@media (max-width: 560px) {
+  .aiu .lux-table { overflow-x: auto; }
+}

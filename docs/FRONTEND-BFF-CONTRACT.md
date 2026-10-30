@@ -14302,3 +14302,23 @@ Each `byDepartment` line links to its unit view (66.4). The budget lines are add
 
 Three read routes under `/api/:tenantId/ai-usage/`, no MCP tool, no module tool, no n8n flow. No write route yet (`manage` and `lift_stop`
 arrive with AIP-17b and AIP-18).
+
+### 66.7 The screens (AIP-16 and AIP-05, 2026-10-30, BUILT in `platform-ui`; no new route)
+
+Three server pages read the routes above through `lib/aiUsage-data.ts` (a 403 is `forbidden`; on the unit route only, a 404 is `not_found`; anything else, a
+malformed answer included, is `unavailable` with the reason; never an empty month). `lib/aiUsage.ts` checks every answer: a missing count, a cost that is not a
+decimal string, or a non-`YYYY-MM` month makes the read `unavailable`, and an absent `people` key stays absent. The month is a UTC calendar month in `?month=`
+(the current one by default, never a future one); the month picker is links plus a plain GET form.
+
+| Screen | Path | Reads | Offered to |
+|---|---|---|---|
+| My AI use (AIP-05) | `/analytics/ai-usage` | `GET ai-usage/me` | everyone, the Performance block's Analytics row (ungated; a non-staff caller gets the server's 403, said in words) |
+| AI usage, one department (AIP-16) | `/analytics/ai-usage/department?unit={dept}` | `GET ai-usage/units/:unit` | the Analytics row, `any` of `unitCap` `ai_usage.read_unit` (core.ai_usage.read_unit) and `cap` `ai_usage.read_company` (core.ai_usage.read_company); with no `?unit=` it lists the departments the person may open |
+| AI usage, the company (AIP-16) | `/ai-usage` | `GET ai-usage/company` | the Company area (`areas.ts`, beside Knowledge and AI Agents): `any` of `cap` `ai_usage.read_company` and the new registry gate `leadGm` (the lead of the company's GM unit: the GM is a seat, not a grant, so no capability can name it) |
+
+Every screen leads with the by-surface table (never one combined calls number: knowledge embeds outnumber replies about 3,000 to 1), then the month total (cost and
+tokens), then by model (unit and company), by department (company; each line links to the unit screen for the same month; `unitNodeId: null` is the unlinked
+line "No department recorded"), "Company, no person" (`noPerson`), by person (the unit screen, only when the answer HAS `people`) and by day. A `null` sum is "unknown",
+never 0; a cost is formatted from its decimal string (four decimals under a dollar, "under $0.0001" for a non-zero cost below that); tokens say "estimated" when
+`estimatedTokenCalls` > 0, a cost says "from our price table" when `tableCostCalls` > 0 and "partial" when `noCostCalls` > 0. An empty month says "No AI use recorded in <Month> <year>".
+The UI gate is cosmetic: the department screen asks the server whenever it is given a unit, so a seat the UI cannot see (the GM) is never turned away by a mirror.

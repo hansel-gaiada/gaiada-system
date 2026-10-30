@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
-import { ADMIN_ROWS, ASSISTANT_ROW, COMPANY_ROWS, GENERIC_WORKSPACE, WORKSPACES, sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
+import { ADMIN_ROWS, ASSISTANT_ROW, COMPANY_ROWS, GENERIC_WORKSPACE, PERFORMANCE_ROWS, WORKSPACES, sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
 import { approvalsGateInput, concreteRows, functionalConsoleFor, gateAllows, holdsDecideRight, homeArea, resolveMyWorkspaces } from "./workspaceAccess";
 import { areaFor, resolveArea } from "./areas";
 import { AGENCY, HOTEL, ROOT, agencyTree, lead, me, member, node, person } from "./workspaceFixtures";
@@ -342,5 +342,68 @@ describe("functionalConsoleFor (DW-7d: one home for HR, Finance and IT)", () => 
     expect(functionalConsoleFor("GM")).toBeNull();
     expect(functionalConsoleFor("Human Resources")).toBeNull();
     expect(functionalConsoleFor("")).toBeNull();
+  });
+});
+
+// AIP-05 and AIP-16 (BFF section 66): who is OFFERED the AI usage tabs and the company page. A mirror of PERMISSION-CONTRACT section 58, never the
+// authority: the server decides every read. The department tab is `any` of the unit's head (`unitCap`) and the company read; the company row is the
+// company read or the GM SEAT (`leadGm`, because the GM is a seat and no capability can name it); My AI use is offered to everyone.
+describe("the AI usage tabs and the company page (AIP-05, AIP-16)", () => {
+  const analytics = PERFORMANCE_ROWS.find((r) => r.key === "analytics")!;
+  const companyRow = COMPANY_ROWS.find((r) => r.key === "ai-usage")!;
+  const tabs = (m: Me, unitPath: string[], deptId: string | null) =>
+    concreteRows([analytics], { ...ctx(m, "co-a", unitPath), deptId })[0].tabs
+      .filter((t) => t.key === "ai-use" || t.key === "ai-usage")
+      .map((t) => `${t.label} ${t.href}`);
+  const MINE = "My AI use /analytics/ai-usage";
+  const DEPT = "AI usage /analytics/ai-usage/department?unit=d-web";
+  const admin = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
+  const owner = me([{ role: "owner", scopeType: "company", scopeId: "co-a" }]);
+  const superadmin = me([{ role: "platform_admin", scopeType: "global", scopeId: null as unknown as string }]);
+  const GM_UNITS = { gm: ["d-gm"], "social-media": ["d-soc"] };
+  const companyRowOffered = (m: Me, units: Record<string, string[]> = GM_UNITS) => gateAllows(companyRow.gate, { ...ctx(m, "co-a"), units });
+
+  it("offers a member only My AI use, whatever department they are looking at", () => {
+    expect(tabs(me([member()]), ["d-web", "root"], "d-web")).toEqual([MINE]);
+    expect(tabs(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), ["d-web", "root"], "d-web")).toEqual([MINE]);
+  });
+  it("offers the head of the unit, and of an enclosing unit, AI usage for it", () => {
+    expect(tabs(me([member(), lead("d-web")]), ["d-web", "root"], "d-web")).toEqual([MINE, DEPT]);
+    expect(tabs(me([member(), lead("d-web")]), ["d-web-fe", "d-web", "root"], "d-web")).toEqual([MINE, DEPT]);
+  });
+  it("does not offer the head of a sibling, or of a unit only below, AI usage for this department", () => {
+    expect(tabs(me([member(), lead("d-seo")]), ["d-web", "root"], "d-web")).toEqual([MINE]);
+    expect(tabs(me([member(), lead("d-web-fe")]), ["d-web", "root"], "d-web")).toEqual([MINE]);
+  });
+  it("offers the company read (a company admin, the owner, the superadmin) both tabs on any department", () => {
+    expect(tabs(admin, ["d-seo", "root"], "d-web")).toEqual([MINE, DEPT]);
+    expect(tabs(owner, ["d-web", "root"], "d-web")).toEqual([MINE, DEPT]);
+    expect(tabs(superadmin, ["d-web", "root"], "d-web")).toEqual([MINE, DEPT]);
+  });
+  it("drops the department tab, and keeps My AI use, for a workspace with no department id", () => {
+    expect(tabs(admin, [], null)).toEqual([MINE]);
+  });
+
+  it("offers the company page in the Company area to the company read and the GM seat, and to no one else", () => {
+    expect(companyRowOffered(admin)).toBe(true);
+    expect(companyRowOffered(owner)).toBe(true);
+    expect(companyRowOffered(superadmin)).toBe(true);
+    expect(companyRowOffered(me([member(), lead("d-gm")]))).toBe(true);
+  });
+  it("does not offer the company page to a member, a manager, a Social head or a head of another department", () => {
+    expect(companyRowOffered(me([member()]))).toBe(false);
+    expect(companyRowOffered(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]))).toBe(false);
+    expect(companyRowOffered(me([member(), lead("d-soc")]))).toBe(false);
+    expect(companyRowOffered(me([member(), lead("d-web")]))).toBe(false);
+  });
+  it("offers the GM seat nothing when the company's GM unit is not known, and not a head whose lead seat is in another company", () => {
+    expect(companyRowOffered(me([member(), lead("d-gm")]), {})).toBe(false);
+    expect(companyRowOffered(me([member(), lead("d-gm", ["co-b"])]))).toBe(false);
+  });
+  it("is in the Company area's rows for the company read and out of them for a member", () => {
+    const rowKeys = (m: Me) => concreteRows(COMPANY_ROWS, { ...ctx(m, "co-a"), units: GM_UNITS, deptId: null }).map((r) => r.key);
+    expect(rowKeys(admin)).toContain("ai-usage");
+    expect(rowKeys(me([member(), lead("d-gm")]))).toContain("ai-usage");
+    expect(rowKeys(me([member()]))).not.toContain("ai-usage");
   });
 });

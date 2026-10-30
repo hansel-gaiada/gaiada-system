@@ -956,4 +956,17 @@ export const CAPABILITY_MAP = {
     permissions: ["core.dept_assistant_preamble.read", "core.dept_assistant_preamble.edit"],
     semantics: "all",
   },
+
+  // ── AIP-16 · the AI usage screens (contract §66, PERMISSION-CONTRACT §58) ────────────────────────
+  // A unit's head reads that unit (and the units below it): totals AND per-person lines (AIP-D6). Resolved at `org_unit` scope.
+  "ai_usage.read_unit": {
+    permissions: ["core.ai_usage.read_unit"],
+    semantics: "all",
+  },
+  // The company tier (AIP-D18): company admins, the owner, the superadmin. Totals by department, model, surface and day; never a person.
+  // The GM reaches the same reads through a seat rule (`ai_usage_gm_seat`), which no bundle carries.
+  "ai_usage.read_company": {
+    permissions: ["core.ai_usage.read_company"],
+    semantics: "all",
+  },
 } as const satisfies Record<Capability, CapabilityDef>;

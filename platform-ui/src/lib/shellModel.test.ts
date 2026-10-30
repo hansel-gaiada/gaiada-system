@@ -120,8 +120,9 @@ describe("buildShellModel: HR staff with no HR node in the org tree", () => {
   it("leaves out every row that needs a department id", () => {
     expect(keys(hr.rows.work)).not.toContain("pm");
     expect(keys(hr.rows.work)).not.toContain("tools");
-    // Analytics keeps HR's own tab and My activity (DW-4i: it needs no department), and loses the {dept} Work and Team activity tabs.
-    expect(hr.rows.performance.find((r) => r.key === "analytics")?.tabs.map((t) => t.href)).toEqual(["/analytics/activity", "/hr/analytics"]);
+    // Analytics keeps HR's own tab, My activity (DW-4i) and My AI use (AIP-05): neither needs a department. It loses the {dept} Work, Team activity
+    // and AI usage (AIP-16) tabs; the company read reaches AI usage through the Company area's /ai-usage page.
+    expect(hr.rows.performance.find((r) => r.key === "analytics")?.tabs.map((t) => t.href)).toEqual(["/analytics/activity", "/analytics/ai-usage", "/hr/analytics"]);
     expectNothingPlanned(hr);
   });
 

@@ -137,6 +137,11 @@ export function gateAllows(gate: Gate | undefined, ctx: GateContext): boolean {
       return isElevated(ctx.me);
     case "leadSocial":
       return canLeadSocial(ctx.me, ctx.tenantId, { social: ctx.units?.["social-media"] ?? [], gm: ctx.units?.gm ?? [] });
+    case "leadGm": {
+      if (!ctx.tenantId) return false;
+      const gm = ctx.units?.gm ?? [];
+      return leadUnits(ctx.me, ctx.tenantId).some((id) => gm.includes(id));
+    }
     case "platformOperator":
       return isPlatformOperator(ctx.me);
     case "rootGroup":

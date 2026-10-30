@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { PACKS } from "./packs";
 import { bespokeToolkit, deptTabs } from "./deptToolkits";
 import {
-  WORKSPACES, GENERIC_WORKSPACE, PERFORMANCE_ROWS, YOU_ROWS, COMPANY_ROWS, ADMIN_ROWS, TOOLS_ROW,
+  WORKSPACES, GENERIC_WORKSPACE, PERFORMANCE_ROWS, ASSISTANT_ROW, YOU_ROWS, COMPANY_ROWS, ADMIN_ROWS, TOOLS_ROW,
   OVERVIEW_BANDS, REPORT_PERIODS, workspaceFor, workspaceBySlug, hrefFor, isPlanned, sidebarRows, departmentOverviewHref, deptCalendarTab,
   type Gate, type Workspace, type WorkspaceRow, type WorkspaceTab,
 } from "./workspaces";
@@ -312,11 +312,46 @@ describe("Analytics activity tabs (DW-4i, BFF section 44.9)", () => {
   });
 
   it("keeps Work first and puts both in every workspace's Analytics row, ahead of the department's own analytics tabs", () => {
-    expect(analytics.tabs.map((t) => t.key)).toEqual(["work", "activity", "team-activity"]);
+    // AIP-05 and AIP-16 add `ai-use` and `ai-usage` after Team activity, still ahead of the department's own tabs.
+    expect(analytics.tabs.map((t) => t.key)).toEqual(["work", "activity", "team-activity", "ai-use", "ai-usage"]);
     for (const ws of ALL) {
       const row = sidebarRows(ws).performance.find((r) => r.key === "analytics")!;
-      expect(row.tabs.map((t) => t.key).slice(0, 3), ws.key).toEqual(["work", "activity", "team-activity"]);
+      expect(row.tabs.map((t) => t.key).slice(0, 5), ws.key).toEqual(["work", "activity", "team-activity", "ai-use", "ai-usage"]);
     }
+  });
+});
+
+// AIP-05 and AIP-16 (BFF section 66): the two AI usage tabs in the Analytics row, and the company page's row in the Company area. NOT the AI Assistant
+// row: its first tab opens the drawer, so no page draws that row's tab strip (found in AIP-13d's live walk).
+describe("the AI usage tabs (AIP-05, AIP-16)", () => {
+  const analytics = PERFORMANCE_ROWS.find((r) => r.key === "analytics")!;
+
+  it("offers My AI use to everyone, at /analytics/ai-usage, with no gate", () => {
+    const mine = analytics.tabs.find((t) => t.key === "ai-use")!;
+    expect([mine.label, mine.href, mine.gate, mine.ticket]).toEqual(["My AI use", "/analytics/ai-usage", undefined, undefined]);
+  });
+
+  it("offers AI usage for THIS department to its head or the company read, and drops it for a workspace with no department", () => {
+    const tab = analytics.tabs.find((t) => t.key === "ai-usage")!;
+    expect([tab.label, tab.href]).toEqual(["AI usage", "/analytics/ai-usage/department?unit={dept}"]);
+    expect(tab.gate).toEqual({
+      kind: "any",
+      gates: [{ kind: "unitCap", cap: "ai_usage.read_unit" }, { kind: "cap", cap: "ai_usage.read_company" }],
+    });
+    expect(tab.ticket).toBeUndefined();
+  });
+
+  it("puts neither tab in the AI Assistant row (its first tab opens the drawer)", () => {
+    expect(ASSISTANT_ROW.tabs.map((t) => t.key)).not.toContain("ai-usage");
+    expect(ASSISTANT_ROW.tabs.map((t) => t.href).join(" ")).not.toContain("ai-usage");
+  });
+
+  it("puts the company page in the Company area, beside Knowledge and AI Agents, for the company read and the GM seat", () => {
+    const keys = COMPANY_ROWS.map((r) => r.key);
+    expect(keys.indexOf("ai-usage")).toBe(keys.indexOf("agents") + 1);
+    const row = COMPANY_ROWS.find((r) => r.key === "ai-usage")!;
+    expect(row.tabs.map((t) => [t.label, t.href])).toEqual([["AI usage", "/ai-usage"]]);
+    expect(row.gate).toEqual({ kind: "any", gates: [{ kind: "cap", cap: "ai_usage.read_company" }, { kind: "leadGm" }] });
   });
 });
 

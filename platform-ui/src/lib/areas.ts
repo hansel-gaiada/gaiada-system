@@ -68,6 +68,8 @@ const PERFORMANCE: AreaRule[] = [
   rule("/reports/client", "performance", false, "PV7-05: a client's delivery report, like the project report"),
   rule("/analytics/activity", "performance", false, "DW-4i: Analytics > My activity, the year map of all work (BFF section 44.9)"),
   rule("/analytics/activity/team", "performance", false, "DW-4i: Analytics > Team activity, for a head"),
+  rule("/analytics/ai-usage", "performance", false, "AIP-05: Analytics > My AI use, the person's own month (BFF section 66.3)"),
+  rule("/analytics/ai-usage/department", "performance", false, "AIP-16: Analytics > AI usage, one department's month (BFF section 66.4)"),
   rule("/appraisals", "performance"),
   rule("/appraisals/mine", "performance"),
   rule("/appraisals/department", "performance"),
@@ -109,6 +111,7 @@ const COMPANY: AreaRule[] = [
   rule("/deliverables", "company", true),
   rule("/knowledge", "company"),
   rule("/agents", "company", true),
+  rule("/ai-usage", "company", false, "AIP-16: the company's AI usage by department, model, surface and day (BFF section 66.5)"),
   rule("/office", "company", true),
   rule("/notices", "company", false, "DW-10a-2: the company-wide notice board. A department's own is /departments/[deptId]/notices, in its workspace (the subtree rule below)"),
 ];

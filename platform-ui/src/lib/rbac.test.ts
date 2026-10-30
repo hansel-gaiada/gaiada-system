@@ -917,3 +917,47 @@ describe("assistant.preamble.edit (AIP-13b)", () => {
     });
   });
 });
+
+// AIP-16: `ai_usage.read_unit` and `ai_usage.read_company` mirror resource_ai_usage.yaml (BFF section 66, PERMISSION-CONTRACT section 58).
+// read_unit: the head of the unit or an enclosing one (`canInUnit`) and platform_admin; the owner does NOT hold it. read_company: company_admin, the
+// owner and platform_admin. The GM is a seat, not a grant, so no role carries the capability for it (the registry's `leadGm` gate offers the page).
+describe("ai_usage.read_unit and ai_usage.read_company (AIP-16)", () => {
+  const UNIT = "ai_usage.read_unit" as const;
+  const COMPANY = "ai_usage.read_company" as const;
+  const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId }]);
+  const lead = (unit: string, tenantIds: string[] = ["co-a"]) => me([
+    { role: "member", scopeType: "company", scopeId: "co-a" },
+    { role: "org_unit_lead", scopeType: "org_unit", scopeId: unit, tenantIds },
+  ]);
+  it("gives the company read to company_admin, the owner and platform_admin, in their own company only", () => {
+    expect(can(as("company_admin"), COMPANY, "co-a")).toBe(true);
+    expect(can(as("owner"), COMPANY, "co-a")).toBe(true);
+    expect(can(as("platform_admin", "global", null), COMPANY, "co-a")).toBe(true);
+    expect(can(as("company_admin"), COMPANY, "co-b")).toBe(false);
+    expect(can(as("owner"), COMPANY, "co-b")).toBe(false);
+  });
+  it("never gives the company read to a manager, a member, a viewer, HR or a head", () => {
+    for (const role of ["manager", "member", "viewer", "hr_manager", "hr_staff", "client"]) expect(can(as(role), COMPANY, "co-a"), role).toBe(false);
+    expect(can(lead("d-web"), COMPANY, "co-a")).toBe(false);
+  });
+  it("gives the unit read to platform_admin and the head, and not to the owner or company_admin (they read a unit through the company tier)", () => {
+    expect(can(as("platform_admin", "global", null), UNIT, "co-a")).toBe(true);
+    expect(can(as("owner"), UNIT, "co-a")).toBe(false);
+    expect(can(as("company_admin"), UNIT, "co-a")).toBe(false);
+    for (const role of ["manager", "member", "viewer", "client"]) expect(can(as(role), UNIT, "co-a"), role).toBe(false);
+  });
+  it("reaches the head through canInUnit over the unit's path, an enclosing head on a unit below, and never company-wide", () => {
+    expect(can(lead("d-web"), UNIT, "co-a")).toBe(false);
+    expect(canInUnit(lead("d-web"), UNIT, "co-a", ["d-web", "root"])).toBe(true);
+    expect(canInUnit(lead("d-web"), UNIT, "co-a", ["d-web-fe", "d-web", "root"])).toBe(true);
+  });
+  it("does not reach a head of a sibling, of a unit only below, or whose lead seat is in another company", () => {
+    expect(canInUnit(lead("d-seo"), UNIT, "co-a", ["d-web", "root"])).toBe(false);
+    expect(canInUnit(lead("d-web-fe"), UNIT, "co-a", ["d-web", "root"])).toBe(false);
+    expect(canInUnit(lead("d-web", ["co-b"]), UNIT, "co-a", ["d-web", "root"])).toBe(false);
+  });
+  it("is declared in the capability map with the key it mirrors", () => {
+    expect(CAPABILITY_MAP[UNIT]).toEqual({ permissions: ["core.ai_usage.read_unit"], semantics: "all" });
+    expect(CAPABILITY_MAP[COMPANY]).toEqual({ permissions: ["core.ai_usage.read_company"], semantics: "all" });
+  });
+});

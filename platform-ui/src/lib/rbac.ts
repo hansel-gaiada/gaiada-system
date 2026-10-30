@@ -475,6 +475,16 @@ export const CAPABILITIES = [
   // (the permission arm covers `manage` only, so the owner's reach is exactly company_admin's: any unit, never a bot). ONE capability
   // because the screen offers read and edit to the same people (the server's two routes ask `manage`, else the per-unit action).
   "assistant.preamble.edit",
+
+  // ── AIP-16 (2026-10-30, the AI usage screens, docs/FRONTEND-BFF-CONTRACT.md §66, PERMISSION-CONTRACT §58) — two capabilities, one per tier the
+  // screens offer, mirroring `resource_ai_usage.yaml`. `read_own` needs none: every staff member holds it, and "My AI use" is ungated.
+  // `ai_usage.read_unit`: org_unit_lead over the unit or an enclosing one (`canInUnit`), platform_admin by wildcard. A head of a sibling or of a
+  // unit below is refused by the server, and so is never offered the page for it. The owner does NOT hold it (no mirror, by design): the owner
+  // reaches every unit through the company read below.
+  "ai_usage.read_unit",
+  // `ai_usage.read_company`: company_admin by role, the owner through the permission arm, platform_admin by wildcard. The GM is a SEAT, not a
+  // grant (`ai_usage_gm_seat`): no role carries it, so the registry offers the GM the company page through its own `leadGm` gate.
+  "ai_usage.read_company",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -570,6 +580,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "notices.post",
     // AIP-13b: company_admin reads and edits every unit's assistant preamble.
     "assistant.preamble.edit",
+    // AIP-16: company_admin reads the company's AI usage and any unit's totals (never per-person lines: the server omits them).
+    "ai_usage.read_company",
   ],
   // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
   // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the
@@ -823,7 +835,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
                   // DW-10a-2: the head posts, edits and withdraws notices of their own unit and the units below it (never company-wide).
                   "notices.post",
                   // AIP-13b: the head edits the assistant preamble of their own unit and the units below it (never another unit's).
-                  "assistant.preamble.edit"],
+                  "assistant.preamble.edit",
+                  // AIP-16: the head reads their own unit's AI usage, per-person lines included, and the units below it (never a sibling's).
+                  "ai_usage.read_unit"],
   // IAM-02a-FIX / DR-2b — see the `Role` union's `agency_approver` comment for the full trail. Its
   // ENTIRE verified Cerbos reach is `agency_approval:approve` (via `module_approver`, module always
   // `"agency"`) — nothing else, not even `agency_approval:read` (that baseline rule names
@@ -938,6 +952,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "work_request.send_across", "work_request.read_across",
     // AIP-13b: owner holds `manage` (read, edit any unit) through the permission arm `perm_dept_assistant_preamble_manage`.
     "assistant.preamble.edit",
+    // AIP-16: owner holds `read_company` through company_admin's envelope and the permission arm `perm_ai_usage_read_company`.
+    "ai_usage.read_company",
   ],
 };
 

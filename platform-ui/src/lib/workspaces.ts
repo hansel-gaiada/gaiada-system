@@ -59,6 +59,10 @@ export type Gate =
   /** The four Social approvers (SCP-Q19, PERMISSION §53.4): rbac.ts's `canLeadSocial` over the active company's Social Media and GM units
    *  (`GateContext.units`). For the Social rows only they may open (Settings, SCP-1c; the Team dashboard, SCP-5d). */
   | { kind: "leadSocial" }
+  /** The GM SEAT and no one else (AIP-16, PERMISSION §58: `ai_usage_gm_seat`): the person leads one of the active company's GM units
+   *  (`GateContext.units.gm`, found the way every GM surface finds them). Narrower than `leadSocial`, which also admits the Social heads, the
+   *  owner and platform_admin. The GM is a seat, not a capability, so no `cap` gate can name it; combine it with the capability gate. */
+  | { kind: "leadGm" }
   /** `isPlatformOperator(me)` (PV-D18). */
   | { kind: "platformOperator" }
   /** The Group area: the root owner or `platform_admin`, while the active company is the root (PV-D11). */
@@ -1132,6 +1136,15 @@ export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
       // DW-4i: a head's Team activity for THIS department (the same gate as the Team report); the server gates every person.
       { key: "team-activity", label: "Team activity", href: "/analytics/activity/team?unit={dept}", icon: "pulse", gate: { kind: "unitCap", cap: "reports.department.view" },
         blurb: "What each person on your team did, by kind." },
+      // AIP-05 (BFF §66.3, owner ruling AIP-D18): the person's own AI use this month. Ungated: every staff member holds `read_own`, and a
+      // person who is not staff of the company is told so by the page (the server's 403). Counts and money only.
+      { key: "ai-use", label: "My AI use", href: "/analytics/ai-usage", icon: "pulse", blurb: "Your own AI use this month: calls, tokens and cost." },
+      // AIP-16 (BFF §66.4, AIP-D6 and AIP-D18): THIS department's AI use. Offered to its head (`unitCap`, who also sees each person) and to the
+      // company read (company admins, the owner, the superadmin: totals, and for the owner and superadmin the people too). The Analytics row,
+      // not the AI Assistant row: that row's first tab opens the drawer, so no page draws its tab strip (found in AIP-13d's live walk).
+      { key: "ai-usage", label: "AI usage", href: "/analytics/ai-usage/department?unit={dept}", icon: "pulse",
+        gate: { kind: "any", gates: [{ kind: "unitCap", cap: "ai_usage.read_unit" }, { kind: "cap", cap: "ai_usage.read_company" }] },
+        blurb: "This department's AI use this month: by surface, model and day, and each person for a head." },
     ],
   },
   {
@@ -1241,6 +1254,13 @@ export const COMPANY_ROWS: readonly WorkspaceRow[] = [
   },
   { key: "knowledge", label: "Knowledge", icon: "box", tabs: [{ key: "knowledge", label: "Knowledge", href: "/knowledge", icon: "box" }] },
   { key: "agents", label: "AI Agents", icon: "agents", tabs: [{ key: "agents", label: "AI Agents", href: "/agents", icon: "agents" }] },
+  // AIP-16 (BFF §66.5, AIP-D18): the company's AI use by department, model, surface and day. For the owner, company admins and the superadmin
+  // (`ai_usage.read_company`) and the GM, who is a seat and not a grant (`leadGm`). Cosmetic: the server decides every read.
+  {
+    key: "ai-usage", label: "AI usage", icon: "pulse",
+    gate: { kind: "any", gates: [{ kind: "cap", cap: "ai_usage.read_company" }, { kind: "leadGm" }] },
+    tabs: [{ key: "ai-usage", label: "AI usage", href: "/ai-usage", icon: "pulse" }],
+  },
   { key: "learning", label: "Learning catalogue", icon: "learning", tabs: [{ key: "catalogue", label: "Learning catalogue", href: "/learning/catalogue", icon: "learning" }] },
   { key: "office", label: "The Office", icon: "pulse", tabs: [{ key: "office", label: "The Office", href: "/office", icon: "pulse" }] },
 ];
