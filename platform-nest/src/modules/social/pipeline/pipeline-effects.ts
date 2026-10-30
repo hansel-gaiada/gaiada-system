@@ -23,6 +23,7 @@ import { assertDispatchChain, resolveDispatchOrgHandle } from "../publisher/prov
 import { assertRealPublisherTarget, isSimulatedPublisher } from "../publisher/simulation";
 import { SCP } from "./fixture";
 import { syncContentMonthProgress } from "./content-month-progress";
+import { syncCycleStepProgress } from "./cycle-steps";
 import { captionWithHashtags } from "./handoff-checks";
 import { COLUMN_EFFECTS, splitEffect, type PipelinePostState, type StageApplied } from "./machine";
 import {
@@ -651,6 +652,9 @@ export const EFFECT_RUNNERS: Record<string, (run: EffectRun) => Promise<void>> =
   withdraw_pending_client_reviews: (run) => withdrawReviews(run),
   // ── the content-month PM task (SCP-1n, BFF §63.13): its progress, done and reopen follow the cycle's posts, one direction only ──
   content_month_progress: async (run) => { if (run.row.cycle_id) await syncContentMonthProgress(run.c, run.tenantId, run.row.cycle_id, run.actorId || null); },
+  // ── the monthly cycle's step tasks (SCP-5f, BFF §63.27.3): closed and reopened by their conditions, AFTER the content-month task (the lock
+  //    order: the post, the content-month task, the step tasks in the rules' order). On every action that changes a counted post's status. ──
+  cycle_steps: async (run) => { if (run.row.cycle_id) await syncCycleStepProgress(run.c, run.tenantId, run.row.cycle_id, run.actorId || null); },
   // ── the month request and designs ──
   join_or_open_month_request: joinOrOpenMonthRequest,
   insert_design: insertDesign,

@@ -72,6 +72,7 @@ import { PdfRendererNotConfiguredError, mintPrintJobToken, renderPdfViaSidecar }
 // company's seat approvers (`approverIds`), because `approve` and `deliver` belong to the four social approvers only.
 import { loadSocialApproverIds, socialReportResource } from "./pipeline-authz";
 import { rulesRefFor, socialRules } from "./pipeline/rules";
+import { closeReportStepsOnDelivery } from "./pipeline/cycle-steps";
 // PV7-04a (BFF §55.2): delivery publishes the report to the client, in the same transaction.
 import {
   announceClientReportPublished, deliveredReportTitle, discardStoredReportFile, publishDeliveredReport, storeClientReportFile,
@@ -641,6 +642,10 @@ export class SocialReportsController {
         await emitEvent(c, tenantId, "social_report", id, "social.report.delivered", {
           engagementId: report.engagementId, period: report.period, kind: report.kind, fileId, deliverableId,
         });
+
+        // SCP-5f (BFF §63.27.3): a delivered monthly report closes the `report` step of the cycle(s) whose rules name its period (the
+        // seed's: cycle M = period + 2), in THIS transaction. It takes only that step task; nothing else of the cycle is locked.
+        await closeReportStepsOnDelivery(c, tenantId, { engagementId: report.engagementId, kind: report.kind, period: report.period }, req.principal.userId ?? null);
 
         // PV7-04a (BFF §55.2): publish it to the client in THIS transaction. An engagement with no project gives a client-wide
         // report (project NULL). Idempotent per source (one client report per social report, ever).

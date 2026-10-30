@@ -1011,7 +1011,7 @@ export function splitEffect(raw: string): { condition: string | null; name: stri
 
 /** The effects with side effects outside the `social_posts` row: phase 2 implements each, by this name. */
 export const IO_EFFECTS: ReadonlySet<string> = new Set([
-  "content_month_progress",
+  "content_month_progress", "cycle_steps",
   "copy_log_when_in_changes", "copy_log", "copy_log_each_field",
   "sync_variants_copy_from_master", "request_client_reviews",
   "join_or_open_month_request",

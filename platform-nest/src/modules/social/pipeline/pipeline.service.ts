@@ -17,6 +17,7 @@ import { withTenants } from "../../../db";
 import { authorize, notify, writeActivity, explainDenial } from "../../../core/http";
 import { buildPipelinePost, readCerbosActions } from "./pipeline-read";
 import { syncContentMonthProgress } from "./content-month-progress";
+import { syncCycleStepProgress } from "./cycle-steps";
 import { ensureDesignThumbs } from "./design-thumbs";
 import { notifyApprovalFiled } from "../../../core/approval-filing";
 import { notifyBestEffort, resolveClientRecipients } from "../../../core/client-notify";
@@ -340,8 +341,12 @@ export async function createPostInTx(
   const r = decide({ ...base, post: null, facts, mode: "apply" });
   if (!r.ok) return { refusal: r };
   const ins = await insertPostRow(c, tenantId, engagement!.id, callerId, a.extra ? { ...r.set, ...a.extra } : r.set);
-  // A new counted post that is not approved yet reopens a done content-month task (SCP-1n, BFF §63.13).
-  if (ins.created && a.syncProgress !== false) await syncContentMonthProgress(c, tenantId, cycle!.id, callerId);
+  // A new counted post that is not approved yet reopens a done content-month task (SCP-1n, BFF §63.13), and the cycle's step tasks
+  // (SCP-5f, BFF §63.27.3: the fixture's `cycle_steps` on create), in that order: the lock order.
+  if (ins.created && a.syncProgress !== false) {
+    await syncContentMonthProgress(c, tenantId, cycle!.id, callerId);
+    await syncCycleStepProgress(c, tenantId, cycle!.id, callerId);
+  }
   return { applied: r, ...ins, engagement: engagement!, cycle: cycle! };
 }
 
@@ -694,8 +699,10 @@ export async function changeAfterClientInTx(c: PoolClient, tenantId: string, pos
       WHERE tenant_id = $1 AND id = $2`,
     [tenantId, postId],
   );
-  // The post went back to the client: the cycle's content-month task reopens (SCP-1n, BFF §63.13), now that the row says so.
+  // The post went back to the client: the cycle's content-month task reopens (SCP-1n, BFF §63.13), now that the row says so; then the
+  // cycle's step tasks (SCP-5f: `client_window` and `deploy` reopen), after it.
   await EFFECT_RUNNERS.content_month_progress(run);
+  await EFFECT_RUNNERS.cycle_steps(run);
   return postId;
 }
 

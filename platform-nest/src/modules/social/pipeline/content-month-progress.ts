@@ -36,8 +36,11 @@ export async function syncContentMonthProgress(
   c: PoolClient, tenantId: string, cycleId: string, actorId: string | null,
 ): Promise<{ outcome: string; figures: ContentMonthFigures | null }> {
   await declareSocialModuleScope(c);
+  // SCP-5f (BFF §63.27.3, the lock order): the task is locked BEFORE the posts are read, so two stage actions on posts of one cycle queue
+  // here and the second counts what the first committed. The post (the action's own lock) comes first, this task second, the cycle's
+  // step tasks third (`cycle-steps.ts`).
   const task = await c.query<{ id: string }>(
-    `SELECT id FROM pm_tasks WHERE tenant_id = $1 AND linked_type = 'social_cycle' AND linked_id = $2 AND deleted_at IS NULL`,
+    `SELECT id FROM pm_tasks WHERE tenant_id = $1 AND linked_type = 'social_cycle' AND linked_id = $2 AND deleted_at IS NULL FOR UPDATE`,
     [tenantId, cycleId],
   );
   if (!task.rows[0]) return { outcome: "gone", figures: null };

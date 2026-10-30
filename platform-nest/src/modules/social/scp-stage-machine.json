@@ -180,7 +180,7 @@
       "guards": [
         { "guard": "cycle_exists", "refusal": "cycle_not_found" }
       ],
-      "effects": ["set_cycle_and_engagement", "set_status_since", "set_engine_status", "content_month_progress"],
+      "effects": ["set_cycle_and_engagement", "set_status_since", "set_engine_status", "content_month_progress", "cycle_steps"],
       "plan": "§1 step 1; §6.2 Create"
     },
     {
@@ -191,7 +191,7 @@
       "to": "drafting",
       "params": {},
       "guards": [],
-      "effects": ["set_author_if_null", "set_status_since", "set_engine_status"],
+      "effects": ["set_author_if_null", "set_status_since", "set_engine_status", "cycle_steps"],
       "plan": "§4.3 start_draft"
     },
     {
@@ -233,7 +233,7 @@
         { "guard": "required_to_send", "refusal": "incomplete_post" },
         { "guard": "handoff_checks_pass_or_send_anyway", "refusal": "checks_failed" }
       ],
-      "effects": ["clear_change_keep_changed_only", "append_skipped_checks", "set_status_since", "set_engine_status", "notify:copywriters"],
+      "effects": ["clear_change_keep_changed_only", "append_skipped_checks", "set_status_since", "set_engine_status", "cycle_steps", "notify:copywriters"],
       "plan": "§4.3 send_to_proofread; §4.6"
     },
     {
@@ -261,7 +261,7 @@
       "guards": [
         { "guard": "suggestions_not_stale", "refusal": "suggestion_stale" }
       ],
-      "effects": ["apply_suggestions", "copy_log_each_field", "clear_suggestions", "set_status_since", "set_engine_status", "when changedOnly: sync_variants_copy_from_master", "when changedOnly: request_client_reviews", "when changedOnly: clear_changed_only", "when changedOnly: notify:approvers_told", "when changedOnly: notify:client", "else: notify:approvers"],
+      "effects": ["apply_suggestions", "copy_log_each_field", "clear_suggestions", "set_status_since", "set_engine_status", "cycle_steps", "when changedOnly: sync_variants_copy_from_master", "when changedOnly: request_client_reviews", "when changedOnly: clear_changed_only", "when changedOnly: notify:approvers_told", "when changedOnly: notify:client", "else: notify:approvers"],
       "plan": "§4.3 approve_copy; loop e"
     },
     {
@@ -276,7 +276,7 @@
       ],
       "params": { "note": "1..2000, required" },
       "guards": [],
-      "effects": ["set_change", "keep_suggestions", "set_status_since", "set_engine_status", "notify:officer"],
+      "effects": ["set_change", "keep_suggestions", "set_status_since", "set_engine_status", "cycle_steps", "notify:officer"],
       "plan": "§4.3 return_copy; loop a"
     },
     {
@@ -289,7 +289,7 @@
       "guards": [
         { "guard": "creatives_unit_exists_when_source_creatives", "refusal": "creatives_unit_missing" }
       ],
-      "effects": ["copy_creative_source_from_engagement", "creative_state_not_started", "when creatives: join_or_open_month_request", "when in_team: enter_in_team_queue", "set_status_since", "set_engine_status", "notify:designers"],
+      "effects": ["copy_creative_source_from_engagement", "creative_state_not_started", "when creatives: join_or_open_month_request", "when in_team: enter_in_team_queue", "set_status_since", "set_engine_status", "cycle_steps", "notify:designers"],
       "plan": "§4.3 approve_for_design (SCP-Q2 ruled: either, per client)"
     },
     {
@@ -301,7 +301,7 @@
       "setsChangeCase": "hod_copy",
       "params": { "note": "1..2000, required" },
       "guards": [],
-      "effects": ["set_change", "set_status_since", "set_engine_status", "notify:officer"],
+      "effects": ["set_change", "set_status_since", "set_engine_status", "cycle_steps", "notify:officer"],
       "plan": "§4.3 hod_changes; loop b"
     },
     {
@@ -315,7 +315,7 @@
       ],
       "params": {},
       "guards": [],
-      "effects": ["clear_change", "set_status_since", "set_engine_status", "notify:approvers"],
+      "effects": ["clear_change", "set_status_since", "set_engine_status", "cycle_steps", "notify:approvers"],
       "plan": "§4.3 resend; loops b and c"
     },
     {
@@ -367,7 +367,7 @@
       "guards": [
         { "guard": "design_present", "refusal": "design_missing" }
       ],
-      "effects": ["creative_state_submitted", "clear_change", "warn_on_unknown_source", "set_status_since", "set_engine_status", "notify:approvers"],
+      "effects": ["creative_state_submitted", "clear_change", "warn_on_unknown_source", "set_status_since", "set_engine_status", "cycle_steps", "notify:approvers"],
       "plan": "§4.3 submit_design: needs an asset version or a shared link; loops c and d. An AI-made design always carries its note: the database refuses one without"
     },
     {
@@ -384,7 +384,7 @@
         { "guard": "account_not_ambiguous", "refusal": "ambiguous_account" },
         { "guard": "account_kinds_not_mixed", "refusal": "publisher_kinds_mixed" }
       ],
-      "effects": ["sync_variants_from_master", "materialize_design_files", "request_client_reviews", "set_client_first_sent_at_if_null", "set_status_since", "set_engine_status", "notify:client_once_per_post"],
+      "effects": ["sync_variants_from_master", "materialize_design_files", "request_client_reviews", "set_client_first_sent_at_if_null", "set_status_since", "set_engine_status", "cycle_steps", "notify:client_once_per_post"],
       "plan": "§4.3 final_approve: creates the variants and requests client review on each"
     },
     {
@@ -399,7 +399,7 @@
       ],
       "params": { "changeKind": "copy|design, required", "note": "1..2000, required" },
       "guards": [],
-      "effects": ["set_change", "when design: creative_state_revision", "set_status_since", "set_engine_status", "when copy: notify:officer", "when design: notify:designers"],
+      "effects": ["set_change", "when design: creative_state_revision", "set_status_since", "set_engine_status", "cycle_steps", "when copy: notify:officer", "when design: notify:designers"],
       "plan": "§4.3 final_changes; loop c"
     },
     {
@@ -413,7 +413,7 @@
         { "guard": "seen_hash_matches", "refusal": "content_changed" },
         { "guard": "every_variant_review_pending", "refusal": "client_review_already_decided" }
       ],
-      "effects": ["approve_every_variant_review_with_args_hash_in_one_transaction", "decision_id", "undo_window_10s", "set_status_since", "set_engine_status", "content_month_progress", "notify_after_undo_window:officer"],
+      "effects": ["approve_every_variant_review_with_args_hash_in_one_transaction", "decision_id", "undo_window_10s", "set_status_since", "set_engine_status", "content_month_progress", "cycle_steps", "notify_after_undo_window:officer"],
       "plan": "§4.3 client_approve; §8 2c. The approval covers the content, the date, the time and the placement (SCP-Q13)"
     },
     {
@@ -431,7 +431,7 @@
         { "guard": "seen_hash_matches", "refusal": "content_changed" },
         { "guard": "every_variant_review_pending", "refusal": "client_review_already_decided" }
       ],
-      "effects": ["changes_requested_on_every_variant_review_in_one_transaction", "decision_id", "undo_window_10s", "set_change", "when copy: set_changed_only_and_copy_before", "when design: creative_state_revision", "set_status_since", "set_engine_status", "notify_after_undo_window:officer", "notify_after_undo_window:approvers_told", "when design: notify_after_undo_window:designers"],
+      "effects": ["changes_requested_on_every_variant_review_in_one_transaction", "decision_id", "undo_window_10s", "set_change", "when copy: set_changed_only_and_copy_before", "when design: creative_state_revision", "set_status_since", "set_engine_status", "cycle_steps", "notify_after_undo_window:officer", "notify_after_undo_window:approvers_told", "when design: notify_after_undo_window:designers"],
       "plan": "§4.3 client_change; loops d and e. A design change returns to the final check (loop d), not straight to the client"
     },
     {
@@ -446,7 +446,7 @@
         { "guard": "within_undo_window", "refusal": "undo_window_passed" },
         { "guard": "nothing_happened_since", "refusal": "undo_window_passed" }
       ],
-      "effects": ["reviews_back_to_pending", "restore_pre_decision_fields", "drop_pending_notifications", "set_status_since", "set_engine_status", "content_month_progress"],
+      "effects": ["reviews_back_to_pending", "restore_pre_decision_fields", "drop_pending_notifications", "set_status_since", "set_engine_status", "content_month_progress", "cycle_steps"],
       "plan": "§8 2c: a short undo; §10: undo is a recorded reverse of the person's own last step"
     },
     {
@@ -457,7 +457,7 @@
       "to": "approved",
       "params": { "channel": "whatsapp|email|meeting, required", "note": "1..2000, required" },
       "guards": [],
-      "effects": ["approve_every_variant_review_with_args_hash_in_one_transaction", "recorded_by_and_channel", "decision_id", "set_status_since", "set_engine_status", "content_month_progress", "notify:officer", "notify:client_recorded"],
+      "effects": ["approve_every_variant_review_with_args_hash_in_one_transaction", "recorded_by_and_channel", "decision_id", "set_status_since", "set_engine_status", "content_month_progress", "cycle_steps", "notify:officer", "notify:client_recorded"],
       "plan": "§4.3 client_approve (recorded); §8 2e"
     },
     {
@@ -472,7 +472,7 @@
       ],
       "params": { "changeKind": "copy|design, required", "channel": "whatsapp|email|meeting, required", "note": "1..2000, required", "anchor": "optional pin" },
       "guards": [],
-      "effects": ["changes_requested_on_every_variant_review_in_one_transaction", "recorded_by_and_channel", "decision_id", "set_change", "when copy: set_changed_only_and_copy_before", "when design: creative_state_revision", "set_status_since", "set_engine_status", "notify:officer", "notify:approvers_told", "when design: notify:designers", "notify:client_recorded"],
+      "effects": ["changes_requested_on_every_variant_review_in_one_transaction", "recorded_by_and_channel", "decision_id", "set_change", "when copy: set_changed_only_and_copy_before", "when design: creative_state_revision", "set_status_since", "set_engine_status", "cycle_steps", "notify:officer", "notify:approvers_told", "when design: notify:designers", "notify:client_recorded"],
       "plan": "§4.3 client_change (recorded); §8 2e"
     },
     {
@@ -486,7 +486,7 @@
         { "guard": "approved_time_not_passed", "refusal": "approved_time_passed" },
         { "guard": "media_rules_pass", "refusal": "media_rules_failed" }
       ],
-      "effects": ["schedule_by_hand_at_approved_date_time_and_placement", "set_schedule_via_manual", "set_status_since", "set_engine_status"],
+      "effects": ["schedule_by_hand_at_approved_date_time_and_placement", "set_schedule_via_manual", "set_status_since", "set_engine_status", "cycle_steps"],
       "plan": "§4.3 schedule; §8 3a ('Schedule in Meta'). The approved date, time and placement are used as they are (SCP-Q13)"
     },
     {
@@ -502,7 +502,7 @@
         { "guard": "approved_time_not_passed", "refusal": "approved_time_passed" },
         { "guard": "media_rules_pass", "refusal": "media_rules_failed" }
       ],
-      "effects": ["file_one_publish_approval_per_variant", "set_schedule_via_publisher", "set_status_since", "set_engine_status"],
+      "effects": ["file_one_publish_approval_per_variant", "set_schedule_via_publisher", "set_status_since", "set_engine_status", "cycle_steps"],
       "plan": "SCP-Q16 and SCP-Q19 ruled: one of the four files through the publisher, and approve is the whole gate (no extra publish check); a second person decides (PV-D46, systemRules publish_decision); the author and the officer never file (the maker/checker DENY on approve)"
     },
     {
@@ -515,7 +515,7 @@
       "guards": [
         { "guard": "no_variant_publishing", "refusal": "dispatch_in_flight" }
       ],
-      "effects": ["when publisher: cancel_queued_dispatches_and_withdraw_pending_approvals", "clear_schedule_via", "set_status_since", "set_engine_status"],
+      "effects": ["when publisher: cancel_queued_dispatches_and_withdraw_pending_approvals", "clear_schedule_via", "set_status_since", "set_engine_status", "cycle_steps"],
       "plan": "§4.3 unschedule: cancels a dispatch. The client's approval stands: nothing it covered changed"
     },
     {
@@ -532,7 +532,7 @@
         { "guard": "one_account_per_placement_network", "refusal": "no_account_for_network" },
         { "guard": "account_not_ambiguous", "refusal": "ambiguous_account" }
       ],
-      "effects": ["when scheduled: unschedule_cancelling_dispatches_and_withdrawing_approvals", "write_date_and_placement", "sync_variants_dates_and_networks", "request_client_reviews_on_every_variant", "clear_schedule_via", "set_status_since", "set_engine_status", "content_month_progress", "notify:client_once_per_post"],
+      "effects": ["when scheduled: unschedule_cancelling_dispatches_and_withdrawing_approvals", "write_date_and_placement", "sync_variants_dates_and_networks", "request_client_reviews_on_every_variant", "clear_schedule_via", "set_status_since", "set_engine_status", "content_month_progress", "cycle_steps", "notify:client_once_per_post"],
       "plan": "SCP-Q13 ruled: any change to the date, time or placement of an approved or scheduled post asks the client again"
     },
     {
@@ -545,7 +545,7 @@
       "guards": [
         { "guard": "no_variant_publishing", "refusal": "dispatch_in_flight" }
       ],
-      "effects": ["officer: variants_become_native_import_published", "publisher: from_published_variants", "set_live_url_and_went_live_at", "set_simulated_from_variants", "start_metrics", "set_status_since", "set_engine_status", "notify:officer_when_by_publisher"],
+      "effects": ["officer: variants_become_native_import_published", "publisher: from_published_variants", "set_live_url_and_went_live_at", "set_simulated_from_variants", "start_metrics", "set_status_since", "set_engine_status", "cycle_steps", "notify:officer_when_by_publisher"],
       "plan": "§4.3 mark_live; §8 3b"
     },
     {
@@ -556,7 +556,7 @@
       "to": "blocked",
       "params": { "reason": "3..500, required", "waitingOn": "client|designer|copywriter|approver|officer|external, required" },
       "guards": [],
-      "effects": ["set_blocked_from_and_reason", "keep_change_case", "set_status_since", "set_engine_status"],
+      "effects": ["set_blocked_from_and_reason", "keep_change_case", "set_status_since", "set_engine_status", "cycle_steps"],
       "plan": "§4.3 block: any status before client"
     },
     {
@@ -567,7 +567,7 @@
       "to": { "from": "blockedFrom" },
       "params": {},
       "guards": [],
-      "effects": ["clear_block", "set_status_since", "set_engine_status", "notify:holder"],
+      "effects": ["clear_block", "set_status_since", "set_engine_status", "cycle_steps", "notify:holder"],
       "plan": "§4.3 resolve: back to the status it left"
     },
     {
@@ -592,7 +592,7 @@
       "to": "deleted",
       "params": {},
       "guards": [],
-      "effects": ["soft_delete", "content_month_progress"],
+      "effects": ["soft_delete", "content_month_progress", "cycle_steps"],
       "plan": "§4.3 delete: planned, drafting"
     },
     {
@@ -603,7 +603,7 @@
       "to": "archived",
       "params": { "reason": "3..500, required" },
       "guards": [],
-      "effects": ["set_archived", "withdraw_pending_client_reviews", "withdraw_pending_publish_approvals", "set_engine_status", "content_month_progress"],
+      "effects": ["set_archived", "withdraw_pending_client_reviews", "withdraw_pending_publish_approvals", "set_engine_status", "content_month_progress", "cycle_steps"],
       "plan": "§4.3 delete: later statuses are archived instead. Not from scheduled (unschedule first) or live"
     }
   ],
