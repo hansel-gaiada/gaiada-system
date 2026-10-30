@@ -153,7 +153,10 @@ describe.skipIf(!TEST_URL)("SCP-1n · pm_tasks links", () => {
     const cons = await pool().query(
       `SELECT conname FROM pg_constraint WHERE conrelid = 'pm_tasks'::regclass AND conname LIKE 'pm\\_tasks\\_linked\\_%' ORDER BY conname`,
     );
-    expect(cons.rows.map((x) => x.conname)).toEqual(["pm_tasks_linked_pair_ck", "pm_tasks_linked_type_ck"]);
+    // One of each of THIS file's two constraints. Later files add their own pm_tasks_linked_* checks (SCP-5f's
+    // 202610301310_pm_task_cycle_steps adds pm_tasks_linked_step_ck and pm_tasks_linked_step_value_ck), so the set is not pinned.
+    const names = cons.rows.map((x) => x.conname);
+    for (const n of ["pm_tasks_linked_pair_ck", "pm_tasks_linked_type_ck"]) expect(names.filter((x) => x === n), n).toHaveLength(1);
     const wall = await pool().query(`SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'pm_tasks'::regclass`);
     expect(wall.rows[0]).toEqual({ relrowsecurity: true, relforcerowsecurity: true });
   });
