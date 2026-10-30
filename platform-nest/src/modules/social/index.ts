@@ -1467,6 +1467,119 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "section", "expectedVersion"],
       },
     },
+    // ── SCP-5 W5-B2: ideas for next month (BFF §63.25.3, tools of 63.25.4) ───────────────────────────────────────────────
+    // The same routes, the same gates and the same order of checks as the person's: the client's officer and the four write (403
+    // `not_officer_or_approver`, 403 `automation_cannot_act`). Ideas stay internal (SCP-Q27). The writes are `low`: internal notes a person sees
+    // and changes, and a `planned` post that reaches nobody and is discarded in one step.
+    {
+      name: "social.listIdeas",
+      description:
+        "List one client's ideas for next month (BFF §63.25), newest first, at most 200: what we saw, the metric it rests on, what we suggest, its "
+        + "status (`proposed`, `shared` with the client, or `planned`) and, once planned, its post. Optional filters: `status`, `reportId`. `canWrite` says "
+        + "whether the caller may add and change ideas for this client. 404 `engagement_not_found`.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/ideas",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The client's engagement." },
+          status: { type: "string", enum: ["proposed", "shared", "planned"], description: "Optional status filter." },
+          reportId: { type: "string", description: "Optional: only the ideas raised with this monthly report." },
+        },
+        required: ["tenantId", "engagementId"],
+      },
+    },
+    {
+      name: "social.addIdea",
+      description:
+        "Add an idea for a client's next month: what we saw (`saw`), the metric it rests on (`metric`; the company decides whether it is required: "
+        + "400 `{field: 'metric'}` when it is and is missing) and what we suggest (`suggestion`). Optional `reportId` (a monthly report of the same "
+        + "client). Idempotent: pass a stable `id` and a repeat answers `created: false`. Only the client's officer and the four social approvers may "
+        + "(403 `not_officer_or_approver`). The idea stays internal; nothing reaches the client.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/ideas",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The client's engagement." },
+          saw: { type: "string", description: "What we saw, 1 to 500 characters." },
+          metric: { type: "string", description: "The metric it rests on, 1 to 300 characters. Required unless the company made it optional." },
+          suggestion: { type: "string", description: "What we suggest, 1 to 500 characters." },
+          reportId: { type: "string", description: "Optional monthly report of the same client that the idea was raised with." },
+          id: { type: "string", description: "Optional caller-supplied uuid, the idempotency key for a retry." },
+        },
+        required: ["tenantId", "engagementId", "saw", "suggestion"],
+      },
+    },
+    {
+      name: "social.editIdea",
+      description:
+        "Change an idea's `saw`, `metric` or `suggestion` while it is `proposed` or `shared`; a `planned` idea is 409 `idea_planned` (discard its post "
+        + "first, which gives the idea back). Same gate as `social.addIdea`.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "PATCH",
+      pathTemplate: "/api/:tenantId/modules/social/ideas/:ideaId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          ideaId: { type: "string", description: "The idea." },
+          saw: { type: "string", description: "What we saw, 1 to 500 characters." },
+          metric: { type: "string", description: "The metric it rests on, 1 to 300 characters." },
+          suggestion: { type: "string", description: "What we suggest, 1 to 500 characters." },
+        },
+        required: ["tenantId", "ideaId"],
+      },
+    },
+    {
+      name: "social.shareIdea",
+      description:
+        "Mark an idea as shared with the client: it records that the team shared it, nothing is sent (SCP-Q27). `proposed` becomes `shared`; an idea "
+        + "already `shared` answers 200 `alreadyApplied`; a `planned` one is 409 `idea_planned`. Same gate as `social.addIdea`.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/ideas/:ideaId/share",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          ideaId: { type: "string", description: "The idea." },
+        },
+        required: ["tenantId", "ideaId"],
+      },
+    },
+    {
+      name: "social.planIdea",
+      description:
+        "\"Add to next plan\": turn an idea into a `planned` post of the cycle `cycleId` (the person picks it; the server never guesses), linked both "
+        + "ways, in one transaction. 404 `cycle_not_found` for another client's cycle, 409 `cycle_closed` for a cycle whose month is before this month, "
+        + "409 `idea_planned` for an idea already planned elsewhere; a repeat for the same cycle answers 200 `alreadyApplied` with the same post. "
+        + "The post reaches nobody: discarding it gives the idea back. Same gate as `social.addIdea`.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/ideas/:ideaId/plan",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          ideaId: { type: "string", description: "The idea." },
+          cycleId: { type: "string", description: "The client's cycle to plan the post into." },
+        },
+        required: ["tenantId", "ideaId", "cycleId"],
+      },
+    },
   ],
   rollupProviders: [socialRollups],
   // D-18: the console is the department template's reserved "Publish" craft group, under the
