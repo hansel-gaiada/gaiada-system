@@ -13529,6 +13529,78 @@ CHECKs (`status` is NOT NULL; every other side is written with `IS NULL`): `(sta
 
 **63.25.5 Proofs:** every CHECK with its NULL cases, both FKs and both unique indexes; the officer of another client and a `company_admin` refused 403 `not_officer_or_approver`, the client's officer and each of the four allowed; "Add to next plan" writes the post and the idea in one transaction (a refused create leaves the idea as it was), a replay answers `alreadyApplied`, `cycle_closed`, another client's cycle 404; discarding the planned post releases the idea, archiving it does not; a planned idea refuses edit and delete; the post read's `idea`.
 
+### 63.26 Saved: the content bank (SCP-5e) — **STATUS: PLANNED (2026-10-30)**
+
+**What it is.** Each client's bank, seen by the team only: the Asset Library's photos with used, unused and source; the client's approved posts; saved captions, templates and references; and the brand book's hashtag sets. It reuses before it stores: a design's photo, an approved post and a hashtag set are READ from where they live, and the bank stores only what has no home (a caption, a template, a reference, a Drive link, an asset saved for later). Per client (SCP-Q28, default).
+
+**63.26.1 Data: `<prefix+2>_social_saved_items.sql`** (social; no DML; closing DO-block assertions):
+- On `creative_assets` (plain wall, Creatives' table): `ux_creative_assets_id_tenant UNIQUE (id, tenant_id)` when missing, the 0075 pattern (it cannot fail: `id` is the key), so the bank's FK carries the tenant.
+- `social_saved_items` (new, third wall):
+
+| Column | Type and rule |
+|---|---|
+| `id`, `tenant_id` | uuid PK; `ux_social_saved_items_id_tenant UNIQUE (id, tenant_id)` |
+| `engagement_id` | `uuid NOT NULL`, composite FK to `social_engagements` |
+| `kind` | `text NOT NULL`: `asset` (an Asset Library group kept for this client), `media_link` (a Drive link to a photo or video), `caption`, `template`, `reference` |
+| `title` | `text NOT NULL`, 1 to 120 |
+| `body` | `text NULL`, 1 to 5,000: a caption's or a template's text |
+| `url` | `text NULL`, http(s), ≤ 500 |
+| `media` | `text NULL`: `photo` or `video` |
+| `asset_group_id` | `uuid NULL`, composite FK to `creative_assets (id, tenant_id)`: the version group, `COALESCE(version_group_id, id)` |
+| `pillar` | `text NULL`, ≤ 60 (the page offers the brand book's pillars) |
+| `source`, `ai_note` | `text NULL`: a link's source (`own`, `client`, `stock`, `ai`, `unknown`) and AI note (≤ 1,000). An asset carries its own (63.6.6) |
+| `use_count`, `last_used_at`, `last_used_post_id` | `integer NOT NULL DEFAULT 0`; NULL; `uuid NULL`, composite FK to `social_posts` |
+| `created_by` (NOT NULL), `created_at`, `updated_by`, `updated_at`, `deleted_at`, `deleted_by`, `origin_site` | as usual |
+
+CHECKs, one shape per kind (every side written with `IS NULL`, since a CHECK passes on NULL):
+- `asset`: `asset_group_id IS NOT NULL`, and `url`, `body`, `media`, `source` and `ai_note` all NULL;
+- `media_link`: `url`, `media` and `source` NOT NULL; `asset_group_id` and `body` NULL;
+- `caption`, `template`: `body IS NOT NULL`; `url`, `asset_group_id`, `media`, `source` and `ai_note` NULL;
+- `reference`: `(url IS NULL) <> (asset_group_id IS NULL)`, `body` and `media` NULL, a link with a `source`, an asset without one;
+- `source IS DISTINCT FROM 'ai' OR ai_note IS NOT NULL`; `use_count >= 0`; `(last_used_at IS NULL) = (last_used_post_id IS NULL)`; `(deleted_at IS NULL) = (deleted_by IS NULL)`; the lengths.
+
+`ux_social_saved_items_asset UNIQUE (engagement_id, asset_group_id) WHERE kind = 'asset' AND deleted_at IS NULL` (the kind CHECK makes the group NOT NULL there); index `(tenant_id, engagement_id, kind, created_at DESC) WHERE deleted_at IS NULL`.
+
+**63.26.2 Who** (SCP-Q29, default). Reading is `social_post` · `read` (the team). Adding is `social_post` · `create` on the client's would-be post (63.25.2's resource): the Social Media team's seats carry it (63.2). Changing or deleting an item is its author's; anyone else needs `manage` on the client's would-be post (the officer, the HoD and GM seats; 403 `not_officer_or_approver`). An automation principal is refused every write. No new action (PERMISSION §57).
+
+**63.26.3 Routes** (base 63.0; order 404, 403, 400, 409):
+
+| Route | What it does |
+|---|---|
+| `GET engagements/:engagementId/saved` (`read`) | Without `collection`: `{collections: [{key, label, count, previews: string[]}], canAdd}`, the six of the design: `photos` "Photos and videos", `posts` "Approved posts", `captions`, `hashtags` "Hashtag sets", `templates`, `references`. 404 `engagement_not_found` |
+| `GET engagements/:engagementId/saved?collection=&pillar=&used=&source=&cursor=&limit=` (`read`) | `{items, nextCursor}` (63.0's paging; `hashtags` unpaged). Shapes below |
+| `POST engagements/:engagementId/saved` | `{id?, kind, title, body?, url?, media?, assetGroupId?, pillar?, source?, aiNote?}` → 201 `{item, created}`. 404 `asset_not_found` for a group outside the company; an asset already kept for the client answers 200 `{item, created: false}`; a replayed `id` likewise |
+| `PATCH saved/:itemId` | `{title?, body?, pillar?, source?, aiNote?}` (the kind's shape); 404 `saved_item_not_found` |
+| `DELETE saved/:itemId` | A soft delete |
+| `PATCH posts/:postId/pipeline` (63.6.3) | Gains `savedItemIds?: string[]` (1 to 10, items of the post's client, else 400 `{field: 'savedItemIds'}`). When the edit applies, the same transaction adds one to each item's `use_count` and sets `last_used_at` and `last_used_post_id`; a refused edit counts nothing |
+
+**The collections' items:**
+- `photos`: the union, without repeats, of (a) the asset groups on the live designs of this client's live posts (`social_post_designs`, derived, never stored), (b) the client's `asset` items and (c) its `media_link` items: `{key, savedItemId \| null, kind: 'asset'\|'media_link', title, media, asset: {groupId, versionId, versionNo, contentType} \| null, url, source, aiNote, pillar, used, usedIn, addedBy, addedAt}`. **Used** means a live design of a live post of this client names the group, or, for a link, `use_count > 0`; `usedIn` counts the posts. The image comes from the Asset Library's own `GET creative/assets/:id/content` (`file` · `read`, §35).
+- `posts`: this client's pipeline posts from `approved` on that have a stored design, newest first: `{postId, title, format, cycleMonth, thumbFileId, pipelineStatus, simulated}`; read-only, each linking to its post.
+- `captions`, `templates`, `references`: the items, `{id, kind, title, body, url, asset, source, aiNote, pillar, useCount, lastUsedAt, addedBy, addedAt}`.
+- `hashtags`: the brand book's `hashtag_strategy.sets` (63.4), read-only here; they are edited in the brand book.
+
+**Use in a post.** The edit is the machine's own: the fixture's `editRules` decide which posts may take what. A caption, a template or a hashtag set goes into the copy (`drafting` and the team's copy change cases); a reference or a photo link goes into `rawAssets` (`planned`, `drafting`). The page offers only the posts and fields the rules allow and sends the edit with `savedItemIds`. An asset becomes a design only through `POST posts/:postId/designs` (63.6.6), by the designer, unchanged; that design row is its use.
+
+**63.26.4 Pages.** `{D}/saved`, the content bank: a client switcher (the caller's clients first, as Profile), the six collections as mosaics with counts, a collection as a grid (photos, posts) or a list, the filters pillar, used and source, and an item's sheet (source and AI note, "Use in a post", delete). Adding: paste a Drive link; upload, which saves through the Asset Library's existing save (`POST creative/assets` with `source` and `aiNote`, §35, unchanged) and then keeps the new group for the client; or pick from the Asset Library. Registry: a new tab `saved` "Saved" on the `publish` row (one area, its `AREA_RULES` entry); the Social skin's Saved pin moves from `publish` › `assets` to `publish` › `saved` (`lib/skins.ts`), and the Asset Library tab stays. It is never in the portal.
+
+**Limits.** Videos are Drive links (SCP-Q30, default): the Asset Library stores images (0031: `grade` and `graded_key` are NOT NULL). A link's "shared with anyone with the link" is checked only as "a link is present" until DW-11, as 63.3.4.
+
+**DEMO_MODE.** Every collection holds items for the demo clients; the photos include the demo designs (derived) and one unused saved asset; "Use in a post" runs the demo's edit rules.
+
+**Agents:**
+
+| Tool | Route | Class |
+|---|---|---|
+| `social.savedItems` | the two GETs | read |
+| `social.saveItem` | `POST engagements/:engagementId/saved` | `write`, impact `low`: team material, removed in one step |
+
+An agent uses an item through `social.editPost` with `savedItemIds` (63.15, `low`).
+
+**Simulated.** The `posts` collection carries each post's `simulated` and the page its SIMULATED mark; nothing else in the bank is a number.
+
+**63.26.5 Proofs:** each kind's CHECK with its NULL cases; the asset FK refusing another company's group; one `asset` item per client and group; the derived photos (a design's group shows as used without a saved row; removing the design makes a kept asset unused); `used`, `source` and `pillar` filters; the author edits and deletes their item, the officer and a seat anyone's, another member is 403 `not_officer_or_approver`; `savedItemIds` counted only when the edit applies, and refused for another client's item; the hashtag sets read from the brand book; nothing of the bank reachable from the portal.
+
 
 ## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
 
