@@ -209,6 +209,7 @@ import { SearchAiCrawlerController } from "./modules/search/ai-crawler.controlle
 import { SearchExperimentsController } from "./modules/search/experiments.controller";
 import { SearchIndexNowController } from "./modules/search/indexnow.controller";
 import { SearchReplaysController } from "./modules/search/replays.controller";
+import { SearchTrackingTagsController } from "./modules/search/tracking-tags.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { GroupReportController } from "./modules/reports/group-report.controller"; // PV1-06a
 // PRV-02: the `webdev` module shell's HTTP surface (provision a site+repo, read/reconcile the mirror
@@ -342,6 +343,7 @@ import { AiUsageReadsController } from "./modules/ai-usage/reads.controller";
     SearchExperimentsController,
     SearchIndexNowController,
     SearchReplaysController,
+    SearchTrackingTagsController,
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,
     ZoneBEventsController,
