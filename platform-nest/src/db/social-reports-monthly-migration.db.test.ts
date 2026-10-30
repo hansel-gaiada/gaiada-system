@@ -24,7 +24,9 @@ describe("SCP-5a · the migration file (no database needed)", () => {
 
   it("is registered in the social module, after every earlier social migration", () => {
     expect(socialModule.migrations).toContain(MIGRATION);
-    expect(socialModule.migrations[socialModule.migrations.length - 1]).toBe(MIGRATION);
+    // Later social files (SCP-5's wave 5) follow it; it must still come after the boosts file before it.
+    const m = socialModule.migrations as string[];
+    expect(m.indexOf(MIGRATION)).toBeGreaterThan(m.indexOf("202610281300_social_boosts.sql"));
   });
 
   it("holds no data change, no grant, no policy change and no ledger write, and is LF only", () => {
