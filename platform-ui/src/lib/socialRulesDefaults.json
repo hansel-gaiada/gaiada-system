@@ -1,0 +1,187 @@
+{
+  "_about": "SCP-5's company rules as seeded (FRONTEND-BFF-CONTRACT §63.30, SCP-Q41): the owner's rulings SCP-Q25 to SCP-Q40 are the defaults, and each company edits its own copy in Settings. A company with no saved version reads this file as version 0. platform-ui keeps a byte-identical twin (src/lib/socialRulesDefaults.json). A change to any value here is a new defaultsVersion, and the old document must stay readable under its own version (pipeline/rules.ts, DEFAULTS_ARCHIVE).",
+  "defaultsVersion": "scp5-2026-10-30",
+  "reports": {
+    "fiscalYearStartMonth": 1,
+    "kinds": {
+      "daily": {
+        "enabled": true,
+        "due": { "rule": "working_days_after", "n": 1 },
+        "freezeAt": "submit",
+        "content": {
+          "narrative": { "max": 1000 },
+          "nextPeriodLine": true,
+          "notes": { "areas": [] },
+          "actionPlan": { "enabled": false, "max": 10 }
+        },
+        "checkRequires": ["narrative"],
+        "aiDrafting": true
+      },
+      "weekly": {
+        "enabled": true,
+        "due": { "rule": "working_days_after", "n": 1 },
+        "freezeAt": "submit",
+        "content": {
+          "narrative": { "max": 1000 },
+          "nextPeriodLine": true,
+          "notes": { "areas": [] },
+          "actionPlan": { "enabled": false, "max": 10 }
+        },
+        "checkRequires": ["narrative"],
+        "aiDrafting": true
+      },
+      "monthly": {
+        "enabled": true,
+        "due": { "rule": "report_due_day" },
+        "freezeAt": "create",
+        "content": {
+          "narrative": { "max": null },
+          "nextPeriodLine": false,
+          "notes": {
+            "areas": [
+              { "key": "followers", "label": "Followers" },
+              { "key": "engagement", "label": "Engagement" },
+              { "key": "audience", "label": "Audience" }
+            ]
+          },
+          "actionPlan": { "enabled": true, "max": 10 }
+        },
+        "checkRequires": ["notes"],
+        "aiDrafting": true
+      },
+      "quarterly": {
+        "enabled": true,
+        "due": { "rule": "report_due_day" },
+        "freezeAt": "create",
+        "content": {
+          "narrative": { "max": null },
+          "nextPeriodLine": false,
+          "notes": {
+            "areas": [
+              { "key": "followers", "label": "Followers" },
+              { "key": "engagement", "label": "Engagement" },
+              { "key": "audience", "label": "Audience" }
+            ]
+          },
+          "actionPlan": { "enabled": true, "max": 10 }
+        },
+        "checkRequires": ["notes"],
+        "aiDrafting": true
+      },
+      "semester": {
+        "enabled": true,
+        "due": { "rule": "report_due_day" },
+        "freezeAt": "create",
+        "content": {
+          "narrative": { "max": null },
+          "nextPeriodLine": false,
+          "notes": {
+            "areas": [
+              { "key": "followers", "label": "Followers" },
+              { "key": "engagement", "label": "Engagement" },
+              { "key": "audience", "label": "Audience" }
+            ]
+          },
+          "actionPlan": { "enabled": true, "max": 10 }
+        },
+        "checkRequires": ["notes"],
+        "aiDrafting": true
+      },
+      "yearly": {
+        "enabled": true,
+        "due": { "rule": "report_due_day" },
+        "freezeAt": "create",
+        "content": {
+          "narrative": { "max": null },
+          "nextPeriodLine": false,
+          "notes": {
+            "areas": [
+              { "key": "followers", "label": "Followers" },
+              { "key": "engagement", "label": "Engagement" },
+              { "key": "audience", "label": "Audience" }
+            ]
+          },
+          "actionPlan": { "enabled": true, "max": 10 }
+        },
+        "checkRequires": ["notes"],
+        "aiDrafting": true
+      }
+    }
+  },
+  "ideas": {
+    "metricRequired": true,
+    "sharedInMonthlyReport": false
+  },
+  "cycle": {
+    "steps": [
+      {
+        "key": "report",
+        "title": "Monthly report for {month-2}",
+        "due": { "rule": "report_due_day", "monthOffset": -1 },
+        "autoClose": { "rule": "report_delivered", "reportMonthOffset": -2 }
+      },
+      {
+        "key": "planning",
+        "title": "{month} plan",
+        "due": { "rule": "ready_by", "lessEstimatesFrom": "proofread", "lessWorkingDays": 0 },
+        "autoClose": { "rule": "plan_laid_out" }
+      },
+      {
+        "key": "copy_lock",
+        "title": "{month} copy locked",
+        "due": { "rule": "ready_by", "lessEstimatesFrom": "design", "lessWorkingDays": 0 },
+        "autoClose": { "rule": "copy_locked" }
+      },
+      {
+        "key": "artwork",
+        "title": "{month} artwork",
+        "due": { "rule": "ready_by", "lessEstimatesFrom": "final", "lessWorkingDays": 0 },
+        "autoClose": { "rule": "artwork_done" }
+      },
+      {
+        "key": "client_window",
+        "title": "{month} client approval",
+        "due": { "rule": "ready_by", "lessEstimatesFrom": "schedule", "lessWorkingDays": 0 },
+        "autoClose": { "rule": "client_approved" }
+      },
+      {
+        "key": "deploy",
+        "title": "{month} scheduled",
+        "due": { "rule": "ready_by", "lessEstimatesFrom": null, "lessWorkingDays": 0 },
+        "autoClose": { "rule": "all_scheduled" }
+      }
+    ]
+  },
+  "audit": {
+    "dimensions": [
+      { "key": "consistency", "label": "Posting consistency", "weight": 1, "source": "consistency", "advice": "Plan each month to the agreed number of posts and keep a steady rhythm." },
+      { "key": "format_mix", "label": "Format mix", "weight": 1, "source": "format_mix", "advice": "Use every agreed format each month: feed posts, carousels, reels and stories." },
+      { "key": "engagement_rate", "label": "Engagement against the benchmark", "weight": 1, "source": "engagement_rate", "advice": "Study the posts with the best engagement and make more like them." },
+      { "key": "reels", "label": "Reels", "weight": 1, "source": "reels", "advice": "Open each reel with a hook in its first seconds and keep it short." },
+      { "key": "stories", "label": "Stories", "weight": 1, "source": "stories", "advice": "Post stories every week to stay in front of followers." },
+      { "key": "boosting", "label": "Paid boosting", "weight": 1, "source": "boosting", "advice": "Spend the agreed boost budget on the posts that already perform." },
+      { "key": "profile", "label": "Profile, bio and link", "weight": 1, "source": "typed", "advice": "Keep the bio clear, the link working and the contact details current." },
+      { "key": "highlights", "label": "Highlights and pinned posts", "weight": 1, "source": "typed", "advice": "Pin the strongest posts and keep the highlights tidy and current." },
+      { "key": "visual", "label": "Visual consistency", "weight": 1, "source": "typed", "advice": "Follow the brand book's colours, type and photo style on every post." },
+      { "key": "caption_cta", "label": "Captions and calls to action", "weight": 1, "source": "typed", "advice": "End each caption with one clear call to action." },
+      { "key": "community", "label": "Answers to comments and messages", "weight": 1, "source": "typed", "advice": "Answer comments and messages within one working day." },
+      { "key": "cross_platform", "label": "The client's other networks", "weight": 1, "source": "typed", "advice": "Keep the other networks active and in step with the main one." }
+    ],
+    "bands": [
+      { "key": "strong", "label": "Strong", "from": 75 },
+      { "key": "fair", "label": "Fair", "from": 50 },
+      { "key": "needs_work", "label": "Needs work", "from": 0 }
+    ],
+    "benchmark": { "source": "own_clients_median" }
+  },
+  "saved": {
+    "categories": [
+      { "key": "photos", "label": "Photos and videos", "holds": ["asset", "link"], "enabled": true },
+      { "key": "posts", "label": "Approved posts", "holds": [], "enabled": true },
+      { "key": "captions", "label": "Captions", "holds": ["text"], "enabled": true },
+      { "key": "hashtags", "label": "Hashtag sets", "holds": [], "enabled": true },
+      { "key": "templates", "label": "Templates", "holds": ["text"], "enabled": true },
+      { "key": "references", "label": "References", "holds": ["link", "asset"], "enabled": true }
+    ]
+  }
+}

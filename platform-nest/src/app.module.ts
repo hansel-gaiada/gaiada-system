@@ -171,6 +171,8 @@ import { SocialSimulatedAccountsController } from "./modules/social/simulated-ac
 import { SocialFeedController } from "./modules/social/pipeline/feed.controller";
 // SCP-5d: `GET team?month=` — the Social Media Team dashboard (BFF §63.19), the four approvers' read.
 import { SocialTeamController } from "./modules/social/pipeline/team.controller";
+// SCP-5 W5-A0: the company rules (BFF §63.30): read, set, reset, history, preview.
+import { SocialRulesController } from "./modules/social/pipeline/rules.controller";
 // SCP-1h: the designer's queue (`GET design-queue`), on its own controller under the same route prefix.
 import { SocialDesignQueueController } from "./modules/social/pipeline/design-queue.controller";
 // SCP-3c: a post's metrics (BFF §63.10 `POST variants/:variantId/metrics`, `GET posts/:postId/metrics`), on its own controller, same prefix.
@@ -301,6 +303,7 @@ import { AiUsageReadsController } from "./modules/ai-usage/reads.controller";
     SocialSimulatedAccountsController,
     SocialFeedController,
     SocialTeamController,
+    SocialRulesController,
     // SCP-1k: the client calendar read (BFF §63.10 `GET calendar`).
     SocialCalendarController,
     // SCP-3d: `GET/POST engagements/:engagementId/feed-preview[/swap]` (BFF §63.10).
