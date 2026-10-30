@@ -16,6 +16,8 @@
 //   (6) a new officer on the allocation takes the Ball of every OPEN step; new estimates re-date them; a new buffer re-dates them;
 //   (7) two stage actions on posts of one cycle at once never deadlock, and the second always counts what the first committed: the pairs
 //       run truly concurrently (two connections), many times;
+//   (9) the reads (§63.27.4): `GET cycles/:cycleId/health` answers `steps` in the rules' order from the tasks (due, done, progress, auto or
+//       manual, holder, late), `stepsReason` says why there are none, and `GET team` lists `cycle_step_late` while a step is open past its date;
 //   (8) a rules change applies to new cycles only, and a step set to `manual` is never closed or reopened by the pipeline (last: it changes
 //       the company's rules).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -295,6 +297,14 @@ describe.skipIf(!TEST_URL)("SCP-5f · the monthly cycle's step tasks (BFF §63.2
 
     // The stage actions still run on a cycle with no step tasks.
     const c = (await adminPool().query(`SELECT id::text AS id FROM social_cycles WHERE engagement_id = $1`, [e.engagementId])).rows[0].id as string;
+    // §63.27.4: the health read says it too: no steps, and the reason.
+    const h1 = await app.inject({ method: "GET", url: `${base()}/cycles/${c}/health`, headers: as(U.hod) });
+    expect(h1.statusCode, h1.body).toBe(200);
+    expect(h1.json()).toMatchObject({ steps: [], stepsReason: "no_project" });
+    const cg = (await adminPool().query(`SELECT id::text AS id FROM social_cycles WHERE engagement_id = $1`, [gone.engagementId])).rows[0].id as string;
+    const h2 = await app.inject({ method: "GET", url: `${base()}/cycles/${cg}/health`, headers: as(U.hod) });
+    expect(h2.statusCode, h2.body).toBe(200);
+    expect(h2.json()).toMatchObject({ steps: [], stepsReason: "project_not_found" });
     const eng = { ...e, cycleId: c };
     const p = await newPost(eng);
     await driveTo(eng, p, "approved");
@@ -531,6 +541,75 @@ describe.skipIf(!TEST_URL)("SCP-5f · the monthly cycle's step tasks (BFF §63.2
   }, 300_000);
 
   // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // (9) the reads: health `steps` and the Team dashboard's `cycle_step_late` (§63.27.4)
+  // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+  it("GET cycles/:id/health answers the steps from their tasks (late in words, closed, reopened); GET team lists cycle_step_late while a step is open past its date", async () => {
+    const e = await planned({ estimates: E9, reportDueDay: 10, target: 1 });
+    interface StepAnswer { step: string; title: string; taskId: string | null; dueDate: string | null; done: boolean; progress: number; autoClose: string; late: boolean; holder: { role: string; label: string } | null }
+    const health = async () => {
+      const r = await app.inject({ method: "GET", url: `${base()}/cycles/${e.cycleId}/health`, headers: as(U.hod) });
+      expect(r.statusCode, r.body).toBe(200);
+      return r.json() as { steps: StepAnswer[]; stepsReason: string | null };
+    };
+    const lateOf = async () => {
+      const r = await app.inject({ method: "GET", url: `${base()}/team?month=${MONTH}`, headers: as(U.hod) });
+      expect(r.statusCode, r.body).toBe(200);
+      const a = r.json() as { needsAttention: Array<{ kind: string; engagementId: string; step?: string; dueDate?: string; holder?: unknown }>; partial: string[] };
+      expect(a.partial).not.toContain("needsAttention");
+      return a.needsAttention.filter((i) => i.kind === "cycle_step_late" && i.engagementId === e.engagementId);
+    };
+
+    // Made: the six, in the rules' order, each with its task and due date, none done, none late (the dates are in 2027).
+    const h0 = await health();
+    const s0 = await steps(e.cycleId);
+    expect(h0.stepsReason).toBeNull();
+    expect(h0.steps.map((x) => x.step)).toEqual(STEPS);
+    expect(h0.steps.map((x) => x.taskId)).toEqual(s0.map((x) => x.id));
+    expect(h0.steps.map((x) => x.dueDate)).toEqual(s0.map((x) => x.due));
+    expect(h0.steps.map((x) => x.title)).toEqual(s0.map((x) => x.title));
+    for (const x of h0.steps) {
+      expect(x).toMatchObject({ done: false, progress: 0, late: false, autoClose: "auto", holder: { role: "officer", label: "The officer" } });
+    }
+    expect(await lateOf()).toEqual([]);
+
+    // Two steps fall past their date: health says late, and the Team dashboard lists them (a client, a step, a date: no person).
+    await adminPool().query(`UPDATE pm_tasks SET due_date = '2020-01-15' WHERE id = ANY($1::uuid[])`, [[s0[0].id, s0[1].id]]);
+    const h1 = await health();
+    expect(h1.steps.map((x) => x.late)).toEqual([true, true, false, false, false, false]);
+    expect((await lateOf()).map((i) => [i.step, i.dueDate, i.holder])).toEqual([["planning", "2020-01-15", undefined], ["report", "2020-01-15", undefined]]);
+
+    // The planning step closes on its own condition: done, no longer late, gone from the list; the report stays.
+    const p = await newPost(e);
+    await driveTo(e, p, "proofread");
+    const h2 = await health();
+    expect(h2.steps[1]).toMatchObject({ step: "planning", done: true, progress: 100, late: false, holder: null });
+    expect(h2.steps[0]).toMatchObject({ step: "report", done: false, late: true });
+    expect((await lateOf()).map((i) => i.step)).toEqual(["report"]);
+
+    // Closed by hand, the report shows done and leaves the list; the next recompute (a new counted post) reopens planning and, its condition
+    // not holding, the report too: both are late again.
+    const report = s0[0];
+    expect((await app.inject({ method: "PATCH", url: `/api/${A}/pm/tasks/${report.id}`, headers: as(U.hod), payload: { status: "done" } })).statusCode).toBe(200);
+    expect((await health()).steps[0]).toMatchObject({ step: "report", done: true, late: false });
+    expect(await lateOf()).toEqual([]);
+    await newPost(e);
+    const h3 = await health();
+    expect(h3.steps[1]).toMatchObject({ step: "planning", done: false, late: true });
+    expect(h3.steps[1].progress).toBeLessThan(100);
+    expect(h3.steps[0]).toMatchObject({ step: "report", done: false, late: true });
+    expect((await lateOf()).map((i) => i.step)).toEqual(["planning", "report"]);
+
+    // A cycle made before SCP-5f (a project, but no step task): the rules' steps, with no task and no date, none late.
+    const old = await planned();
+    await adminPool().query(`UPDATE pm_tasks SET deleted_at = now() WHERE tenant_id = $1 AND linked_type = 'social_cycle_step' AND linked_id = $2`, [A, old.cycleId]);
+    const r = await app.inject({ method: "GET", url: `${base()}/cycles/${old.cycleId}/health`, headers: as(U.hod) });
+    const hOld = r.json() as { steps: StepAnswer[]; stepsReason: string | null };
+    expect(hOld.stepsReason).toBeNull();
+    expect(hOld.steps.map((x) => [x.step, x.taskId, x.dueDate, x.done, x.late])).toEqual(STEPS.map((k) => [k, null, null, false, false]));
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
   // (8) LAST: the company's rules change (it changes the rules of company A for every later cycle)
   // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -571,5 +650,10 @@ describe.skipIf(!TEST_URL)("SCP-5f · the monthly cycle's step tasks (BFF §63.2
     expect((await app.inject({ method: "PATCH", url: `/api/${A}/pm/tasks/${deploy.id}`, headers: as(U.hod), payload: { status: "done" } })).statusCode).toBe(200);
     await ok(await act(fresh.officer, p, "reschedule", { at: "2027-03-15T10:00:00.000Z" }), "reschedule");
     expect(await doneOf(fresh.cycleId)).toEqual({ planning: true, deploy: true });
+    // The health read says which step the pipeline closes itself and which it does not (§63.27.4 `autoClose`).
+    const hf = await app.inject({ method: "GET", url: `${base()}/cycles/${fresh.cycleId}/health`, headers: as(U.hod) });
+    expect(hf.statusCode, hf.body).toBe(200);
+    expect((hf.json().steps as Array<{ step: string; autoClose: string; done: boolean }>).map((x) => [x.step, x.autoClose, x.done]))
+      .toEqual([["planning", "auto", true], ["deploy", "manual", true]]);
   });
 });
