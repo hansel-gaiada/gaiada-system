@@ -1,5 +1,7 @@
 // SCP-5 W5-B2 — the pure part of "Ideas for next month" (BFF §63.25): the bodies' validation, the company's metric rule, what "Add to next
 // plan" gives the post, the closed-cycle rule, and the fixture's `release_idea` on discard (and not on archive). No services needed.
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import { ScpRouteError } from "./pipeline-effects";
 import { SCP, scpAction } from "./fixture";
@@ -145,5 +147,13 @@ describe("SCP-5 W5-B2 · the fixture's release_idea (BFF §63.25.1)", () => {
     expect(SCP.actions.filter((a) => a.effects.some((x) => String(x).includes("release_idea"))).map((a) => a.action)).toEqual(["discard"]);
     expect(IO_EFFECTS.has("release_idea")).toBe(true);
     expect(typeof EFFECT_RUNNERS.release_idea).toBe("function");
+  });
+});
+
+describe("SCP-5 W5-B2 · the fixture twins", () => {
+  it("the server's stage-machine fixture and the UI's twin are byte-identical (a new effect needs both)", () => {
+    const server = readFileSync(resolve(__dirname, "../scp-stage-machine.json"));
+    const ui = readFileSync(resolve(__dirname, "../../../../../platform-ui/src/lib/scpStageMachine.json"));
+    expect(Buffer.compare(server, ui)).toBe(0);
   });
 });
