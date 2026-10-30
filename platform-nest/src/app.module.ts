@@ -178,6 +178,7 @@ import { SocialIdeasController } from "./modules/social/pipeline/ideas.controlle
 import { SocialSavedController } from "./modules/social/pipeline/saved.controller";
 // SCP-5g: the social audit (BFF §63.28): the list, the scorecard, create, edit, Draft with AI, finalize, attach and delete.
 import { SocialAuditController } from "./modules/social/pipeline/audit.controller";
+import { SocialOnboardingController } from "./modules/social/pipeline/onboarding.controller";
 // SCP-1h: the designer's queue (`GET design-queue`), on its own controller under the same route prefix.
 import { SocialDesignQueueController } from "./modules/social/pipeline/design-queue.controller";
 // SCP-3c: a post's metrics (BFF §63.10 `POST variants/:variantId/metrics`, `GET posts/:postId/metrics`), on its own controller, same prefix.
@@ -312,6 +313,7 @@ import { AiUsageReadsController } from "./modules/ai-usage/reads.controller";
     SocialIdeasController,
     SocialSavedController,
     SocialAuditController,
+    SocialOnboardingController,
     // SCP-1k: the client calendar read (BFF §63.10 `GET calendar`).
     SocialCalendarController,
     // SCP-3d: `GET/POST engagements/:engagementId/feed-preview[/swap]` (BFF §63.10).

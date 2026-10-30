@@ -1755,6 +1755,52 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "auditId"],
       },
     },
+    // ── SCP-5h: client onboarding (BFF §63.29.4, tools of 63.29.5) ───────────────────────────────────────────────────────────
+    // Onboarding is PM's project template applied to the client's own project. Starting it hands about fifteen tasks to people, so it is `medium`
+    // (the person confirms in the thread, 63.15); only the four start it (403 `not_a_social_approver`) and they also need `pm_project` · `manage` on
+    // the client's project. `pm.applyTemplate` (PM's own tool) is the same apply by project id.
+    {
+      name: "social.onboarding",
+      description:
+        "List the clients being onboarded (BFF §63.29): the engagements still in draft and every client whose project carries the company's onboarding "
+        + "template with a task open. Each row has `engagementId`, `clientName`, `officer`, `projectId`, `applicationId` (null before it starts), `kickoff`, "
+        + "`progress` (done of total), `next` (the next open step, with `late`), the `baselineAudit` (`auditId`, `status`, `overall`) when the client has one, "
+        + "`steps` (the checklist by phase) and `startBlock` (`no_project` or `onboarding_template_not_set` when it cannot start). `template` is the company's "
+        + "chosen template or null; `canStart` says whether the caller may start onboarding.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/onboarding",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string", description: "Company id (route scope)." } },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "social.startOnboarding",
+      description:
+        "Start a client's onboarding (BFF §63.29.4): apply the company's onboarding template to the client's project, one task per step, each due a number "
+        + "of working days after the `kickoff` (YYYY-MM-DD). Pass a new uuid `id`; a repeat with the same `id` answers the same application. `people` is an "
+        + "optional {<roleKey>: userId}: it defaults to the client's officer for `officer` and `client` and to the caller for `lead`. Only the four social "
+        + "approvers may start it (403 `not_a_social_approver`), and they need the project's manage right too. 409 `no_project` when the client has no "
+        + "project, 409 `onboarding_template_not_set` when the company chose no template, 409 `template_already_applied` when it was started already.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/onboarding",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The client's engagement." },
+          id: { type: "string", description: "A new uuid for the application (a replay with the same id answers the same application)." },
+          kickoff: { type: "string", description: "The kickoff day, YYYY-MM-DD." },
+          people: { type: "object", description: "Optional {<roleKey>: userId} to override the default people." },
+        },
+        required: ["tenantId", "engagementId", "id", "kickoff"],
+      },
+    },
   ],
   rollupProviders: [socialRollups],
   // D-18: the console is the department template's reserved "Publish" craft group, under the
