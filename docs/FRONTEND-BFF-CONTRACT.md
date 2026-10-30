@@ -13467,6 +13467,68 @@ New code: 400 `summary_missing` (the module's `refuse()`). The fixture's `report
 - sending publishes through PV7-04a with the weekly title; the SIMULATED watermark when a number was simulated;
 - `weekly_report_due` only for clients switched on.
 
+### 63.25 Ideas for next month (SCP-5c) — **STATUS: PLANNED (2026-10-30)**
+
+**What it is.** Per client: what we saw, the metric it rests on, and what we suggest. "Add to next plan" turns an idea into a `planned` post of a cycle the person picks, linked both ways; "Mark shared" records that the team shared it with the client. Ideas stay internal: nothing reaches the portal or the report's PDF (SCP-Q27, default). They sit on the monthly report's page, as in the team's design.
+
+**63.25.1 Data: `<prefix+1>_social_ideas.sql`** (social; the third wall in 0105's DO-loop form, FORCE RLS; no DML; the closing DO block asserts the catalogue and, before the FK is added, that no `social_posts.idea_id` is set).
+
+`social_ideas` (new; the name plan §4.2 reserved):
+
+| Column | Type and rule |
+|---|---|
+| `id`, `tenant_id` | uuid PK; `ux_social_ideas_id_tenant UNIQUE (id, tenant_id)` |
+| `engagement_id` | `uuid NOT NULL`, composite FK to `social_engagements (id, tenant_id)` |
+| `saw` | `text NOT NULL`, 1 to 500 characters |
+| `metric` | `text NOT NULL`, 1 to 300: required, as in the design |
+| `suggestion` | `text NOT NULL`, 1 to 500 |
+| `status` | `text NOT NULL DEFAULT 'proposed'`: `proposed`, `shared`, `planned` |
+| `report_id` | `uuid NULL`, composite FK to `social_reports`: the monthly report it was raised with, when it was |
+| `cycle_id`, `post_id` | `uuid NULL`, composite FKs to `social_cycles` and `social_posts`: where it was planned |
+| `shared_at`, `shared_by`, `planned_at`, `planned_by` | who and when |
+| `created_by` (NOT NULL), `created_at`, `updated_at`, `deleted_at`, `deleted_by`, `origin_site` | as usual |
+
+CHECKs (`status` is NOT NULL; every other side is written with `IS NULL`): `(status = 'planned') = (post_id IS NOT NULL)`; `(post_id IS NULL) = (cycle_id IS NULL)`, and the same for `planned_at` and `planned_by`; `(shared_at IS NULL) = (shared_by IS NULL)`; `status <> 'shared' OR shared_at IS NOT NULL`; `(deleted_at IS NULL) = (deleted_by IS NULL)`; `deleted_at IS NULL OR status <> 'planned'`; the lengths. `ux_social_ideas_post UNIQUE (post_id) WHERE post_id IS NOT NULL`; index `(tenant_id, engagement_id, status, created_at DESC) WHERE deleted_at IS NULL`.
+
+`social_posts.idea_id` (reserved by 63.1) gains `fk_social_posts_idea FOREIGN KEY (idea_id, tenant_id) REFERENCES social_ideas (id, tenant_id)` and `ux_social_posts_idea UNIQUE (idea_id) WHERE idea_id IS NOT NULL`. Only "Add to next plan" writes the two pointers, together; `discard` clears them (below).
+
+**Moves:** `proposed → shared`; `proposed` or `shared → planned` (`shared_at` stays as the record). The machine's `discard` gains the effect `release_idea` (fixture, both twins): a discarded post's idea goes back to `shared` when it was shared, else `proposed`, with its post, cycle and planned fields cleared, in the action's transaction. An archived post keeps its idea `planned`.
+
+**63.25.2 Who.** The gate is the client's would-be post, built from the rows: `{kind: "social_post", tenantId, module: "social", ownerId: <the engagement's officer>, creatorId: "", approverIds, assigneeIds: [], creativeSource: ""}`, asked as creating a pipeline post is (63.6.1): `create`, plus `author` or `approve` in the same `checkMany`. So the client's officer and the four write ideas; anyone else gets 403 `not_officer_or_approver`, and an automation principal 403 `automation_cannot_act`. Reading is `social_post` · `read`. No new action (PERMISSION §57).
+
+**63.25.3 Routes** (base 63.0; every write in the order 404, 403, 400, 409; an unknown or other company's idea is 404 `idea_not_found`):
+
+| Route | What it does |
+|---|---|
+| `GET engagements/:engagementId/ideas?status=&reportId=` (`read`) | `{items: [Idea], canWrite}`, newest first, at most 200. `Idea {id, engagementId, saw, metric, suggestion, status, reportId, post: {id, title, pipelineStatus, cycleMonth} \| null, sharedAt, sharedBy: {id, name} \| null, createdBy: {id, name}, createdAt}`. 404 `engagement_not_found` |
+| `POST engagements/:engagementId/ideas` | `{id?, saw, metric, suggestion, reportId?}` → 201 `{idea, created}`. A replayed `id` answers `created: false`; an `id` used for another client is 400 `{field: 'id'}`; `reportId` must be a monthly report of the same client (400 `{field: 'reportId'}`) |
+| `PATCH ideas/:ideaId` | `{saw?, metric?, suggestion?}` while `proposed` or `shared`, else 409 `idea_planned` |
+| `POST ideas/:ideaId/share` | `proposed → shared`; on `shared`, 200 `{alreadyApplied: true}`; on `planned`, 409 `idea_planned` |
+| `POST ideas/:ideaId/plan` | `{cycleId}`: "Add to next plan" (below) → 201 `{idea, post: {id, title, cycleId, cycleMonth}}` |
+| `DELETE ideas/:ideaId` | A soft delete while `proposed` or `shared`, else 409 `idea_planned` |
+
+**"Add to next plan."**
+- The person picks the cycle. The page offers the client's next open cycle (the earliest whose month is after the report month) and any later one; the server never guesses.
+- Order: 404 `idea_not_found`; 403 (the gate above, on the cycle's client); 400 `{field: 'cycleId'}`; 404 `cycle_not_found` (another client's cycle included); 409 `cycle_closed` when its month is before the report month (`todayIsoInTz(config.reportsTz)`); then, under the idea's row lock, an idea already `planned` answers 200 `{alreadyApplied: true}` with its post when the post is live in that cycle, else 409 `idea_planned`.
+- One transaction: the machine's `create` through `createPostInTx` (63.6.1, with `extra` columns as the sheet import passes them): `title` the suggestion cut at 200 characters, `placement` the client's allocated platforms, `angle` "From an idea: <saw> (<metric>)" cut at 500, and `idea_id`; the post starts `planned`. Then the idea becomes `planned` with its cycle, post and planner. A refusal of the create, with its own code, rolls both back.
+- Activity: the post's `create` row carries `metadata.ideaId`; the idea gets `planned`. Content-month progress syncs as create does.
+
+**63.25.4 Pages.** No new URL or key. On a monthly report's page, `{D}/social-reports/[reportId]`, the section "Ideas for next month" lists the client's ideas with their status ("Proposed", "Shared with client", "Added to plan" with "Open post") and offers the officer and the four: Add idea (what we saw, the metric it rests on, what we suggest), Add to next plan (with the cycle picker), Mark shared and Delete. An idea added there carries the report's id. `PipelinePost` (63.6.2) gains `idea: {id, saw, metric, suggestion} | null` (additive), and the post page shows "From an idea".
+
+**DEMO_MODE.** An idea in each status on the demo client with a monthly report, one planned into next month's cycle; "Add to next plan" and the discard release run in the demo store in the server's order.
+
+**Agents:**
+
+| Tool | Route | Class |
+|---|---|---|
+| `social.listIdeas` | `GET engagements/:engagementId/ideas` | read |
+| `social.addIdea`, `social.editIdea`, `social.shareIdea` | the create, edit and share routes | `write`, impact `low`: internal notes a person sees and changes |
+| `social.planIdea` | `POST ideas/:ideaId/plan` | `write`, impact `low`: a `planned` post reaches nobody and is discarded in one step |
+
+**Simulated.** An idea is typed text and carries no mark; the report page keeps the report's own.
+
+**63.25.5 Proofs:** every CHECK with its NULL cases, both FKs and both unique indexes; the officer of another client and a `company_admin` refused 403 `not_officer_or_approver`, the client's officer and each of the four allowed; "Add to next plan" writes the post and the idea in one transaction (a refused create leaves the idea as it was), a replay answers `alreadyApplied`, `cycle_closed`, another client's cycle 404; discarding the planned post releases the idea, archiving it does not; a planned idea refuses edit and delete; the post read's `idea`.
+
 
 ## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
 
