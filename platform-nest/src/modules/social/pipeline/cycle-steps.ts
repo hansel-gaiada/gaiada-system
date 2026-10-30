@@ -3,7 +3,7 @@
 // new cycles only), in the engagement's project beside the content-month task (§63.13). Still no task per post. PM's task system, not
 // a second one: every write goes through the PM module's own functions (`createPmTaskInTx`, `updateLinkedTaskScheduleInTx`,
 // `setLinkedTaskProgressInTx`), and a step task is found again by its link (`linked_type = 'social_cycle_step'`, `linked_id` the cycle,
-// `linked_step` the step key: migration 202610301310), never by its title.
+// `linked_step` the step key: migration 202610301400), never by its title.
 //
 // WHO WRITES THEM (§63.27.3). Only the pipeline, inside actions that are already authorized: no route and no Cerbos action of its own.
 //   made and re-dated   `syncCycleStepTasks(create: true)` from `writeCycleInTx` (PUT cycles, the sheet import's cycles);

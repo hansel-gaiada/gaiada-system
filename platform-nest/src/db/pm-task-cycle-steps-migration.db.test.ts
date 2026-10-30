@@ -1,4 +1,4 @@
-// SCP-5f / W5-C1 — 202610301310_pm_task_cycle_steps.sql (BFF §63.27.1) against LIVE Postgres. Needs DATABASE_URL_TEST; skipped without
+// SCP-5f / W5-C1 — 202610301400_pm_task_cycle_steps.sql (BFF §63.27.1) against LIVE Postgres. Needs DATABASE_URL_TEST; skipped without
 // it (the file-text checks at the top always run). initTestDb() hands us a fully migrated database; the CHECKs and the unique index are
 // proved through the superuser pool (which bypasses RLS but never a CHECK or an index), the wall through the app role (`withGlobal` has no
 // tenant GUC; `withTenants` sets one), and the file is re-applied the way CI's sync-engine-go job applies every migration: plain `psql -f`
@@ -17,7 +17,7 @@ import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setu
 import { createCompany, createProject } from "../testing/fixtures";
 import { pmModule } from "../modules/pm/index";
 
-const MIGRATION = "202610301310_pm_task_cycle_steps.sql";
+const MIGRATION = "202610301400_pm_task_cycle_steps.sql";
 const PATH = join(__dirname, "..", "..", "migrations", MIGRATION);
 const CHECK = "23514";
 const UNIQUE = "23505";

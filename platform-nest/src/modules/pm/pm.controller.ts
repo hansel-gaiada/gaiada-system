@@ -62,7 +62,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // SCP-5f (BFF §63.27): `social_cycle_step` is one STEP of the monthly cycle (`linked_id` the cycle, `linked_step` the step key of the
 // company's rules), also created and owned by the pipeline; like the content-month task, no route moves its link (409 `task_link_locked`).
 export type PmLinkType = "social_post" | "social_cycle" | "social_cycle_step";
-/** `step` is set for `social_cycle_step` only (migration 202610301310's pm_tasks_linked_step_ck holds it to that). */
+/** `step` is set for `social_cycle_step` only (migration 202610301400's pm_tasks_linked_step_ck holds it to that). */
 export interface PmTaskLink { type: PmLinkType; id: string; step?: string }
 /** The link kinds the social pipeline owns: no PM route changes the link of such a task. */
 const PIPELINE_OWNED_LINKS: ReadonlySet<string> = new Set(["social_cycle", "social_cycle_step"]);

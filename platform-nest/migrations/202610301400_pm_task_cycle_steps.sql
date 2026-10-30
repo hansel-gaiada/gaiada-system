@@ -63,7 +63,7 @@ BEGIN
    WHERE table_schema = current_schema() AND table_name = 'pm_tasks' AND column_name = 'linked_step'
      AND data_type = 'text' AND is_nullable = 'YES' AND column_default IS NULL;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610301310: pm_tasks needs linked_step text NULL with no default';
+    RAISE EXCEPTION '202610301400: pm_tasks needs linked_step text NULL with no default';
   END IF;
 
   SELECT string_agg(want.c, ', ') INTO missing
@@ -71,7 +71,7 @@ BEGIN
    WHERE NOT EXISTS (SELECT 1 FROM pg_constraint pc
                       WHERE pc.conrelid = to_regclass('pm_tasks') AND pc.conname = want.c AND pc.contype = 'c' AND pc.convalidated);
   IF missing IS NOT NULL THEN
-    RAISE EXCEPTION '202610301310: missing or unvalidated constraints on pm_tasks: %', missing;
+    RAISE EXCEPTION '202610301400: missing or unvalidated constraints on pm_tasks: %', missing;
   END IF;
 
   -- The widened type CHECK admits all three kinds (the old two are still admitted).
@@ -80,7 +80,7 @@ BEGIN
      AND pg_get_constraintdef(pc.oid) LIKE '%social_post%' AND pg_get_constraintdef(pc.oid) LIKE '%''social_cycle''%'
      AND pg_get_constraintdef(pc.oid) LIKE '%social_cycle_step%';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610301310: pm_tasks_linked_type_ck must admit social_post, social_cycle and social_cycle_step';
+    RAISE EXCEPTION '202610301400: pm_tasks_linked_type_ck must admit social_post, social_cycle and social_cycle_step';
   END IF;
 
   SELECT count(*) INTO n FROM pg_indexes
@@ -90,13 +90,13 @@ BEGIN
        OR (indexname = 'ux_pm_tasks_social_cycle' AND indexdef LIKE 'CREATE UNIQUE INDEX%' AND indexdef LIKE '%(tenant_id, linked_id)%'
            AND indexdef LIKE '%''social_cycle''::text%' AND indexdef NOT LIKE '%social_cycle_step%'));
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610301310: ux_pm_tasks_social_cycle_step must exist with its key and predicate, and ux_pm_tasks_social_cycle must be untouched; found % of 2 right', n;
+    RAISE EXCEPTION '202610301400: ux_pm_tasks_social_cycle_step must exist with its key and predicate, and ux_pm_tasks_social_cycle must be untouched; found % of 2 right', n;
   END IF;
 
   -- The wall is untouched: pm_tasks still has RLS enabled and forced.
   SELECT count(*) INTO n FROM pg_class
    WHERE oid = to_regclass('pm_tasks') AND relrowsecurity AND relforcerowsecurity;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610301310: pm_tasks must keep RLS ENABLED and FORCED';
+    RAISE EXCEPTION '202610301400: pm_tasks must keep RLS ENABLED and FORCED';
   END IF;
 END $$;

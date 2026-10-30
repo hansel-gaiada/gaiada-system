@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.210.0` + platform-ui `0.228.0` - Shared train 20261030-5 (conductor gaiada-system-ed): SCP-5 wave 5, three cars - PROTOTYPED
+
+- **SCP-5 W5-C1 (SCP-5f, BFF §63.27):** the monthly cycle as six PM step tasks per client and month (report, planning, copy lock, artwork, client window, deploy), made and re-dated with the cycle from the company's rules, and closed or reopened by the pipeline inside each stage action by each step's condition (a manual step is never touched); the report step closes on delivery. One lock order everywhere (the post, the content-month task, the step tasks in the rules' order); proved by two concurrent stage actions on one cycle that never deadlock. A step task's link is locked (409 `task_link_locked`); PM task reads answer `linkedStep`. Migration `202610301400_pm_task_cycle_steps.sql` (re-stamped at assembly after main's 202610301330): `pm_tasks_linked_type_ck` admits `social_cycle_step`, `linked_step` with its two CHECKs, one task per step and cycle. The stage machine's `discard` runs soft_delete, release_idea, content_month_progress, cycle_steps (both fixture twins).
+- **SCP-5 W5-B3 (SCP-5e, BFF §63.26):** Saved, each client's content bank: the collections from the company's rules (photos, approved posts, hashtag sets read where they live; captions, templates and references stored), add, change and delete with the team's gates, and `savedItemIds` on the post edit counting each use inside the edit's own transaction (a refused edit counts nothing; a replayed `actionId` counts once). Tools `social.savedItems`, `social.saveItem`. No migration.
+- **SCP-5 W5-A2 (SCP-5b, BFF §63.24.1-4):** the six periodic report kinds (daily, weekly, monthly, quarterly, semester, yearly) on the report routes: each kind's period, due date, freeze point, content and check from the company's rules, AI drafting at create, one report per client, kind and period; daily and weekly carry a summary and a next-period line (400 `summary_missing`); the long kinds use the monthly's notes and action plan; monthly unchanged. Needs you's `periodic_report_due`, the allocation's `reportKinds`, the Team dashboard's `reportKind`. No migration.
+- **Deploy.** One additive migration; no Cerbos change; no compose change.
+
 ### platform-nest `0.209.0` + platform-ui `0.227.1` - shared train 20261030-4: AIP Phase 4 budgets, notices and the runaway alert (AIP-17b, AIP-19); SCP-5 W5-A1 and W5-B2 - PROTOTYPED
 
 - **AIP-17b (platform-nest; plan §6.3 items 6 and 7; BFF §66.8 to §66.10).** Budgets and allowances, report-only first (owner ruling AIP-D7):
