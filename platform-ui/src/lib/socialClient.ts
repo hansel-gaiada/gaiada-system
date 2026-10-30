@@ -8,6 +8,7 @@
 // target and never fill a slot of the Plan grid. The server counts the same way (`tallyCounts`); `planSlots` here only lays the grid out.
 import { SCP_PHASES, scpPhaseLabel } from "./scpStageMachine";
 import type { Health, HealthState, HolderRole } from "./socialCycles";
+import { asCycleSteps, asStepsReason, type CycleStep, type StepsReason } from "./socialCycleSteps";
 
 const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
@@ -94,6 +95,10 @@ export interface CycleView {
   today: string;
   client: Health | null;
   posts: ClientPost[];
+  /** SCP-5f (BFF §63.27.4): the month's steps in the rules' order, or null when the answer carries none (an older server: nothing is claimed). */
+  steps: CycleStep[] | null;
+  /** Why a cycle has no steps (its client has no project, or it was deleted); null otherwise. */
+  stepsReason: StepsReason | null;
 }
 
 const STATES: readonly string[] = ["on_track", "tight", "at_risk", "late", "done"];
@@ -123,6 +128,7 @@ export function asCycleView(raw: unknown): CycleView {
   return {
     cycleId: raw.cycleId, engagementId: str(raw.engagementId) ?? "", clientName: str(raw.clientName) ?? "", month: str(raw.month) ?? "",
     deadline: str(raw.deadline) ?? "", readyBy: str(raw.readyBy) ?? "", today: str(raw.today) ?? "", client: asHealth(raw.client), posts,
+    steps: asCycleSteps(raw.steps), stepsReason: asStepsReason(raw.stepsReason),
   };
 }
 

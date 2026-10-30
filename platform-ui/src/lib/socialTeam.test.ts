@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  ATTENTION_LABEL, ATTENTION_ORDER, ATTENTION_WORDS, asTeamDashboard, attentionGroups, attentionHref, clientHref, clientsByHealth, dashboardHref, holderText,
+  ATTENTION_LABEL, ATTENTION_ORDER, ATTENTION_WORDS, asTeamDashboard, attentionGroups, attentionHref, attentionMeta, clientHref, clientsByHealth, dashboardHref, holderText,
   lateOrAtRiskCount, partialText, postsText, settingsHref, sinceText, stepLabel, waitsSorted, workingDaysText, workloadSorted,
   type AttentionItem, type TeamClient, type WaitRow, type WorkloadRow,
 } from "./socialTeam";
@@ -9,7 +9,7 @@ import {
 
 const health = (state: string) => ({ state, spareDays: 2, lateDays: null, lateWith: null, latestSafeHandoff: "2026-10-20", readyBy: "2026-10-25" });
 const item = (over: Partial<AttentionItem> = {}): AttentionItem => ({
-  kind: "late", postId: null, reportId: null, boostId: null, engagementId: "e-1", clientName: "Northwind Traders", title: null, since: "2026-10-05", holder: null, ...over,
+  kind: "late", postId: null, reportId: null, boostId: null, engagementId: "e-1", clientName: "Northwind Traders", title: null, since: "2026-10-05", holder: null, step: null, dueDate: null, ...over,
 });
 const body = (over: Record<string, unknown> = {}) => ({
   month: "2026-10", needsAttention: [], clients: [], workload: [], waits: [], stepAverages: [], estimatesNotSet: [], personRowsLimited: false, partial: [], ...over,
@@ -118,7 +118,7 @@ describe("attentionHref: where a row opens", () => {
 
 describe("the words", () => {
   it("has a label and a sentence for every kind", () => {
-    expect(ATTENTION_ORDER).toHaveLength(7);
+    expect(ATTENTION_ORDER).toHaveLength(8);
     for (const k of ATTENTION_ORDER) {
       expect(ATTENTION_LABEL[k], k).toBeTruthy();
       expect(ATTENTION_WORDS[k], k).toBeTruthy();
@@ -198,5 +198,41 @@ describe("sorting and grouping", () => {
     const rows = [item({ kind: "late", since: "2026-10-09" }), item({ kind: "late", since: "2026-10-01" })];
     attentionGroups(rows);
     expect(rows[0].since).toBe("2026-10-09");
+  });
+});
+
+// SCP-5f (BFF §63.27.4): the needs-attention kind `cycle_step_late`: parsed with its step and day, worded, ordered before the reports and linked to the client's Plan tab.
+describe("cycle_step_late", () => {
+  const late = (over: Partial<AttentionItem> = {}): AttentionItem =>
+    item({ kind: "cycle_step_late", engagementId: "e-9", title: "November 2026 plan", step: "planning", dueDate: "2026-10-12", since: "2026-10-12", ...over });
+
+  it("is parsed with its step and its day, and carries no holder and no post", () => {
+    const d = asTeamDashboard(body({ needsAttention: [{ kind: "cycle_step_late", engagementId: "e-9", clientName: "Northwind Traders", step: "planning", dueDate: "2026-10-12", title: "November 2026 plan", since: "2026-10-12" }] }));
+    expect(d.needsAttention).toEqual([{
+      kind: "cycle_step_late", postId: null, reportId: null, boostId: null, engagementId: "e-9", clientName: "Northwind Traders", title: "November 2026 plan",
+      since: "2026-10-12", holder: null, step: "planning", dueDate: "2026-10-12",
+    }]);
+  });
+  it("has a label and a sentence, sits after the boosts and before the reports, and is its own group", () => {
+    expect(ATTENTION_LABEL.cycle_step_late).toBe("Cycle step late");
+    expect(ATTENTION_WORDS.cycle_step_late).toMatch(/past its due date/);
+    expect(ATTENTION_ORDER.indexOf("cycle_step_late")).toBeGreaterThan(ATTENTION_ORDER.indexOf("boost_waiting"));
+    expect(ATTENTION_ORDER.indexOf("cycle_step_late")).toBeLessThan(ATTENTION_ORDER.indexOf("report_due"));
+    const groups = attentionGroups([late({ since: "2026-10-12" }), late({ step: "report", since: "2026-10-03", dueDate: "2026-10-03" }), item({ kind: "late" })]);
+    expect(groups.map((g) => g.kind)).toEqual(["late", "cycle_step_late"]);
+    expect(groups[1].items.map((i) => i.step)).toEqual(["report", "planning"]); // the longest late first
+  });
+  it("opens the client's Plan tab, never a post or a report", () => {
+    expect(attentionHref("d-soc", late())).toBe("/departments/d-soc/profile/e-9?tab=plan");
+    expect(attentionHref("d-soc", late({ postId: "p-1", reportId: "r-1" }))).toBe("/departments/d-soc/profile/e-9?tab=plan");
+  });
+  it("says the day it was due in words, and the other kinds keep their own line", () => {
+    expect(attentionMeta(late())).toBe("Was due 12 Oct");
+    expect(attentionMeta(late({ dueDate: null, since: "2026-10-04" }))).toBe("Was due 4 Oct");
+    expect(attentionMeta(item({ kind: "late", since: "2026-10-05", holder: { role: "designer", label: "The designer" } }))).toBe("Since 5 Oct · With the designer");
+    expect(attentionMeta(item({ kind: "failed_post", since: "2026-10-05" }))).toBe("Since 5 Oct");
+  });
+  it("does not count as late or at risk in the Reports block", () => {
+    expect(lateOrAtRiskCount({ needsAttention: [late(), item({ kind: "late" }), item({ kind: "at_risk" })] })).toBe(2);
   });
 });

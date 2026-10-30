@@ -32,6 +32,13 @@ describe("taskLinkTarget", () => {
     });
   });
 
+  it("a cycle step links to the Plan tab of the cycle's client, where the steps are drawn (SCP-5f)", () => {
+    expect(taskLinkTarget({ linkedType: "social_cycle_step", linkedId: CYCLE }, { deptId: "d-soc", engagementId: ENGAGEMENT })).toEqual({
+      href: `/departments/d-soc/profile/${ENGAGEMENT}?tab=plan`, label: "Client's monthly step",
+    });
+    expect(taskLinkTarget({ linkedType: "social_cycle_step", linkedId: CYCLE }, { deptId: "d-soc" })).toBeNull();
+  });
+
   it("a content-month task whose client is not known has no link (the cycle id is not a page)", () => {
     expect(taskLinkTarget({ linkedType: "social_cycle", linkedId: CYCLE }, { deptId: "d-soc" })).toBeNull();
     expect(taskLinkTarget({ linkedType: "social_cycle", linkedId: CYCLE }, { deptId: "d-soc", engagementId: null })).toBeNull();
