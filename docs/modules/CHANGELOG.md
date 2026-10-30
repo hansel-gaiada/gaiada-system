@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### infra `0.14.0` - shared train 20261030-6, ALONE: PID-1c, Keycloak 26.0 (resolved 26.0.8) to 26.8.1, the prerequisite for passkeys (plan `docs/plans/2026-10-30-phone-identity.md`; runbook `infra/runbooks/keycloak-upgrade.md`) - PROTOTYPED
+
+- **What changes.** `infra/compose/docker-compose.vps.yml`: the `keycloak` image `quay.io/keycloak/keycloak:26.8.1`, and `KC_HTTP_HOST: "0.0.0.0"` stated (26.6+ makes `start-dev` listen on localhost by default). Still `start-dev --import-realm`; nothing else in the service moves.
+- **Rehearsed (PID-1b, DEV-VERIFIED on sumopod).** A copy of the live `gaiada_keycloak` went 26.0.8 to 26.8.1 to revert. The schema migrated in about 7 s; realm, flows, clients, all 75 accounts and their credentials came through identical (only the new built-in required action `idp_link`); password logins, `gaiada-provisioner` list-users 200 and `webdesk-control` 403 were unchanged; the revert was identical.
+- **Deploy.** The `keycloak` service is recreated, and its first start MIGRATES `gaiada_keycloak` (no down-migration). The owner takes runbook §1's `pg_dump` before this release is tagged. Sign-in is down about a minute; signed-in people stay signed in (sessions are persisted). No other service changes. After the deploy, runbook §3's checks run.
+- **Revert (runbook §5).** Restore that dump AND put `26.0.8` back, together, never the image alone. Never re-run an older release's deploy job afterwards, because it rsyncs the old compose; `rollback-to.sh` is safe.
+
 ### platform-nest `0.210.0` + platform-ui `0.228.0` - Shared train 20261030-5 (conductor gaiada-system-ed): SCP-5 wave 5, three cars - PROTOTYPED
 
 - **SCP-5 W5-C1 (SCP-5f, BFF §63.27):** the monthly cycle as six PM step tasks per client and month (report, planning, copy lock, artwork, client window, deploy), made and re-dated with the cycle from the company's rules, and closed or reopened by the pipeline inside each stage action by each step's condition (a manual step is never touched); the report step closes on delivery. One lock order everywhere (the post, the content-month task, the step tasks in the rules' order); proved by two concurrent stage actions on one cycle that never deadlock. A step task's link is locked (409 `task_link_locked`); PM task reads answer `linkedStep`. Migration `202610301400_pm_task_cycle_steps.sql` (re-stamped at assembly after main's 202610301330): `pm_tasks_linked_type_ck` admits `social_cycle_step`, `linked_step` with its two CHECKs, one task per step and cycle. The stage machine's `discard` runs soft_delete, release_idea, content_month_progress, cycle_steps (both fixture twins).
