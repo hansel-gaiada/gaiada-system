@@ -323,7 +323,7 @@ describe.skipIf(!TEST_URL)("SCP-5 W5-A5 · report automation (BFF §63.24.9)", (
 
     const resumed = ok(await patch(as(U.gm), S.lead2, { enabled: true }), 200, "the GM resumes");
     expect(resumed.schedule).toMatchObject({ enabled: true, pausedReason: null, owner: { id: U.gm }, nextPeriod: week(0) });
-    const acts = (await adminPool().query(`SELECT actor_id::text AS actor, verb FROM activities WHERE target_entity_type = 'social_report_schedule' AND target_entity_id = $1 ORDER BY created_at`, [S.lead2])).rows;
+    const acts = (await adminPool().query(`SELECT actor_id::text AS actor, verb FROM activities WHERE target_entity_type = 'social_report_schedule' AND target_entity_id = $1 ORDER BY occurred_at, id`, [S.lead2])).rows;
     expect(acts.map((a) => a.verb)).toEqual(["created", "paused", "resumed"]);
     expect(acts[1].actor).toBe(U.lead2); // the job's row carries the owner
     expect(acts[2].actor).toBe(U.gm);
@@ -382,7 +382,7 @@ describe.skipIf(!TEST_URL)("SCP-5 W5-A5 · report automation (BFF §63.24.9)", (
     const paused = ok(await patch(viaAgent("wa-scp5-sched-hod"), made.schedule.id, { enabled: false }), 200, "pause by chat");
     expect(paused.schedule).toMatchObject({ enabled: false, pausedReason: "manual" });
     expect(await scheduleRow(made.schedule.id)).toMatchObject({ owner_id: U.hod, paused_by: U.hod });
-    const acts = (await adminPool().query(`SELECT actor_id::text AS actor, verb, metadata FROM activities WHERE target_entity_type = 'social_report_schedule' AND target_entity_id = $1 ORDER BY created_at`, [made.schedule.id])).rows;
+    const acts = (await adminPool().query(`SELECT actor_id::text AS actor, verb, metadata FROM activities WHERE target_entity_type = 'social_report_schedule' AND target_entity_id = $1 ORDER BY occurred_at, id`, [made.schedule.id])).rows;
     expect(acts.map((a) => a.verb)).toEqual(["created", "paused"]);
     for (const a of acts) expect(a).toMatchObject({ actor: U.hod, metadata: { via: { agent: "mock-agent" } } });
 
