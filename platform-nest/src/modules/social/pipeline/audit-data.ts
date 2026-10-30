@@ -223,11 +223,11 @@ async function readLivePosts(
   await declareSocialModuleScope(c);
   const posts = await c.query<RawLive>(
     `SELECT p.id::text AS id, p.engagement_id::text AS engagement_id, p.format, p.is_extra,
-            to_char(p.went_live_at AT TIME ZONE $4, 'YYYY-MM-DD') AS live_day, ${SIMULATED_SQL} AS simulated
+            to_char(p.went_live_at AT TIME ZONE $3, 'YYYY-MM-DD') AS live_day, ${SIMULATED_SQL} AS simulated
        FROM social_posts p
       WHERE p.tenant_id = $1 AND p.engagement_id = ANY($2::uuid[]) AND p.pipeline_status = 'live' AND p.went_live_at IS NOT NULL
         AND p.deleted_at IS NULL AND p.archived_at IS NULL
-        AND (p.went_live_at AT TIME ZONE $4)::date >= $5::date AND (p.went_live_at AT TIME ZONE $4)::date < $6::date`,
+        AND (p.went_live_at AT TIME ZONE $3)::date >= $4::date AND (p.went_live_at AT TIME ZONE $3)::date < $5::date`,
     [tenantId, [...engagementIds], range.tz, range.from, range.toExcl],
   );
   if (posts.rows.length === 0) return out;
