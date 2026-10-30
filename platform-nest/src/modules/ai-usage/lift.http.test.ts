@@ -20,7 +20,7 @@ import { newId, withTenants } from "../../db";
 import { resetModules } from "../registry";
 import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole } from "../../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, grantLeadSeat } from "../../testing/fixtures";
 import { clearBudgetStateCacheForTests } from "./soft-stop";
 import { clearUnitCacheForTests } from "./gateway-usage";
 
@@ -134,6 +134,11 @@ describe.skipIf(!TEST_URL)("AIP-18 lifting a department's soft stop (HTTP, real 
     await grantRole(headWeb, role.lead, "org_unit", "d-web");
     await grantRole(headSeo, role.lead, "org_unit", "d-seo");
     await grantRole(headOps, role.lead, "org_unit", "d-ops");
+    // DW-10g-2: Cerbos honours an org_unit_lead grant only in a company where a live lead SEAT backs it (as reads.http.test.ts does).
+    await grantLeadSeat(W, "dv-fe", headFe);
+    await grantLeadSeat(W, "d-web", headWeb);
+    await grantLeadSeat(W, "d-seo", headSeo);
+    await grantLeadSeat(W, "d-ops", headOps);
 
     await withTenants([W], (c) => c.query(
       `INSERT INTO company_org_structure (tenant_id, structure, origin_site) VALUES ($1,$2,$3) ON CONFLICT (tenant_id) DO UPDATE SET structure = EXCLUDED.structure`,
@@ -214,7 +219,7 @@ describe.skipIf(!TEST_URL)("AIP-18 lifting a department's soft stop (HTTP, real 
     it("an unknown unit: the owner gets 404 unit_not_found (after authorization), a head gets 403", async () => {
       const o = await lift("d-nowhere", owner);
       expect(o.statusCode, o.body).toBe(404);
-      expect(o.json().message).toBe("unit_not_found");
+      expect(o.body).toContain("unit_not_found"); // the house error filter wraps the body
       expect((await lift("d-nowhere", headWeb)).statusCode).toBe(403);
     });
 
@@ -222,11 +227,11 @@ describe.skipIf(!TEST_URL)("AIP-18 lifting a department's soft stop (HTTP, real 
       for (const who of [owner, headOps]) {
         const r = await lift("d-ops", who);
         expect(r.statusCode, r.body).toBe(404);
-        expect(r.json().message).toBe("no_soft_stop");
+        expect(r.body).toContain("no_soft_stop"); // the house error filter wraps the body
       }
       const seo = await lift("d-seo", headSeo);
       expect(seo.statusCode, seo.body).toBe(404);
-      expect(seo.json().message).toBe("no_soft_stop");
+      expect(seo.body).toContain("no_soft_stop"); // the house error filter wraps the body
       expect(await liftedMonth("d-ops")).toBeNull();
       expect(await liftActivities()).toEqual([]);
     });
