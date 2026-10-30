@@ -316,7 +316,7 @@ describe.skipIf(!TEST_URL)("AIP-17b budgets and allowances (HTTP, real Postgres 
     it("is 404 unit_not_found for a unit outside the company's org tree (another company's node ids do not count), after authorization", async () => {
       const r = await put("budgets/units/d-nowhere", { monthlyUsd: "5" }, ownerW);
       expect(r.statusCode, r.body).toBe(404);
-      expect(r.json().message).toBe("unit_not_found");
+      expect(r.body).toContain("unit_not_found"); // the house error filter wraps the body; reads.http.test.ts asserts the same way
       // company B has d-web but A's tree is what A's owner is checked against; a node only in another tree is unknown here
       await withTenants([B], (c) => rebuildOrgUnitClosure(c, B, { id: "b-only", kind: "company", name: "B", children: [{ id: "b-dept", kind: "department", name: "B Dept", children: [] }] } as never));
       expect((await put("budgets/units/b-dept", { monthlyUsd: "5" }, ownerW)).statusCode).toBe(404);
@@ -368,7 +368,7 @@ describe.skipIf(!TEST_URL)("AIP-17b budgets and allowances (HTTP, real Postgres 
       for (const who of [stranger, newId()]) {
         const r = await put(`allowances/${who}`, { dailyReplies: 5 }, ownerW);
         expect(r.statusCode, r.body).toBe(404);
-        expect(r.json().message).toBe("person_not_found");
+        expect(r.body).toContain("person_not_found"); // the house error filter wraps the body; reads.http.test.ts asserts the same way
       }
       // a removed or suspended membership is not active
       await q().query(`UPDATE company_memberships SET status = 'suspended' WHERE tenant_id = $1 AND user_id = $2`, [W, adminW]);
