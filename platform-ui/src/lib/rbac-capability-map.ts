@@ -611,6 +611,12 @@ export const CAPABILITY_MAP = {
     permissions: ["search.property.view_replay"],
     semantics: "all",
   },
+  // M5-P4 (WSK-D92): `manage_tags` on resource_search_property, the same tier as the two above (platform_admin, company_admin,
+  // search_manager and owner hold it in the bundles; search_staff does not). It writes a site's LinkedIn partner id.
+  "search.tags.manage": {
+    permissions: ["search.property.manage_tags"],
+    semantics: "all",
+  },
 
   // ────────────────────────────── social-media (SMM-11) ──────────────────────────────────────────
   // Every set below was checked directly against role-permission-bundles.json's generated bundles

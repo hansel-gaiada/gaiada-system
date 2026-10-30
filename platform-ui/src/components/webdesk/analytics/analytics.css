@@ -18,3 +18,12 @@
 .wa-ai { margin: 0 0 8px; font: 600 13px var(--font-body); color: var(--ink-strong); }
 .wa-note { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
 .wa-foot { margin: 8px 0 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-subtle); }
+
+/* M5-P4: Tracking tags card (WSK-D92). */
+.wa-tags { display: flex; flex-direction: column; gap: var(--space-12); }
+.wa-tags__row { margin: 0; font: 400 14px var(--font-body); color: var(--ink-strong); }
+.wa-tags__label { color: var(--ink-muted); }
+.wa-tags__form { display: flex; flex-wrap: wrap; gap: var(--space-12); align-items: flex-end; }
+.wa-tags__form .lux-field { width: 220px; }
+.wa-tags__actions { display: flex; gap: var(--space-8); }
+.wa-tags__ok { color: var(--status-ok-fg); font: 400 13px var(--font-body); margin: 0; }

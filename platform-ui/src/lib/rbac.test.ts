@@ -657,6 +657,26 @@ describe("search.visitors.read / search.replay.view", () => {
   });
 });
 
+// M5-P4 (WSK-D92): `search.tags.manage` is the mirror of Cerbos `manage_tags` on resource_search_property.
+describe("search.tags.manage", () => {
+  const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId } as Me["roles"][number]]);
+
+  it.each(["search_manager", "company_admin", "owner"])("%s holds it in its own company", (role) => {
+    expect(can(as(role), "search.tags.manage", "co-a")).toBe(true);
+  });
+  it("the global superadmin holds it", () => {
+    expect(can(as("platform_admin", "global", null), "search.tags.manage", "co-a")).toBe(true);
+  });
+  it("plain search staff does not (it can still view), and a manager of another company does not", () => {
+    expect(can(as("search_staff"), "search.view", "co-a")).toBe(true);
+    expect(can(as("search_staff"), "search.tags.manage", "co-a")).toBe(false);
+    expect(can(as("search_manager", "company", "co-b"), "search.tags.manage", "co-a")).toBe(false);
+  });
+  it("maps to the catalog key", () => {
+    expect(CAPABILITY_MAP["search.tags.manage"].permissions).toEqual(["search.property.manage_tags"]);
+  });
+});
+
 // DW-5b — `agency.campaign.manage` mirrors resource_agency_campaign (update) + resource_agency_campaign_part
 // (create, delete, allocate). Its biconditional against the bundles is rbac-capability-parity.test.ts; these pin the
 // role set in words, and that the part's owner / unit-lead rules are NOT folded in (the page decides those).

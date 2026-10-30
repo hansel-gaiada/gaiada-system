@@ -290,6 +290,7 @@ export const CAPABILITIES = [
   "search.ledger.admin",    // override a provider budget stop-loss cap (Cerbos action `admin` on resource_search_ledger, elevated-only)
   "search.visitors.read",   // read consented website-visitor profiles (Cerbos action `read_visitors` on resource_search_property, M5-V3-f): manager + company admin, NOT plain search staff. Personal data.
   "search.replay.view",     // watch a recorded visitor session (Cerbos action `view_replay`, M5-V3-f; the recordings UI is V6-c) — same holders as read_visitors
+  "search.tags.manage",     // set a website's tracking tags, today the LinkedIn partner id (Cerbos action `manage_tags` on resource_search_property, M5-P4 / WSK-D92): manager + company admin, NOT plain search staff (who can still SEE the value)
   // ────────────────────────────── social-media (SMM-11) ──────────────────────────────────────────
   // Verified directly against cerbos/policies/resource_social_engagement.yaml +
   // resource_social_post.yaml (SMM-30) and role-permission-bundles.json's actual generated bundles
@@ -530,7 +531,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "hr.policy.view", "hr.policy.manage", "hr.policy.ratify",
     "hr.recruitment.view", "hr.recruitment.manage", "hr.recruitment.approve",
     "hr.payroll.view", "hr.payroll.manage", "hr.payroll.approve",
-    "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin", "search.visitors.read", "search.replay.view",
+    "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin", "search.visitors.read", "search.replay.view", "search.tags.manage",
     // company_admin holds the FULL social manager-tier bundle (role-permission-bundles.json: every
     // permission social_manager holds, company_admin holds identically — same Cerbos rule lists
     // company_admin alongside module_manager on every social_engagement/social_post action).
@@ -752,7 +753,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // DR-7 — `people.directory` ADDED (see hr_staff's comment above for the full citation; identical
   // reasoning, same `module_staff` rule, `search_manager` deliberately excluded for the same reason).
   search_staff: ["search.view", "search.manage", "people.directory"],
-  search_manager: ["search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin", "search.visitors.read", "search.replay.view"],
+  search_manager: ["search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin", "search.visitors.read", "search.replay.view", "search.tags.manage"],
   // social_staff = Cerbos module_staff on social_engagement (read only — NOT create/update/
   // delete/set_scope, unlike search's engagement policy) and on social_post (read/create/update/
   // submit/import_native — NOT delete/publish/cancel/delete_published). Both verified directly
@@ -910,7 +911,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "reports.company.view", "reports.department.view",
     "reports.facts.admin", "reports.ops.poll", "reports.period.seal", "reports.person.view",
     "reports.project.view", "search.campaign.launch", "search.ledger.admin", "search.manage",
-    "search.report.approve", "search.scope.write", "search.view", "search.visitors.read", "search.replay.view", "social.client_review.read",
+    "search.report.approve", "search.scope.write", "search.view", "search.visitors.read", "search.replay.view", "search.tags.manage", "social.client_review.read",
     "social.client_review.request", "social.client_review.withdraw", "social.inbox.assign",
     "social.inbox.escalate", "social.inbox.read", "social.inbox.reply", "social.ledger.read",
     "social.manage", "social.post.delete", "social.scope.write", "social.view", "webdev.provision",

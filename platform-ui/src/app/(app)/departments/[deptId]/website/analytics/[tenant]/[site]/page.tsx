@@ -1,6 +1,7 @@
 import { listSites } from "@/lib/webdeskContent";
 import { readSiteAnalytics } from "@/lib/websiteAnalytics";
 import { readStatus } from "@/lib/visitors";
+import { readTrackingTags } from "@/lib/trackingTags";
 import { can } from "@/lib/rbac";
 import { BOT_FILTER_LIVE_DATE } from "@/lib/visitorsModel";
 import { resolveRange } from "@/lib/websiteAnalyticsModel";
@@ -45,10 +46,17 @@ export default async function WebsiteAnalyticsPage({ params, searchParams }: { p
   // M5-V3-i: "bot hits filtered" comes from the collector through the visitors status, which needs `read_visitors`. A viewer without it gets no
   // figure (not a zero, not a refusal): Analytics stays open to plain search staff.
   const bots = can(c.me, "search.visitors.read", c.company) ? await readStatus(c.userId, c.company, res.property.id) : undefined;
+  // M5-P4: the Tracking tags card. Every search reader may SEE the value (it is public); only a holder of `search.tags.manage` gets the editor,
+  // and the server's `canManage` must agree. A failed read is a sentence in the card, never a "Not set".
+  const tags = {
+    propertyId: res.property.id, webdeskTenant: tenant, site,
+    read: await readTrackingTags(c.userId, c.company, res.property.id, tenant, site),
+    canEdit: can(c.me, "search.tags.manage", c.company),
+  };
   return (
     <div className="wc-page">
       <Breadcrumbs items={[{ label: "Website" }, { label: "Analytics", href: c.analyticsBase }, { label: s.name }]} />
-      <AnalyticsView siteName={s.name} action={here} range={range} reads={res.reads} bots={bots} botFilterLiveDate={BOT_FILTER_LIVE_DATE} />
+      <AnalyticsView siteName={s.name} action={here} range={range} reads={res.reads} bots={bots} botFilterLiveDate={BOT_FILTER_LIVE_DATE} tags={tags} />
     </div>
   );
 }

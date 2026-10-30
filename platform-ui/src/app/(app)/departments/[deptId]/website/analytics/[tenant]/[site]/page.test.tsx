@@ -8,17 +8,22 @@ vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string
 vi.mock("@/lib/webdeskContent", () => ({ listSites: vi.fn() }));
 vi.mock("@/lib/websiteAnalytics", () => ({ readSiteAnalytics: vi.fn() }));
 vi.mock("@/lib/visitors", () => ({ readStatus: vi.fn() }));
+vi.mock("@/lib/trackingTags", () => ({ readTrackingTags: vi.fn() }));
+vi.mock("@/lib/trackingTagsActions", () => ({ saveLinkedinPartnerIdAction: vi.fn() }));
 vi.mock("@/components/webdesk/content/serverCtx", () => ({ requireWebsiteCtx: vi.fn() }));
 
 import { listSites } from "@/lib/webdeskContent";
 import { readSiteAnalytics } from "@/lib/websiteAnalytics";
 import { readStatus } from "@/lib/visitors";
+import { readTrackingTags } from "@/lib/trackingTags";
 import { requireWebsiteCtx } from "@/components/webdesk/content/serverCtx";
 import Page from "./page";
 
 const sitesMock = vi.mocked(listSites);
 const readMock = vi.mocked(readSiteAnalytics);
 const statusMock = vi.mocked(readStatus);
+const tagsMock = vi.mocked(readTrackingTags);
+const tagsOk = (partnerId: string | null, canManage = true) => ({ state: "ok" as const, data: { linkedin: { partnerId }, target: { repo: "gaiadabali/gaiada-web-revamp", variable: "PUBLIC_LINKEDIN_PARTNER_ID" }, canManage, state: "ok" as const, reason: null } });
 const meOf = (role: string) => ({ userId: "u", name: "U", email: "u@x.com", title: null, assurance: "high", companies: [], roles: [{ role, scopeType: "company", scopeId: "co-1" }] });
 const botsOk = (total: number) => ({ state: "ok" as const, data: { state: "ok" as const, message: null, configured: true, enabled: true, lastOkIngestAt: null, lastRunAt: null, lastOutcome: null, bots: { from: "2026-09-14", to: "2026-10-13", days: 30, total, byReason: { ua: total - 2, asn: 2 } } } });
 const ctxMock = vi.mocked(requireWebsiteCtx);
@@ -39,8 +44,9 @@ const mount = async (search: { from?: string; to?: string } = {}) =>
   render(await Page({ params: Promise.resolve({ deptId: "dept-1", tenant: "gaiada", site: "site-1" }), searchParams: Promise.resolve(search) }));
 
 beforeEach(() => {
-  ctxMock.mockReset(); sitesMock.mockReset(); readMock.mockReset(); statusMock.mockReset();
+  ctxMock.mockReset(); sitesMock.mockReset(); readMock.mockReset(); statusMock.mockReset(); tagsMock.mockReset();
   statusMock.mockResolvedValue(botsOk(1234));
+  tagsMock.mockResolvedValue(tagsOk("778899"));
   ctxMock.mockResolvedValue({ userId: "u", me: meOf("search_manager"), company: "co-1", deptId: "dept-1", contentBase: "c", mediaBase: "m", analyticsBase: "/departments/dept-1/website/analytics" } as never);
   sitesMock.mockResolvedValue(sites());
 });
@@ -164,6 +170,55 @@ describe("Website -> Analytics -> site", () => {
       readMock.mockResolvedValue({ kind: "ok", property, reads: { summary: s, pages: s, sources: s, sections: s, ctas: s, forms: s, vitals: s } } as never);
       await mount();
       expect(screen.getByTestId("bot-hits").textContent).toContain("1,234");
+    });
+  });
+
+  // M5-P4 (WSK-D92): the Tracking tags card. Every search reader sees the value; only a holder of search.tags.manage gets the editor.
+  describe("tracking tags", () => {
+    it("asks for the property's tags with the WebDesk tenant and site, and shows the stored id and its repository", async () => {
+      readMock.mockResolvedValue({ kind: "ok", property, reads: okReads() } as never);
+      await mount();
+      expect(tagsMock).toHaveBeenCalledWith("u", "co-1", "p1", "gaiada", "site-1");
+      expect(screen.getByTestId("tracking-tags-value").textContent).toBe("778899");
+      expect(screen.getByTestId("tracking-tags-target").textContent).toContain("gaiadabali/gaiada-web-revamp");
+    });
+
+    it("a search manager gets the editor", async () => {
+      readMock.mockResolvedValue({ kind: "ok", property, reads: okReads() } as never);
+      await mount();
+      expect(screen.getByTestId("tracking-tags-form")).toBeTruthy();
+    });
+
+    it("plain search staff sees the value but gets no editor", async () => {
+      ctxMock.mockResolvedValue({ userId: "u", me: meOf("search_staff"), company: "co-1", deptId: "dept-1", contentBase: "c", mediaBase: "m", analyticsBase: "/departments/dept-1/website/analytics" } as never);
+      tagsMock.mockResolvedValue(tagsOk("778899", false));
+      readMock.mockResolvedValue({ kind: "ok", property, reads: okReads() } as never);
+      await mount();
+      expect(screen.getByTestId("tracking-tags-value").textContent).toBe("778899");
+      expect(screen.queryByTestId("tracking-tags-form")).toBeNull();
+    });
+
+    it("a failed read is a sentence in the card, never 'Not set', and the rest of the page still draws", async () => {
+      tagsMock.mockResolvedValue({ state: "unavailable", message: "The tracking tags could not be read: GitHub did not answer." });
+      readMock.mockResolvedValue({ kind: "ok", property, reads: okReads() } as never);
+      await mount();
+      expect(screen.getByTestId("tracking-tags-unavailable").textContent).toContain("could not be read");
+      expect(screen.queryByText("Not set")).toBeNull();
+      expect(screen.getByTestId("website-analytics")).toBeTruthy();
+    });
+
+    it("is drawn even when Umami's own summary failed (it comes from GitHub, not Umami)", async () => {
+      const s = down("unreachable", "Umami could not be reached. Try again in a moment.");
+      readMock.mockResolvedValue({ kind: "ok", property, reads: { summary: s, pages: s, sources: s, sections: s, ctas: s, forms: s, vitals: s } } as never);
+      await mount();
+      expect(screen.getByTestId("tracking-tags-value").textContent).toBe("778899");
+    });
+
+    it("is not drawn, and nothing is read, when no property matches the site", async () => {
+      readMock.mockResolvedValue({ kind: "no_property" });
+      await mount();
+      expect(tagsMock).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("tracking-tags")).toBeNull();
     });
   });
 });

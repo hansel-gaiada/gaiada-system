@@ -6466,6 +6466,56 @@ Design: `docs/plans/2026-10-12-m5-phase5-design.md` §6.3 and §4.8. The ERP kee
 
 **Known gaps.** (1) The collector lists recordings only per visitor id, so a recording whose visitor never gets a profile (a forged id that never sends an event) cannot be enumerated for forgetting by the ERP; it is unreachable from the ERP and the collector's 30-day retention removes it. (2) The opening id is a bearer of the viewer's own opening only (same actor, same recording, 60 minutes); it is not a secret and is not a second authorization check, since `view_replay` and the live-profile check run on every page.
 
+## 28h. Tracking tags: the LinkedIn partner id (M5-P4, 2026-10-30) — `platform-nest/src/modules/search/tracking-tags.{controller,service}.ts`, `core/github/repo-variables.ts`; `platform-ui` Analytics page card `components/webdesk/analytics/TrackingTagsCard.tsx` — **STATUS: BUILT (typechecked + unit-tested locally; the DB-backed suite `tracking-tags.db.test.ts` is written and needs the Linux gate; never run against a real GitHub App, so the App's `Variables` permission is unproven)**
+
+Ruling: WSK-D92 (`docs/blueprints/webdesk-design-v2.md` §14). The gaiada.com site loads LinkedIn's Insight tag only when its build has a partner id (digits) in the GitHub Actions **repository variable** `PUBLIC_LINKEDIN_PARTNER_ID` of the site's repository; its rebuild workflow reads `${{ vars.PUBLIC_LINKEDIN_PARTNER_ID }}`. These two routes let staff read and set that one variable from the ERP. **A change takes effect on the next rebuild of the site**: nothing here starts a rebuild, and the tag still loads only after a visitor accepts marketing cookies and only once the site's tracking is live. The site needs no change. Two routes on `api/:t/modules/search/properties/:id/`, both `Cache-Control: no-store`, both behind `AuthGuard` + `ModuleEnabledGuard("search")`.
+
+**Rules that hold on both routes**
+- **Cerbos** kind `resource_search_property`, passing `module: "search"` and `tenantId` (the served company). GET asks **`read`**: the value is public (it ends up in the site's HTML), so plain search staff can SEE it. PUT asks **`manage_tags`** (new, PERMISSION-CONTRACT §33.1: `module_manager` and `company_admin`; NOT plain `module_staff`), **before the body is looked at**: a denied caller gets 403 whatever it sent. After the body is valid and the repository is resolved, a PUT is also authorized for **`github_repo · push`** (module `search`) at the **GitHub org tenant** that `resolveGithubOrgTenant` names for this company, never the URL tenant, the step every ordinary repo write takes. That second check can refuse a search manager who holds no grant at the org tenant (403).
+- **The binding (server side, both routes).** `webdeskTenant` (a slug) and `site` (a site id) name a WebDesk site. The pair must be one **this company can see** (the cross-company wall every WebDesk read goes through), and the **property's domain must equal one of that site's environment domains** (lower-cased, scheme, path and a leading `www.` ignored: the rule the Analytics page uses to find the property). Otherwise **409 `tracking_site_mismatch`**; a property of company X can never name a site, or a repository, that is not its own. A property that is not this company's is **404 `property_not_found`**.
+- **Which repository.** The site's **staging build target** from `resolveSiteBuildTarget(…, "staging")` (the `WEBDESK_REBUILD_TARGETS` override, else the provisioned-site registry), never from a request. For gaiada.com that is `gaiadabali/gaiada-web-revamp`. No target: GET answers `state: "no_build_target"`, PUT is **409 `no_build_target`**.
+- **One variable.** The name is the constant `PUBLIC_LINKEDIN_PARTNER_ID` in `repo-variables.ts`, never read from a request. The body names no variable and any extra field is refused.
+- **Every refusal is `{error: <words>, reason: <token>}`** (`HttpErrorFilter`), and GitHub being unable to answer is words, never an empty value.
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| BUILT | GET | `…/properties/:id/tracking-tags?webdeskTenant=<slug>&site=<siteId>` | `read`. Both query values required (400 `tracking_query_invalid`). |
+| BUILT | PUT | `…/properties/:id/tracking-tags/linkedin` | `manage_tags`. Body EXACTLY `{ webdeskTenant: string, site: string, partnerId: string \| null }`. |
+
+**GET response (200).** `{ linkedin: { partnerId: string | null }, target: { repo: "owner/name", variable: "PUBLIC_LINKEDIN_PARTNER_ID" } | null, canManage: boolean, state: "ok" | "no_build_target" | "github_unavailable", reason?: string }`.
+- `state: "ok"`: `partnerId` is the stored value read the way the site reads it (digits, else `null`). `null` here means the variable is **not set**, confirmed against the repository itself (a 404 on the variable alone cannot tell "unset" from "the App cannot see the repo", so an unset answer is only given for a repository the App can read).
+- `state: "no_build_target"`: `target` is `null`, `partnerId` is `null`, `canManage` is `false`; `reason` is a sentence. The site has no repository the ERP can write to yet.
+- `state: "github_unavailable"`: `target` is set, `partnerId` is `null`, **and that null is not "not set"**: `reason` is a sentence saying why (GitHub not configured on this server, the App not installed on the repository, the App lacking the `actions_variables` permission, a rate limit, a failed request). Render the sentence; never "Not set".
+- `canManage` is the answer to "would `manage_tags` be allowed for me", asked of Cerbos without an audit row (and, on a delegated call, for the human it acts for). It only decides whether the UI draws the editor; PUT is the authority.
+
+**PUT.** `partnerId`: a string that, **after trimming, matches `^[0-9]{1,15}$`** (the same rule as the site's `parseLinkedInPartnerId`), or `null` to clear (the variable is deleted). Anything else is **400 `partner_id_invalid`**; a body that is not exactly the three keys is **400 `tracking_body_invalid`**; a malformed `webdeskTenant` or `site` is **400 `tracking_query_invalid`**. Validation runs after authorization and before any lookup or GitHub call. **200** `{ linkedin: { partnerId }, target: { repo, variable }, result: "set" | "cleared" | "unchanged", takesEffect: "next_rebuild" }`. **Idempotent:** the same value twice (or clearing what is not set) is `unchanged`, with no write and no audit row.
+
+**PUT refusals (every token, with its status).**
+
+| Status | `reason` | Meaning |
+|---|---|---|
+| 400 | `tracking_query_invalid` | `webdeskTenant` is not a slug or `site` is not an id (also the GET's query). |
+| 400 | `tracking_body_invalid` | The body is not exactly `{ webdeskTenant, site, partnerId }`. |
+| 400 | `partner_id_invalid` | `partnerId` is not digits (1 to 15) after trimming, and not `null`. |
+| 403 | (Cerbos) | `manage_tags` on the property, or `github_repo · push` at the org tenant, was refused. |
+| 404 | `property_not_found` | No such property for this company. |
+| 409 | `tracking_site_mismatch` | The site is not this company's, or the property's domain is not one of its environment domains. |
+| 409 | `no_build_target` | The site has no staging build repository (not provisioned or linked yet). |
+| 503 | `github_org_unavailable` | The GitHub org tenant is not configured, or is not registered for this company's group. |
+| 503 | `github_not_configured` | The ERP GitHub App is not configured on this server. |
+| 503 | `github_app_not_installed` | The App cannot see the repository (not installed on it, or the installation is suspended). |
+| 503 | `github_permission_missing` | The App lacks the `actions_variables` permission (Repository permissions > Variables: read and write). Also carries `detail: { permission: "actions_variables" }`. The org owner must grant it and accept the updated permissions on the installation. |
+| 503 | `github_rate_limited` | GitHub's shared rate limit is exhausted; try again later. |
+| 503 | `github_request_failed` | GitHub refused or failed the call for another reason. |
+
+A refusal never writes. A WebDesk outage while resolving the site is the ordinary typed 503 of the WebDesk reads (`editorial_unavailable` and friends).
+
+**The audit row.** One `activities` row per **actual** write, after it landed: verb `tracking_tag_set` (a create or an update) or `tracking_tag_cleared`, entity type `search_property`, entity id the property, actor the caller, metadata `{ repo, variable, from, to, webdeskTenant, site }` (`from` and `to` are the old and new value, `null` for none; the value is public, so it is recorded). `unchanged` and every refusal write none.
+
+**UI** (`platform-ui`, Website → Analytics → site): a "Tracking tags" card, drawn only when the site's property resolved. It shows the partner id (or "Not set"), the repository it is stored on and, when `canManage` and the viewer holds `search.tags.manage`, an input with Save and Clear (digits only, a plain message), the help text, and every refusal in words. A GET that fails or answers `github_unavailable` / `no_build_target` shows the sentence in place of the value.
+
+**Known gaps.** (1) The GitHub App's `Variables` permission has never been granted: the first live save is expected to answer `github_permission_missing` until the org owner grants it (the same shape as O-3 for org secrets). (2) The write is not tied to a build: the owner starts a rebuild as usual; the card says so. (3) Only the **staging** repository is written; a site whose production build lives in another repository is not covered. (4) If the audit row cannot be written after the variable changed, the route answers 500 although the change landed; re-sending the same value reads `unchanged` and writes no row.
+
 ## 29. Conversation — client and staff (PV4-03, 2026-10-12) — `platform-nest/src/core/{portal-conversation,conversation}.controller.ts`, `conversation-core.ts`; predicates in `portal-visibility.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (HTTP suite `conversation.controller.test.ts` runs against real Postgres + Cerbos on the Linux CI gate; portal UI BUILT by PV4-08, PROTOTYPED (vitest, a demo-mode Playwright spec and a stub-BFF Playwright spec; not run against a live platform-nest); staff UI BUILT by PV4-09 (§29f), PROTOTYPED (vitest and demo-mode Playwright specs))**
 
 Plan: `docs/plans/2026-10-12-pv4-conversation-tickets.md` (PV4-03). Rulings PV-D22 (a thread per project plus ONE client-wide "general" thread per client), PV-D23 (agents draft, staff send), PV-D24 (every contact who can see a project takes part, viewers included). Tables: migration `202610122330_pv4_conversation_data_model.sql`. Cerbos: `resource_conversation.yaml` (staff kind) and `resource_portal.yaml` `converse` (client).
