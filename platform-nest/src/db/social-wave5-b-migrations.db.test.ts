@@ -14,6 +14,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { newId, withGlobal, withTenants } from "../db";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createClient, createCompany, createUser } from "../testing/fixtures";
+import { APP_ROLE } from "../testing/db-names";
 import { socialModule } from "../modules/social/index";
 
 const FILES = ["202610301100_social_ideas.sql", "202610301101_social_saved_items.sql", "202610301102_social_audits.sql"] as const;
@@ -165,6 +166,9 @@ describe.skipIf(!TEST_URL)("SCP-5 W5-B1 · social_ideas, social_saved_items, soc
     await q(`ALTER TABLE social_reports DROP CONSTRAINT ux_social_reports_id_tenant`);
     await q(`ALTER TABLE creative_assets DROP CONSTRAINT ux_creative_assets_id_tenant`);
     for (const f of FILES) await q(readFileSync(pathOf(f), "utf8")); // each file's own DO block asserts its catalogue
+    // The harness grants the runtime role DML on every table once, after the template migrates (global-setup.ts); tables re-created here
+    // by the superuser get no such grant, so restore exactly that harness step (live grants come from the owner's default privileges).
+    await q(`GRANT SELECT, INSERT, UPDATE, DELETE ON social_ideas, social_saved_items, social_audits TO ${APP_ROLE}`);
     expect(await snapshot()).toEqual(before);
     for (const f of FILES) await q(readFileSync(pathOf(f), "utf8"));
     expect(await snapshot()).toEqual(before);
