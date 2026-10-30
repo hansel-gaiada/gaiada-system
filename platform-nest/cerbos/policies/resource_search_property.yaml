@@ -54,6 +54,12 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager", "company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # M5-P4 (WSK-D92): manage_tags — set a site's tracking tags (the LinkedIn partner id). Same tier and conditions as
+    # read_visitors/view_replay: search manager + company admin, NOT module_staff (who can still SEE the value via `read`).
+    - actions: ["manage_tags"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
     # above is byte-for-byte unchanged. Generic global-or-company mirror per action (see this
@@ -90,4 +96,9 @@ resourcePolicy:
     - actions: ["view_replay"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_resource_search_property_view_replay"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    # M5-P4: its own key; does not bleed into read, read_visitors or view_replay.
+    - actions: ["manage_tags"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_resource_search_property_manage_tags"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

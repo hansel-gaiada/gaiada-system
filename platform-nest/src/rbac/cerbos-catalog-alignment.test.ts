@@ -159,7 +159,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // AIP-08b (2026-10-28, AIP-D5): +1 pair / +1 kind: `assistant_brain` (choose_provider, NEW kind, module assistant: pick a named AI provider for your own threads). 498 -> 499, kinds 112 -> 113.
     // AIP-13b (2026-10-29, AIP-D10): +3 pairs / +1 kind: `dept_assistant_preamble` (read, edit, manage; NEW core kind: a department head edits their department's assistant preamble). 499 -> 502, kinds 113 -> 114.
     // AIP-15 (2026-10-30, AIP-D6/AIP-D18): +6 pairs / +1 kind: `ai_usage` (read_own, read_unit, read_company, read_people, manage, lift_stop; NEW core kind: who sees and manages the company's AI usage). 502 -> 508, kinds 114 -> 115.
-    expect(catalog.length).toBe(508);
+    // M5-P4 (2026-10-30, WSK-D92): +1 pair on the EXISTING resource_search_property kind (`manage_tags`, no new kind). 508 -> 509, kinds stay 115.
+    expect(catalog.length).toBe(509);
     expect(catalogKindSet.size).toBe(115);
   });
 

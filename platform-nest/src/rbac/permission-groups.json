@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 177,
-      "grantablePermissionsInCatalog": 493,
-      "permissionsCoveredByGroups": 454,
+      "groups": 178,
+      "grantablePermissionsInCatalog": 494,
+      "permissionsCoveredByGroups": 455,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
-      "sensitiveGroups": 117
+      "sensitiveGroups": 118
     }
   },
   "groups": [
@@ -850,6 +850,16 @@
       "description": "Record an attested property fact (CMS, hosting, security posture) that a dependent audit check can resolve from on a later run. An accountability record, not a routine property edit.",
       "permissions": [
         "search.property.attest"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "search_manage_tags",
+      "name": "Manage Website Tracking Tags",
+      "domain": "search",
+      "description": "Set a website's tracking tags from the ERP, today the LinkedIn partner id (an advertising tag that loads only after a visitor accepts marketing cookies). The change reaches the site on its next rebuild. Anyone who can read the property can see the value.",
+      "permissions": [
+        "search.property.manage_tags"
       ],
       "sensitive": true
     },

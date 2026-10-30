@@ -2036,6 +2036,25 @@ and migration, plus the DB rows after migrating); and the pinned counts above. *
 then probe: a `search_staff` principal is denied `read_visitors` and `view_replay`, a `search_manager` of the same company is allowed both, and a permission-only
 principal holding one key is allowed that one action.
 
+### 33.1 M5-P4 (WSK-D92, 2026-10-30, BUILT): `manage_tags` on `resource_search_property`
+
+A third action on the same kind, in the same tier as `read_visitors` and `view_replay`. Seeded by `202610301000_iam_m5_p4_manage_tags.sql`. It sets a
+website's tracking tags through the ERP (today only the LinkedIn partner id, a GitHub Actions repository variable the site's next rebuild reads;
+`docs/FRONTEND-BFF-CONTRACT.md` section 28h). The value is public, but the write changes what the site ships, so it is **sensitive** and manager-tier.
+
+| Action | Key | Who | Perm mirror | `uiGrantable` | Group |
+|---|---|---|---|---|---|
+| `manage_tags` | `search.property.manage_tags` | `search_manager` (derived role `module_manager`) and `company_admin`, `inTenant && notLow`; `owner` by the permission arm; `platform_admin` by the wildcard. **Not `search_staff`**, who keep `read` and so can SEE the value | yes, `perm_resource_search_property_manage_tags` | true | new `search_manage_tags` |
+
+The rule names `["manage_tags"]` alone, so it cannot ride a baseline rule; the mirror grants exactly this action and nothing else, inside its company and root.
+Same module-mediated note as section 33: the handler passes `module: "search"` and `tenantId: <the served company>`. Bundles regenerate to +4 pairs
+(`platform_admin`, `company_admin`, `search_manager`, `owner`). Pinned counts: catalog pairs 502 to 503, grantable 487 to 488, sensitive 218 to 219, kinds 114 (unchanged),
+authoring groups 176 to 177, covered by groups 448 to 449, sensitive groups 117 to 118.
+
+**Proof.** `cerbos/tests/search_manage_tags_test.yaml` (16 principals x 2 resources x 3 actions; `cerbos compile --tests` on the Linux gate, which `ci.yml` does not run),
+`src/rbac/search-manage-tags-cerbos.test.ts` (live Cerbos, runs in CI), `src/rbac/search-manage-tags-catalog.db.test.ts` (static agreement plus the DB rows) and the
+pinned counts. **Deploy: restart the Cerbos container and the live sidecar**, then probe: a `search_staff` principal is denied `manage_tags`, a `search_manager` of the same company is allowed.
+
 ---
 
 ## 34. PV4-05 — `share_minutes` on `meeting_recording`, and its agent DENY (2026-10-12, PROTOTYPED)

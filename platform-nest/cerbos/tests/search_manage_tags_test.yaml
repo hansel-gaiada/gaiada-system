@@ -1,0 +1,389 @@
+# M5-P4 (WSK-D92) - resource_search_property manage_tags: who may set a site's tracking tags (the LinkedIn partner id).
+# Every principal is asked read, read_visitors and manage_tags on the served company's property and on another company's,
+# each listed explicitly ALLOW or DENY. Same tier as read_visitors/view_replay: search manager + company admin, NOT plain
+# search staff (who keep `read`, so they can SEE the value). Run on the Linux gate (from platform-nest/; Git Bash needs
+# MSYS_NO_PATHCONV=1):
+#   docker run --rm -v "$PWD/cerbos/policies:/policies:ro" -v "$PWD/cerbos/tests:/tests:ro" #     ghcr.io/cerbos/cerbos:0.54.0 compile --tests=/tests /policies
+# NOTE: the ci.yml pipeline does not run `cerbos compile --tests`; the live twin that CI does run is
+# src/rbac/search-manage-tags-cerbos.test.ts (needs CERBOS_URL).
+name: SearchManageTags
+description: M5-P4 manage_tags x principals x resources, with every negative case.
+principals:
+  search_manager:
+    id: "u-smgr"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "search_manager", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  company_admin:
+    id: "u-cadm"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "company_admin", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  platform_admin:
+    id: "u-padm"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "platform_admin", "scopeType": "global", "scopeId": ""}]
+      clientAdminOf: []
+      perms: []
+  search_staff:
+    id: "u-sstaff"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "search_staff", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  webdev_manager:
+    id: "u-wmgr"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "webdev_manager", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  generic_manager:
+    id: "u-gmgr"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "manager", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  manager_low:
+    id: "u-smgrl"
+    roles: ["user"]
+    attr:
+      assurance: "low"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "search_manager", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  company_admin_low:
+    id: "u-cadml"
+    roles: ["user"]
+    attr:
+      assurance: "low"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "company_admin", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  manager_t2_only:
+    id: "u-smgr2"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "search_manager", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000002"}]
+      clientAdminOf: []
+      perms: []
+  perm_manage_tags:
+    id: "u-pmt"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.manage_tags", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+  perm_manage_tags_low:
+    id: "u-pmtl"
+    roles: ["user"]
+    attr:
+      assurance: "low"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.manage_tags", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+  perm_manage_tags_t2:
+    id: "u-pmt2"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.manage_tags", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000002"}]
+  perm_manage_tags_global:
+    id: "u-pmtg"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.manage_tags", "scopeType": "global", "scopeId": ""}]
+  perm_read_visitors_only:
+    id: "u-prv"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.read_visitors", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+  perm_read_only:
+    id: "u-pr"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.read", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+  staff_granted_manage_tags:
+    id: "u-sgmt"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "search_staff", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: [{"key": "search.property.manage_tags", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+resources:
+  prop:
+    kind: resource_search_property
+    id: "prop"
+    attr: {"id": "prop", "tenantId": "dddddddd-7030-0000-0000-000000000001", "ownerId": "", "projectId": "", "teamId": "", "module": "search"}
+  prop_t2:
+    kind: resource_search_property
+    id: "prop_t2"
+    attr: {"id": "prop_t2", "tenantId": "dddddddd-7030-0000-0000-000000000002", "ownerId": "", "projectId": "", "teamId": "", "module": "search"}
+tests:
+  - name: search_manager
+    input:
+      principals: [search_manager]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: search_manager
+        resource: prop
+        actions: {read: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, manage_tags: EFFECT_ALLOW}
+      - principal: search_manager
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: company_admin
+    input:
+      principals: [company_admin]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: company_admin
+        resource: prop
+        actions: {read: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, manage_tags: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: platform_admin
+    input:
+      principals: [platform_admin]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: platform_admin
+        resource: prop
+        actions: {read: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, manage_tags: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: prop_t2
+        actions: {read: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, manage_tags: EFFECT_ALLOW}
+  - name: search_staff
+    input:
+      principals: [search_staff]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: search_staff
+        resource: prop
+        actions: {read: EFFECT_ALLOW, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: search_staff
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: webdev_manager
+    input:
+      principals: [webdev_manager]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: webdev_manager
+        resource: prop
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: webdev_manager
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: generic_manager
+    input:
+      principals: [generic_manager]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: generic_manager
+        resource: prop
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: generic_manager
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: manager_low
+    input:
+      principals: [manager_low]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: manager_low
+        resource: prop
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: manager_low
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: company_admin_low
+    input:
+      principals: [company_admin_low]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: company_admin_low
+        resource: prop
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: company_admin_low
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: manager_t2_only
+    input:
+      principals: [manager_t2_only]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: manager_t2_only
+        resource: prop
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: manager_t2_only
+        resource: prop_t2
+        actions: {read: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, manage_tags: EFFECT_ALLOW}
+  - name: perm_manage_tags
+    input:
+      principals: [perm_manage_tags]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: perm_manage_tags
+        resource: prop
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_ALLOW}
+      - principal: perm_manage_tags
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: perm_manage_tags_low
+    input:
+      principals: [perm_manage_tags_low]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: perm_manage_tags_low
+        resource: prop
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: perm_manage_tags_low
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: perm_manage_tags_t2
+    input:
+      principals: [perm_manage_tags_t2]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: perm_manage_tags_t2
+        resource: prop
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: perm_manage_tags_t2
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: perm_manage_tags_global
+    input:
+      principals: [perm_manage_tags_global]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: perm_manage_tags_global
+        resource: prop
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_ALLOW}
+      - principal: perm_manage_tags_global
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_ALLOW}
+  - name: perm_read_visitors_only
+    input:
+      principals: [perm_read_visitors_only]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: perm_read_visitors_only
+        resource: prop
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_ALLOW, manage_tags: EFFECT_DENY}
+      - principal: perm_read_visitors_only
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: perm_read_only
+    input:
+      principals: [perm_read_only]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: perm_read_only
+        resource: prop
+        actions: {read: EFFECT_ALLOW, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: perm_read_only
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+  - name: staff_granted_manage_tags
+    input:
+      principals: [staff_granted_manage_tags]
+      resources: [prop, prop_t2]
+      actions: [read, read_visitors, manage_tags]
+    expected:
+      - principal: staff_granted_manage_tags
+        resource: prop
+        actions: {read: EFFECT_ALLOW, read_visitors: EFFECT_DENY, manage_tags: EFFECT_ALLOW}
+      - principal: staff_granted_manage_tags
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
