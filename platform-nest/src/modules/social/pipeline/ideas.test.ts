@@ -136,7 +136,9 @@ describe("SCP-5 W5-B2 · the fixture's release_idea (BFF §63.25.1)", () => {
 
   it("discard names release_idea, after the soft delete and before the content month's progress", () => {
     const e = effectsOf("discard");
-    expect(e).toEqual(["soft_delete", "release_idea", "content_month_progress"]);
+    // The order, not the whole list: SCP-5f's cycle_steps runs last (after the content month's progress, the lock order of §63.27).
+    expect(e.slice(0, 3)).toEqual(["soft_delete", "release_idea", "content_month_progress"]);
+    expect(e.indexOf("release_idea")).toBeLessThan(e.indexOf("content_month_progress"));
   });
 
   it("archive does not: an archived post keeps its idea planned", () => {
