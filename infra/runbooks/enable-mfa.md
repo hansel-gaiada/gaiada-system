@@ -4,6 +4,15 @@
 a **live Keycloak change**; nothing in it has been executed against `gda-aicenter`. The owner reviews
 and runs each step (or hands it to whoever holds `KEYCLOAK_ADMIN_PASSWORD`).
 
+> **⚠ Superseded for the passkey path (PID-2, 2026-10-30).** The passkey second factor is set up by
+> `infra/scripts/keycloak-passkey-realm.sh` (plan `docs/plans/2026-10-30-phone-identity.md` §5), which does this
+> runbook's mapper and reference steps for WebAuthn. That script is DEV-VERIFIED on sumopod against Keycloak 26.8.1.
+> Two steps below are **wrong on 26.8.1** if this runbook is ever followed for OTP:
+> - **§3.2 sets a reference value without a maxAge.** 26.8.1 reads a missing `default.reference.maxAge` as 0 s, so the
+>   step appears in `amr` only at the instant of sign-in and is gone from the first refresh. Always set a maxAge.
+> - **The backup's `kcadm … create realms/gaiada/partial-export` writes an EMPTY file:** kcadm prints the response
+>   body only with `-o`. Add `-o`, and check the file is non-empty JSON before going on.
+
 ## 1. The problem this closes
 
 `platform-nest/src/auth/oidc.ts`'s `assuranceFor()` maps a verified token to `"high"` assurance only

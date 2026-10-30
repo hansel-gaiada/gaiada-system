@@ -1,6 +1,6 @@
 # Phone identity: username, phone, password and a passkey on the person's phone
 
-**Status: PLANNED (2026-10-30, second version).** The decision log is §3; every PID decision is ruled.
+**Status: IN PROGRESS (2026-10-30, second version).** The decision log is §3; PID-D14 and PID-D15 are open (found by the PID-2 prototype).
 Ticket prefix: **PID**. Board section: `TASKS.md` → "Phone identity". The first version (a WhatsApp code on every
 new device) is superseded by PID-D7, and WhatsApp is not used at all (PID-D8).
 
@@ -55,6 +55,8 @@ Two facts the owner should know:
 | PID-D11 | Lost phone: **IT, the superadmin or the owner** resets the person's sign-in. The person then signs in again and creates a new passkey, the same as when they registered. Defaults added by Claude, which the owner may change: nobody resets their own account this way; IT cannot reset the superadmin's or the owner's account (only the superadmin or the owner can); IT checks it is really the person (in person, or a video call) before the reset. | owner | 2026-10-30 |
 | PID-D12 | **Clients and contributors too**, in the last rollout wave, before real client data. It is the real MFA that PV-D45 waits for. | owner, agreed to the recommendation | 2026-10-30 |
 | PID-D13 | **A second passkey is offered at enrolment, not required:** a laptop's Windows Hello or Touch ID, or a security key. | owner, agreed to the recommendation | 2026-10-30 |
+| PID-D14 | May a person delete their own passkey in the account console? **OPEN.** Recommended: **no**, disable Keycloak's `delete_credential` (§6 risk 17); passkeys are removed only by IT's "Reset sign-in" (PID-D11). | — | — |
+| PID-D15 | Does a password reset always sign out the other devices? **OPEN.** Recommended: **yes, always**, by a login-theme override in the PID-2h image (§6 risk 18). Until it ships, "Forgot password?" stays off for everyone. | — | — |
 
 ## 4. What exists today (measured on `origin/main` e3edaf9bf, 2026-10-30)
 
@@ -111,10 +113,26 @@ Two facts the owner should know:
 
 ## 5. How it is built (built-in Keycloak, plus one small extension for phone sign-in)
 
+**Steps 2, 4 to 8 are one script, PROTOTYPED and DEV-VERIFIED on sumopod (PID-2, 2026-10-30):**
+`infra/scripts/keycloak-passkey-realm.sh` (`apply [--dry-run]`, `revert <backup>`, `status`).
+- **Proof:** `keycloak-passkey-realm-test.sh all` with the Playwright suite `keycloak-passkey-realm.e2e.cjs`. A Chrome
+  virtual authenticator stands in for the phone. The test realm is upgraded from 26.0.8 to 26.8.1, like live.
+  - dry run wrote nothing;
+  - apply, and a second apply that changed nothing;
+  - end-to-end **32/32**;
+  - revert identical to before;
+  - kcadm signed in with the container's own admin, with no password on the host (the live way).
+- **The script takes `RP_ID` and `BIND`.** On live, `BIND=client:<test client>` comes first (§6 risk 1);
+  `BIND=realm` switches everyone over.
+
 1. **Upgrade** Keycloak 26.0 to the newest 26.x patch at the time (26.4 or later), after a rehearsal on sumopod.
 2. **User profile:**
-   - `username`: chosen by the person; letters, digits, dot, dash; 3 to 30 characters.
-   - `phoneNumber`: required, stored in one form (+62…). `08…` is accepted on input and converted.
+   - `username`: chosen by the person (`editUsernameAllowed`). **The 3-to-30-character rule waits for PID-3c.** With
+     today's usernames (every one is an email), the rule made Keycloak refuse the platform's own admin writes (create,
+     disable, required actions: 400). That would break IT Accounts and the provisioner.
+   - `phoneNumber`: required, stored as `+62…` (the profile validates only that form). **`08…` → `+62…` conversion
+     belongs to the invite and IT screens (PID-3c) and the phone sign-in form (PID-2h);** Keycloak's profile cannot
+     convert.
    - Existing people are asked for a username and phone at their next sign-in. Keycloak does this itself once
      the field is required.
    - **Uniqueness:** Keycloak does not enforce unique attributes. Our invite and IT screens refuse a number already
@@ -133,20 +151,42 @@ Two facts the owner should know:
    - attestation "none";
    - **RP ID fixed to `erp.gaiada.com`** before anyone enrols. A passkey only works for its RP ID, so changing the ERP's
      domain or the RP ID later breaks every passkey. `api.erp.gaiada.com` is a subdomain, so WebDesk is covered.
-5. **A new browser flow** (a copy; the built-in one is never edited in place):
-   - username or phone + password → passkey (required);
-   - the passkey execution carries the `amr` reference `hwk`;
-   - first sign-in with no passkey → the "register passkey" required action, which cannot be skipped.
-6. **A new reset-credentials flow:** choose user → passkey → set a new password. Every other session ends.
-   `resetPasswordAllowed` comes back on **only** with this flow bound, never with the email one.
+5. **A new browser flow** `gaiada-passkey-browser` (a copy; the built-in one is never edited in place):
+   - username or phone + password REQUIRED → passkey (WebAuthn) REQUIRED. The copy's conditional OTP subflow is removed;
+     nobody holds OTP.
+   - **`amr` references with a maxAge:** `pwd` 7 days, `hwk` 900 s. **26.8.1 reads a missing maxAge as 0 s**, so a step
+     shows in `amr` only at the instant of sign-in (proved: `hwk` was gone on a refresh 5 s later).
+   - First sign-in with no passkey goes to the "register passkey" required action, which has no skip. Proved: an
+     abandoned registration gets no code, in the same browser or a fresh one.
+   - **Proved:** with no passkey the sign-in ends on "Passkey Error", with no code and no "try another way".
+6. **A new reset-credentials flow** `gaiada-passkey-reset`: choose user → **[passkey | else Deny access]** → set a new
+   password.
+   - **A naive version is a takeover hole, proved on 26.8.1** (§6 risk 16). Keycloak skips a REQUIRED step the person
+     has not set up. With "choose user → passkey REQUIRED → reset password", a stranger who typed the username of an
+     account with no passkey set its password, enrolled their own passkey and signed in.
+   - **The fix uses built-ins only:** a REQUIRED subflow [WebAuthn ALTERNATIVE | Deny access ALTERNATIVE]. An account
+     with no passkey, and an unknown name, both get the same "This account cannot reset its password here. Ask IT to
+     reset your sign-in." That leaves nothing to enumerate.
+   - `resetPasswordAllowed` comes back **only** with this flow bound, never with the email one.
+   - **Other sessions do NOT end on their own** (§6 risk 18). Keycloak's "Sign out from other devices" box is unticked
+     by default. The fix rides PID-2h: a login-theme override, so a reset always signs the other devices out.
 7. **Remember me** (PID-D10): the sign-in form gets a "This is my own device" box, which is Keycloak's remember-me,
    reworded. The remember-me lifespans are 7 days. Unticked sessions keep today's 10 h. The ERP's own session
    follows: 7 days when remembered, 12 h otherwise.
-8. **The `amr` mapper** from `infra/runbooks/enable-mfa.md`, with `hwk` for the passkey step.
-9. **Platform:**
-   - "High" requires a passkey touch within the last 15 minutes (`auth_time` with `max_age`).
+8. **The `amr` mapper** (`oidc-amr-mapper`) on `gaiada-ui` and `gaiada-platform`, with the step-5 references. Proved:
+   `["pwd","hwk"]` after a passkey sign-in, `["pwd"]` once the passkey use is older than its maxAge.
+9. **Platform (PID-3a):**
+   - "High" requires **`hwk` in `amr` AND `auth_time` within 15 minutes**. `hwk`'s maxAge only stops new tokens; an
+     access token minted at minute 14 still lives 60 min (`accessTokenLifespan` 3600). Proved: a remembered session
+     keeps the original `auth_time`.
    - The step-up page sends the person back to Keycloak with `max_age=0` for a fresh touch. This replaces the
      simulated button once live.
+10. **Brute force (PID-2i):**
+    - **Settings:** temporary lockouts only (5 failures, 60 s step, 900 s max); `maxSecondaryAuthFailures` **0**.
+    - **Why 0:** a positive value locks permanently even in temporary mode. Measured on 26.8.1: failed passkey checks
+      are not counted at all, so a positive value would only ever bite OTP.
+    - **Proved:** a lockout recovers on its own, and `user.enabled` stays true.
+    - The script can apply this step alone (`STEPS=bruteforce`) as the early live step.
 
 ## 6. Risks and their controls ("plan this safely")
 
@@ -167,6 +207,9 @@ Two facts the owner should know:
 | 13 | **Brute-force protection is off on live** (measured 2026-10-30). Username or phone + password can be guessed with no slow-down. The passkey stops a guessed password from getting in, but only once it is required. | Turn on Keycloak's brute-force detection with **temporary** lockouts (never permanent: a permanent lockout of the owner is itself a lockout incident), in the first live realm step (PID-2i). Every headless test login stays a single attempt, as already ruled. |
 | 14 | **Usernames have always equalled emails** (all 75 live accounts). | Only one reader of `preferred_username` exists (a fallback display name). The proof checks that the IT Accounts page, the invite adoption (`findUserByEmail` with `exact=true`) and `sso-login.sh` all key on email or `sub`, never on the username. |
 | 15 | **The image bump upgrades live in whichever release carries it.** `deploy.yml`'s `up -d` recreates Keycloak, because the `auth` profile is deployed. Keycloak has no down-migration. | The compose change stays on its own branch until the owner picks a window. The backup (runbook §1) is taken first; then it rides a train **alone**. Revert = restore the dump **and** the old tag together. Never re-run an older release's deploy job afterwards (it would start 26.0 on the migrated database); `rollback-to.sh` is safe. |
+| 16 | **"Forgot password?" takes over an account that has no passkey** (proved on 26.8.1: Keycloak skips a REQUIRED step the person has not set up, so a naive reset flow let a stranger set the password and enrol their own passkey). | The reset flow's proof step is [passkey | else Deny access] (§5.6). An account without a passkey and an unknown name get the same refusal. The e2e suite keeps both the naive-flow observation (d0) and the refusal (d2), so a later Keycloak or flow change cannot reopen it unseen. |
+| 17 | **A person can delete their only passkey** in the account console (Keycloak's `delete_credential` action is enabled after the upgrade). Their next sign-in then enrols a new passkey with the password alone, so anyone holding the password and a session could swap the passkey. | Disable `delete_credential`, so passkeys are removed only by IT's "Reset sign-in" (PID-D11). **Owner decision PID-D14.** |
+| 18 | **A password reset leaves the other signed-in devices signed in** (Keycloak's "Sign out from other devices" box is unticked by default, and the theme cannot be configured otherwise). A remembered 7-day session on a lost or stolen device would survive the reset. | A login-theme override in the PID-2h image makes a reset always sign the other devices out. Until then, the reset is not offered to everyone (it is bound only with `BIND=realm`), and IT's "Reset sign-in" ends every session (PID-3d). **Owner decision PID-D15.** |
 
 ## 7. Rollout order
 
@@ -188,6 +231,7 @@ Two facts the owner should know:
 - 1c live upgrade with a DB dump, a window and a revert (owner approves).
 
 **PID-2 · Realm setup, on sumopod:**
+PROTOTYPED and DEV-VERIFIED on sumopod 2026-10-30 except 2h (§5, script `infra/scripts/keycloak-passkey-realm.sh`).
 - 2a user profile (username rules, phone number in one form; existing people asked at next sign-in);
 - 2h the phone sign-in extension and the Keycloak image built in CI (§5.3);
 - 2b passkey policy with the fixed RP ID;
