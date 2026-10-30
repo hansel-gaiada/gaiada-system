@@ -11,7 +11,7 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.207.0` + platform-ui `0.226.0` - shared train 20261030-2: M5-P4, the site's LinkedIn partner id from the ERP (WSK-D92); the AI usage screens (AIP-16, AIP-05); SCP-5 W5-B1, the tables for ideas, the Saved bank and the audit; SCP-5 W5-C3, PM project templates - PROTOTYPED
+### ai-gateway-go `0.20.0` + platform-nest `0.207.0` + platform-ui `0.226.0` - shared train 20261030-2: AIP-17a, the gateway's daily call counters survive a restart; M5-P4, the site's LinkedIn partner id from the ERP (WSK-D92); the AI usage screens (AIP-16, AIP-05); SCP-5 W5-B1, the tables for ideas, the Saved bank and the audit; SCP-5 W5-C3, PM project templates - PROTOTYPED
 
 - **Why.** The gaiada.com site loads LinkedIn's Insight tag only when its build has a partner id in the repository variable `PUBLIC_LINKEDIN_PARTNER_ID`. The owner does not have the id yet and wants staff to set it from the ERP later (WSK-D92). A change reaches the site at its **next rebuild**; nothing here starts one. The site needs no change.
 - **platform-nest.**
@@ -31,7 +31,10 @@ local stack). None of these mean "production-done".
   - Counts and money only, never text; an unknown figure says unknown, never 0; cost formatted exactly from the decimal string.
 - **platform-nest: SCP-5 W5-B1.** Tables `social_ideas`, `social_saved_items`, `social_audits` (additive; their routes come in later trains). Migrations `202610301100`, `202610301101`, `202610301102`.
 - **platform-nest: SCP-5 W5-C3.** PM project templates: apply a project template in one idempotent transaction, due dates in working days from kickoff, move the kickoff (onboarding's base). New routes `POST pm projects/:id/apply-template`, `GET projects/:id/template-applications`, `PATCH template-applications/:id`. Migrations `202610301200_pm_project_templates.sql`, `202610301201_social_settings_onboarding.sql`.
-- **Deploy (train 20261030-2).** Six migrations, all additive, no data rewrite: `202610301000` (IAM seed, M5-P4), `202610301100` to `202610301102` (W5-B1), `202610301200` and `202610301201` (W5-C3). **Cerbos restart** (M5-P4 changes `derived_roles.yaml` and `resource_search_property.yaml`). No compose or `.env` change. The PID car carries docs and an ops script only.
+- **ai-gateway-go: AIP-17a, the daily call counters survive a restart (plan §6.3 item 5).**
+  - The chat/agent budget and the /embed budget write their day counts to `data/budget-state.json` (atomic temp file and rename, at most every 5 s, and on shutdown); at boot a file from the same UTC day is loaded, anything else starts from zero with one log line. Caps, console overrides and DR mode are never stored. `GATEWAY_BUDGET_STATE_FILE=` (empty) turns it off.
+  - SIGTERM/SIGINT now flush the counters first, then drain the listener for up to 8 s, so a gateway recreate takes a few seconds longer.
+- **Deploy (train 20261030-2).** Six migrations, all additive, no data rewrite: `202610301000` (IAM seed, M5-P4), `202610301100` to `202610301102` (W5-B1), `202610301200` and `202610301201` (W5-C3). **Cerbos restart** (M5-P4 changes `derived_roles.yaml` and `resource_search_property.yaml`). No compose or `.env` change (the gateway's state file goes on the existing `gateway-data` volume). The PID car carries docs and an ops script only.
 
 ### platform-nest `0.206.0` - AIP Phase 4, train 1: every AI usage row records its department (AIP-15a), and the `ai_usage` kind with three reads (AIP-15) (plan §6.3; PERMISSION-CONTRACT §58; FRONTEND-BFF-CONTRACT §66) - PROTOTYPED
 
