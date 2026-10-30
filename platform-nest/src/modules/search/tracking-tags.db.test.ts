@@ -67,7 +67,7 @@ describe.skipIf(!TEST_URL)("M5-P4 · tracking tags routes", () => {
     app.inject({ method: "PUT", url: `/api/${A}/modules/search/properties/${prop}/tracking-tags/linkedin`, headers: { ...asUser(u), "content-type": "application/json" }, payload: JSON.stringify(payload) });
   const body = (over: Record<string, unknown> = {}) => ({ webdeskTenant: SLUG, site: SITE, partnerId: "123456", ...over });
   const rows = () => q<{ actor_id: string; verb: string; target_entity_id: string; metadata: Record<string, unknown> }>(
-    `SELECT actor_id, verb, target_entity_id, metadata FROM activities WHERE tenant_id = $1 AND verb IN ('tracking_tag_set','tracking_tag_cleared') ORDER BY created_at`, [A]);
+    `SELECT actor_id, verb, target_entity_id, metadata FROM activities WHERE tenant_id = $1 AND verb IN ('tracking_tag_set','tracking_tag_cleared') ORDER BY occurred_at`, [A]);
 
   beforeAll(async () => {
     await initTestDb();
