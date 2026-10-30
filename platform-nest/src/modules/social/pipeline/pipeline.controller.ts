@@ -54,7 +54,11 @@ export class SocialPipelineController {
   @Patch("posts/:postId/pipeline")
   async edit(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("postId") postId: string, @Body() body: unknown) {
     const b = splitBody(body);
-    return this.answer(req, await runStageAction(req.principal, { tenantId, postId, action: "edit", params: { fields: b.params.fields }, expectedStatus: b.expectedStatus }));
+    // `actionId` (§63.0: a stage action's replay key) and `savedItemIds` (§63.26.3: counted in this edit's transaction) ride the edit.
+    return this.answer(req, await runStageAction(req.principal, {
+      tenantId, postId, action: "edit", params: { fields: b.params.fields }, expectedStatus: b.expectedStatus, actionId: b.actionId,
+      savedItemIds: b.params.savedItemIds,
+    }));
   }
 
   // ── §63.6.4 Suggestions ───────────────────────────────────────────────────────────────────────────────────────────
