@@ -2055,6 +2055,18 @@ authoring groups 176 to 177, covered by groups 448 to 449, sensitive groups 117 
 `src/rbac/search-manage-tags-cerbos.test.ts` (live Cerbos, runs in CI), `src/rbac/search-manage-tags-catalog.db.test.ts` (static agreement plus the DB rows) and the
 pinned counts. **Deploy: restart the Cerbos container and the live sidecar**, then probe: a `search_staff` principal is denied `manage_tags`, a `search_manager` of the same company is allowed.
 
+### 33.2 M5-V3-l (2026-10-30, BUILT): the module tier on `resource_search_property` is the search module's only
+
+`module_staff` and `module_manager` are composed from `resource.attr.module`. On a property whose `module` named another module (for example `"webdev"`), that module's staff and managers matched and were ALLOWED `read`, `create`, `update`, `delete`, `attest`, `read_visitors`, `view_replay` (and, with M5-P4, `manage_tags`). That is against §33's "NOT granted to any webdev role". **No live exposure:** every caller passes `module: "search"` (41 `authorize` calls, the Google property binding and the module's MCP tools). `search_visitors_test.yaml` caught it (10 failures on main since 2026-10-13), but nothing in CI ran the YAML matrices.
+
+- **The fix.** Each module-tier rule now also requires `request.resource.attr.module == "search"`. `company_admin` and the permission arm are NOT module-mediated (§33's own test header), so each keeps a separate rule with its old condition, and its effect does not change.
+- **No catalog, bundle or migration change.** `generate-role-bundles.mjs` already resolved the module tier to `search_*` roles only: 2213 pairs before and after.
+- **Proof.**
+  - `search_visitors_test.yaml` is green again; its 10 failures were the gap.
+  - `search_manage_tags_test.yaml` gains `prop_webdev`: webdev and search managers are DENIED there, and company_admin is ALLOWED.
+  - `ci.yml`'s `nest-static-gates` job now runs `cerbos compile --tests`, so a YAML matrix can no longer drift unseen.
+- **Deploy.** A Cerbos restart.
+
 ---
 
 ## 34. PV4-05 — `share_minutes` on `meeting_recording`, and its agent DENY (2026-10-12, PROTOTYPED)

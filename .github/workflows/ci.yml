@@ -436,6 +436,14 @@ jobs:
       # map this closes (links 1 and the catalog<->groups link).
       - name: IAM permission-contract chain alignment (IAM-07b — CI promotion of the wave-3 audit)
         run: npm run test:iam-chain-alignment
+      # M5-V3-l (2026-10-30) — Cerbos's OWN policy tests (`cerbos compile --tests`, every cerbos/tests/*_test.yaml).
+      # Until now nothing in CI ran them: the live-Cerbos suites start a server on the policies but never execute the
+      # YAML matrices, so search_visitors_test.yaml sat at 10 failures on main (a real rule gap, not a stale test)
+      # and nobody saw it. Same image as the shards' Cerbos server; no network, no database, read-only mount.
+      - name: Cerbos policy tests (cerbos compile --tests)
+        run: |
+          docker run --rm --memory 512m -v "$PWD/cerbos:/c:ro" ghcr.io/cerbos/cerbos:0.54.0 \
+            compile --tests=/c/tests /c/policies
 
   # MAIL-13 / design A13 — the inbound adversarial corpus as a NAMED, FAIL-FAST gate — and
   # IAM-03b's assemblePrincipal() benchmark. WSK-69 (2026-10-10) runs the two as steps of ONE job.

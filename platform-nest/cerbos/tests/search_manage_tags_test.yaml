@@ -194,7 +194,29 @@ resources:
     kind: resource_search_property
     id: "prop_t2"
     attr: {"id": "prop_t2", "tenantId": "dddddddd-7030-0000-0000-000000000002", "ownerId": "", "projectId": "", "teamId": "", "module": "search"}
+  # M5-V3-l: a property whose `module` names another module. The module tier (module_staff/module_manager) is the
+  # search module's only, so neither a webdev nor a search manager gets anything on it; company_admin is not
+  # module-mediated and keeps its rule.
+  prop_webdev:
+    kind: resource_search_property
+    id: "prop_webdev"
+    attr: {"id": "prop_webdev", "tenantId": "dddddddd-7030-0000-0000-000000000001", "ownerId": "", "projectId": "", "teamId": "", "module": "webdev"}
 tests:
+  - name: module_tier_is_search_only
+    input:
+      principals: [webdev_manager, search_manager, company_admin]
+      resources: [prop_webdev]
+      actions: [read, update, read_visitors, manage_tags]
+    expected:
+      - principal: webdev_manager
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, update: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: search_manager
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, update: EFFECT_DENY, read_visitors: EFFECT_DENY, manage_tags: EFFECT_DENY}
+      - principal: company_admin
+        resource: prop_webdev
+        actions: {read: EFFECT_ALLOW, update: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, manage_tags: EFFECT_ALLOW}
   - name: search_manager
     input:
       principals: [search_manager]

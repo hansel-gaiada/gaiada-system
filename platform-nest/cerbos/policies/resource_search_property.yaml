@@ -27,6 +27,14 @@
 # that one action: neither implies the other, and neither is implied by `read`. The kind's usual root gate
 # applies to the mirrors. `owner` reaches both through its role bundle (company_admin's set) via the mirror.
 # Deploy: a Cerbos restart (nothing hot-reloads) and a probe (staff denied, manager allowed) at release.
+#
+# M5-V3-l (2026-10-30): the ROLE ARM IS THE SEARCH MODULE'S ONLY. `module_staff`/`module_manager` are composed from
+# resource.attr.module, so on a property whose `module` named another module (e.g. "webdev"), that module's staff and
+# managers matched and were ALLOWED read/create/update/delete/attest/read_visitors/view_replay, against this header's
+# "NOT granted to any webdev role". Every caller passes module "search", so nothing was exposed live; the YAML suite
+# (search_visitors_test.yaml) caught it and nothing ran that suite in CI. Each module-tier rule now also requires
+# `request.resource.attr.module == "search"`. company_admin and the permission arm stay NOT module-mediated, so they
+# keep their own rules below, unchanged in effect.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -39,26 +47,42 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
     # Search staff / manager (served-company grant) + the served company's own admin: baseline set.
-    # NOT attest (elevated below, SM-76).
+    # NOT attest (elevated below, SM-76). M5-V3-l: the module tier only on a `search` property.
     - actions: ["read", "create", "update"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      derivedRoles: ["module_staff", "module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && request.resource.attr.module == \"search\"" } }
+    - actions: ["read", "create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Destructive + attest: manager + company admin only (NOT plain staff/member).
     - actions: ["delete", "attest"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["module_manager", "company_admin"]
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && request.resource.attr.module == \"search\"" } }
+    - actions: ["delete", "attest"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # M5-V3-f: visitor profiles + session replay. Search manager + company admin ONLY (NOT module_staff).
     - actions: ["read_visitors", "view_replay"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["module_manager", "company_admin"]
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && request.resource.attr.module == \"search\"" } }
+    - actions: ["read_visitors", "view_replay"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # M5-P4 (WSK-D92): manage_tags — set a site's tracking tags (the LinkedIn partner id). Same tier and conditions as
     # read_visitors/view_replay: search manager + company admin, NOT module_staff (who can still SEE the value via `read`).
     - actions: ["manage_tags"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["module_manager", "company_admin"]
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && request.resource.attr.module == \"search\"" } }
+    - actions: ["manage_tags"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====

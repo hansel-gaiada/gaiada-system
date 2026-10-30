@@ -11,6 +11,17 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.207.1` - M5-V3-l: the search property's module tier is the search module's only; CI runs Cerbos's own policy tests
+
+- **Why.** `module_staff`/`module_manager` are composed from `resource.attr.module`. So on a search property whose `module` named another module, that module's staff and managers could read, edit, delete, attest and read visitor profiles and recordings. Nothing was exposed live, because every caller passes `module: "search"`. `search_visitors_test.yaml` showed 10 failures from 2026-10-13, and no CI step ran it.
+- **platform-nest.**
+  - `resource_search_property.yaml`: every module-tier rule also requires `request.resource.attr.module == "search"`.
+  - company_admin keeps its own unchanged rule, because it is not module-mediated.
+  - No catalog, bundle or migration change (2213 pairs before and after).
+  - `search_manage_tags_test.yaml` gains the `prop_webdev` case.
+- **CI.** `nest-static-gates` runs `cerbos compile --tests` (the cerbos 0.54.0 image, read-only mount), so every `cerbos/tests/*_test.yaml` runs on every push.
+- **Deploy.** A Cerbos restart. Contract: `docs/PERMISSION-CONTRACT.md` §33.2.
+
 ### ai-gateway-go `0.20.0` + platform-nest `0.207.0` + platform-ui `0.226.0` - shared train 20261030-2: AIP-17a, the gateway's daily call counters survive a restart; M5-P4, the site's LinkedIn partner id from the ERP (WSK-D92); the AI usage screens (AIP-16, AIP-05); SCP-5 W5-B1, the tables for ideas, the Saved bank and the audit; SCP-5 W5-C3, PM project templates - PROTOTYPED
 
 - **Why.** The gaiada.com site loads LinkedIn's Insight tag only when its build has a partner id in the repository variable `PUBLIC_LINKEDIN_PARTNER_ID`. The owner does not have the id yet and wants staff to set it from the ERP later (WSK-D92). A change reaches the site at its **next rebuild**; nothing here starts one. The site needs no change.
@@ -22,7 +33,7 @@ local stack). None of these mean "production-done".
   - A "Tracking tags" card on Website → Analytics → site, drawn when the property resolved: the stored id or "Not set" (only for an answer that said so; a failed read, no build repository or GitHub unable to answer is a sentence), the repository it is stored on, the owner's help text, and for `search.tags.manage` (new capability, `search_manager` and `company_admin`, mirroring `manage_tags`) an input with Save and Clear, digits-only validation and every refusal in words.
   - Strict parsers, a server reader and a server action; `rbac.ts`, `rbac-capability-map.ts` and the parity tests carry the new capability.
 - **Checks.** platform-ui: `tsc` clean; full vitest 864 files, 14571 tests green. platform-nest: `tsc` clean; the new and touched suites green (see the run in the ticket report).
-- **Known gaps.** The GitHub App has never been granted the `Variables` repository permission, so the first live save is expected to answer `github_permission_missing`. Only the staging repository is written. The Cerbos YAML matrix is run by `cerbos compile --tests` on the Linux gate, which `ci.yml` does not run; the live-Cerbos test is what CI runs.
+- **Known gaps.** The App needs the repository `Variables` permission. It HOLDS it since 2026-10-30, measured live (`actions_variables: write`), so a save answers `github_permission_missing` only if the App is trimmed without it. Only the staging repository is written. Since M5-V3-l, `ci.yml` runs the Cerbos YAML matrix too.
 - **M5-P4 status.** Typechecked and unit-tested locally; the DB and live-Cerbos suites are written and need the Linux gate; never run against a real GitHub App. (FRONTEND-BFF-CONTRACT §28h; PERMISSION-CONTRACT §33.1.)
 - **platform-ui: AIP Phase 4, the AI usage screens (AIP-16, AIP-05; plan §6.3 item 4; BFF §66.7).**
   - Analytics › My AI use (`/analytics/ai-usage`): every staff member's own month (owner ruling AIP-D18).
