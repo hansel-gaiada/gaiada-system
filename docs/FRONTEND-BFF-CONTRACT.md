@@ -13028,7 +13028,7 @@ The owner's words: "same right as the person login or ask. so if the one that as
 
 - **The confirm step.** Writes classed `medium` or `high` map to the agent's `high_write` (`ai-agents/src/agent.ts`, D14-12: the stricter of the AgentDef label and the registry wins). They go through the existing agent-side write gate and the in-thread confirm chip of the assistant's write intents (ASST-23, §T3b): the person confirms before anything moves. `low` writes run as the person.
 - **The hub's automation gate** (`tool.write && impact !== "low"` for `n8n` principals) stays as it is. It never fires here, because Cerbos already refuses those principals.
-- **The rest of SCP-5's tools** (the periodic kinds on the report tools, the new `social.generateReports` and `social.reportRun`, the report automation tools of 63.24.9, ideas, the content bank, the audit and onboarding) are listed in 63.24 to 63.29, in this table's shape and under these rules.
+- **The rest of SCP-5's tools** (the periodic kinds on the report tools, the new `social.generateReports` and `social.reportRun`, the report automation tools of 63.24.9, ideas, the content bank, the audit, onboarding, and the company rules' `social.rules` and `social.setRules`) are listed in 63.24 to 63.30, in this table's shape and under these rules.
 
 ### 63.16 DEMO_MODE
 
@@ -13156,11 +13156,11 @@ The SMM-23 refusals stay as built (all 400, per the module's `refuse()`): `inval
 
 ### 63.20 The rest of SCP-5: contracted in 63.24 to 63.29 (2026-10-30)
 
-Contracted on 2026-10-30 and ruled the same day (SCP-Q25 to SCP-Q37, plan §2): the periodic reports with "Generate with AI" (5b and SCP-Q37) in 63.24, ideas for next month (5c) in 63.25, Saved, the content bank (5e) in 63.26, the monthly cycle's PM tasks (5f) in 63.27, the social audit (5g) in 63.28 and client onboarding (5h) in 63.29. Nothing is built for them before plan §7.2's wave 5. SCP-6b and 6c are not contracted.
+Contracted on 2026-10-30 and ruled the same day (SCP-Q25 to SCP-Q41, plan §2): the periodic reports with "Generate with AI" and report automation (5b, SCP-Q37 to SCP-Q40) in 63.24, ideas for next month (5c) in 63.25, Saved, the content bank (5e) in 63.26, the monthly cycle's PM tasks (5f) in 63.27, the social audit (5g) in 63.28 and client onboarding (5h) in 63.29, with every rule of work they hold set per company in 63.30 (SCP-Q41). Nothing is built for them before plan §7.2's wave 5. SCP-6b and 6c are not contracted.
 
 ### 63.21 Proofs required (Linux CI gate, real Postgres and Cerbos; a skip is not a pass)
 
-- **The rest of SCP-5** (2026-10-30): the lists of 63.24.8 and 63.24.9, 63.25.5, 63.26.5, 63.27.5, 63.28.6 and 63.29.6, under these same rules. The stage-machine fixture's new parts (`reports.kinds`, `cycleSteps`, the effects `release_idea` and `cycle_steps`, the new refusal codes) run on both sides like the rest, and the audit's dimension fixture is byte-compared with its twin. They change no Cerbos policy (PERMISSION §57), so their deploy needs no Cerbos restart.
+- **The rest of SCP-5** (2026-10-30): the lists of 63.24.8 and 63.24.9, 63.25.5, 63.26.5, 63.27.5, 63.28.6, 63.29.6 and 63.30.7, under these same rules. The stage-machine fixture's new parts (the effects `release_idea` and `cycle_steps`, the new refusal codes) run on both sides like the rest, against the rules seed's defaults (report kinds, cycle steps, the scorecard), whose twins are byte-compared. They change no Cerbos policy (PERMISSION §57), so their deploy needs no Cerbos restart.
 - **The fixture, both sides.** Every scenario runs green against the nest stage machine (pure) and the HTTP routes, and against the UI demo store. Every refusal code is reachable. The phase, holder and engine-status mappings are pinned.
 - **Maker/checker:** the author and the client's officer are refused `proofread` and `approve` (403 `author_cannot_approve`), also when an agent drives the call for them, and also as the owner and as `platform_admin`; another of the four passes.
 - **Who acts:**

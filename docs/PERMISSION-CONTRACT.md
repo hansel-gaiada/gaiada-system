@@ -3320,7 +3320,7 @@ the head of the unit, of an enclosing unit and of the root, a head of a sibling 
 member, viewer, HR, client, bot and automation, low assurance, an unfed resource, and the permission-native owner through `manage`);
 `dept-assistant-preamble.test.ts` (the routes); `assistant-dept-preambles-migration.db.test.ts` (the table and the seed).
 
-## 57. SCP-5 rest (5b with SCP-Q37, 5c, 5e to 5h): no new kind, no new action, no policy change (2026-10-30, PLANNED)
+## 57. SCP-5 rest (5b with SCP-Q37 and SCP-Q38, 5c, 5e to 5h, and the company rules of SCP-Q41): no new kind, no new action, no policy change (2026-10-30, PLANNED)
 
 Design: `docs/FRONTEND-BFF-CONTRACT.md` §63.24 to §63.29, on the owner's rulings SCP-Q25 to SCP-Q37 of 2026-10-30 (plan
 `docs/plans/2026-10-15-social-content-pipeline.md` §2). Nothing in §53 changes: no kind, action, attribute, role, mirror, catalogue key, group
@@ -3349,6 +3349,8 @@ that §53, or the PM sections, already define:
 | PM: apply a template, move its kickoff; read the applications | `pm_project` · `manage` on the project (as P3-02's duplicate); `pm_project` · `read` | as today |
 | Social: start a client's onboarding | `social_engagement` · `plan`, then `pm_project` · `manage` on the engagement's project | the four (SCP-Q36) |
 | Social: the company's onboarding template | `social_engagement` · `plan` | the four |
+| Company rules (63.30): read | `social_post` · `read` (the pages read them) | the team |
+| Company rules: change, reset to the default, history, preview | `social_engagement` · `plan`. No new kind: the rules are the department's planning settings, as `PUT settings` is (§53.6), and they hold no rule of who may act | the four (SCP-Q41) |
 
 **The would-be post.** Ideas, the content bank and a client's audit concern a client, not a post, so their handlers build the
 client's would-be post from the rows, as creating a pipeline post does (§53.2): `{kind: "social_post", tenantId, module: "social",
