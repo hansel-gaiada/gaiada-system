@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.206.0` - AIP Phase 4, train 1: every AI usage row records its department (AIP-15a), and the `ai_usage` kind with three reads (AIP-15) (plan §6.3; PERMISSION-CONTRACT §58; FRONTEND-BFF-CONTRACT §66) - PROTOTYPED
+
+- **Why.** Measured live before building: 0 of 41,993 `ai_usage_events` rows had a department. `org_unit_id` is filled only when a person's primary placement is an `org_units` row, and only 2 departments have one. A department view would always have been empty.
+- **AIP-15a.** A new column `ai_usage_events.unit_node_id` (migration `202610300300`): the org node of the person's home placement, with or without an `org_units` row, at most 120 characters, immutable like the rest of the row. Both writers fill it (`recordGatewayCall` and the ingest route). The bill goes to the home department, not the page of the turn. No backfill: old rows read as "No department recorded". `ai_usage_daily` gains the column (appended last, still `security_invoker`).
+- **AIP-15, the `ai_usage` kind** (core, migration `202610300310`), on the owner's rulings AIP-D6 and AIP-D18:
+  - `read_own`: every staff member, their own figures only;
+  - `read_unit` and `lift_stop`: the head of the unit or an enclosing unit (own rules over `unitAncestors`, no mirror);
+  - `read_company`: company admins, the owner, the GM (a seat, fed as `gmIds`, derived role `ai_usage_gm_seat`) and the superadmin; totals only, no per-person lines;
+  - `read_people` and `manage`: the owner only (`OWNER_EXTENSION`, not UI-grantable) and the superadmin;
+  - bots and automation are denied `manage` and `lift_stop`.
+- **Routes.** `GET :t/ai-usage/me`, `GET :t/ai-usage/units/:unitNodeId` (people only for the head and the owner), `GET :t/ai-usage/company`, each by UTC month (`?month=YYYY-MM`). Counts and money only, never any text; an unreported figure is `null`, never 0; cost is an exact decimal string.
+- **Tests (CI 40995628879 on the car's tip).** `cerbos-ai-usage` 64 (the live matrix), `reads.http` 19, `ai-usage-unit-node.db` 13, `ingest.http` 7, `ai-usage.db` 37, `owner-role.db` 9, `role-permission-parity.db` 34, `principal-scope-constrained-perms.db` 11.
+- **Deploy.** Two migrations (`202610300300` adds a column; `202610300310` seeds 6 permissions and 17 role rows and checks that the owner still equals company_admin plus `OWNER_EXTENSION`; live was checked read-only first and holds). **Restart Cerbos** (a new policy file). No compose change.
+
 ### platform-nest `0.205.1` + platform-ui `0.225.1` - AIP Phase 3 follow-ups: the knowledge DB suites run on pgvector in CI (AIP-03d), the sweep logs where its time went (AIP-03e), and "Department guidance" can be found (AIP-13d) - PROTOTYPED
 
 - **AIP-03d (ai-agents tests, CI).** CI's ai-agents step had no database, so the knowledge, graph and episodic suites self-skipped (31 of 34 store tests) and 5 `service.test.ts` tests that failed on pgvector went unseen. Cause: the service tests built 768-dim stores for 32-wide vectors, which plain Postgres accepts and pgvector refuses. Fix: one `DIMS` for the embedder and both stores, a fresh table, the zero-vector guard. `ci.yml`'s ai-agents step now starts `pgvector/pgvector:0.8.1-pg15` (live is Postgres 15.18 + pgvector 0.8.5) with `DATABASE_URL_TEST`: CI run 40988568751 ran store 34, service 17, graph 8, episodic-pg 5, all 55 files green.
