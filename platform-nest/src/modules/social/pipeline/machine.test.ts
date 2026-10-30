@@ -909,7 +909,7 @@ describe("SCP decide · the column changes", () => {
       id: UUID_A, title: "Mock post", is_extra: false, format: "feed", pillar: "Product", scheduled_at: FUTURE, placement: ["instagram"],
       pipeline_status: "planned", status: "draft", status_since: NOW.toISOString(), cycle_id: "c-cycle", engagement_id: "e-engagement",
     });
-    expect(r.effects).toEqual(["content_month_progress"]);
+    expect(r.effects).toEqual(["content_month_progress", "cycle_steps"]);
     expect("last_action_id" in r.set).toBe(false);
     expect(r.from).toBeNull();
     expect(r.to).toBe("planned");
@@ -992,7 +992,7 @@ describe("SCP decide · the column changes", () => {
     expect(r.to).toBe("archived");
     expect("pipeline_status" in r.set).toBe(false);
     expect(r.set).toMatchObject({ archived_at: NOW.toISOString(), archived_by: IDS.officer, archive_reason: "Client cancelled.", status: "archived" });
-    expect(r.effects).toEqual(["withdraw_pending_client_reviews", "withdraw_pending_publish_approvals", "content_month_progress"]);
+    expect(r.effects).toEqual(["withdraw_pending_client_reviews", "withdraw_pending_publish_approvals", "content_month_progress", "cycle_steps"]);
     const d = ok(decide(baseline("discard")));
     expect(d.to).toBe("deleted");
     expect(d.set).toMatchObject({ deleted_at: NOW.toISOString() });

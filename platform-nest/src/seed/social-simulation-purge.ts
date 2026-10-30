@@ -45,6 +45,7 @@ import { writeActivity } from "../core/http";
 import { ACCOUNT_KIND_VIOLATION_SQL, SOCIAL_SIMULATION_ENV, isSocialSimulationEnabled } from "../modules/social/publisher/simulation";
 import { SOCIAL_PUBLISH_TOOL } from "../modules/social/publish-precondition";
 import { syncContentMonthProgress } from "../modules/social/pipeline/content-month-progress";
+import { syncCycleStepProgress } from "../modules/social/pipeline/cycle-steps";
 import {
   RESTORE_ENGINE_STATUS, RESTORE_STATUS, SIMULATOR_ORG_KEY_REF, planIsEmpty, planPurge, renderPurgeReport, unknownDependents,
   type CompanyFacts, type CompanyOutcome, type FootprintCounts, type PurgePlan, type PurgeResult,
@@ -315,8 +316,12 @@ export async function applyPlan(c: PoolClient, p: PurgePlan): Promise<void> {
       WHERE o.tenant_id = $1 AND o.id = ANY($2::uuid[]) AND o.api_key_ref = $3 AND o.postiz_org_id = 'simulated-' || o.client_id::text
         AND NOT EXISTS (SELECT 1 FROM social_accounts x WHERE x.tenant_id = o.tenant_id AND x.publisher_org_id = o.id)`,
     [t, p.deleteOrgs, SIMULATOR_ORG_KEY_REF]);
-  // A post that left "past client approval" reopens its cycle's content-month task, through the pipeline's one writer of it.
-  for (const cycleId of p.cycles) await syncContentMonthProgress(c, t, cycleId, null);
+  // A post that left "past client approval" reopens its cycle's content-month task, through the pipeline's one writer of it, and then
+  // its step tasks (SCP-5f), in the lock order.
+  for (const cycleId of p.cycles) {
+    await syncContentMonthProgress(c, t, cycleId, null);
+    await syncCycleStepProgress(c, t, cycleId, null);
+  }
 }
 
 /** `onlyTenantIds` is a TEST seam (a shared test database holds other suites' companies); the CLI never passes it. */

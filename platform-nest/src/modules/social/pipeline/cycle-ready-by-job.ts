@@ -17,7 +17,7 @@
 import { withGlobal, withTenants } from "../../../db";
 import { config } from "../../../config";
 import {
-  READY_BY_LOOKBACK_DAYS, loadCalendarInfo, openCycleDeadlineRange, readSettings, recomputeOpenReadyBy, todayIsoInTz,
+  CYCLE_STEPS_LOOKBACK_DAYS, loadCalendarInfo, openCycleDeadlineRange, readSettings, recomputeOpenReadyBy, todayIsoInTz,
 } from "./cycles-data";
 
 export interface CycleReadyBySweepResult {
@@ -39,7 +39,8 @@ export async function refreshReadyByForTenant(tenantId: string, today: string): 
     { modules: ["social"] },
   );
   if (!head.range) return null;
-  const info = await loadCalendarInfo(tenantId, [head.range.min, head.range.max, today], READY_BY_LOOKBACK_DAYS);
+  // SCP-5f: the window the cycles' step tasks walk back over (they are re-dated by the same recompute).
+  const info = await loadCalendarInfo(tenantId, [head.range.min, head.range.max, today], CYCLE_STEPS_LOOKBACK_DAYS);
   const range = head.range;
   return withTenants(
     [tenantId],
