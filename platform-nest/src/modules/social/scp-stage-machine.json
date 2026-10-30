@@ -767,7 +767,11 @@
     "officer_not_member": { "http": 409 },
     "officer_set_by_allocation": { "http": 409 },
     "rules_changed": { "http": 409, "with": "detail {currentVersion}" },
-    "saved_item_not_found": { "http": 404 }
+    "saved_item_not_found": { "http": 404 },
+    "audit_not_found": { "http": 404 },
+    "audit_final": { "http": 409 },
+    "audit_attached": { "http": 409 },
+    "not_a_prospect_audit": { "http": 409 }
   },
   "scenarioPersonas": {
     "approver": "the HoD: the Social Media unit's lead seat",

@@ -274,6 +274,10 @@ export const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   officer_set_by_allocation: "The officer is set on the Allocation page.",
   rules_changed: "Someone else saved the rules first. Reload them, then make your change again.",
   saved_item_not_found: "That saved item is gone. It may have been deleted. Reload Saved.",
+  audit_not_found: "That audit is gone. It may have been deleted. Go back to the audit list.",
+  audit_final: "This audit is final, so it cannot change. A final audit is a dated record; start a new one for the client instead.",
+  audit_attached: "This prospect audit is already attached to another client.",
+  not_a_prospect_audit: "Only a prospect's audit can be attached to a client.",
 };
 
 /**
