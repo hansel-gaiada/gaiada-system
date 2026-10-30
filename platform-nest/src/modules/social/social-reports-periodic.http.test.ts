@@ -189,9 +189,11 @@ describe.skipIf(!TEST_URL)("SCP-5 W5-A2 · the periodic report kinds (BFF §63.2
   async function scheduledPost(e: Eng, at: string, o: { archived?: boolean; deleted?: boolean } = {}): Promise<string> {
     const id = newId();
     await adminPool().query(
-      `INSERT INTO social_posts (id, tenant_id, engagement_id, cycle_id, title, format, pipeline_status, status_since, schedule_via, scheduled_at, archived_at, deleted_at)
-       VALUES ($1, $2, $3, $4, $5, 'reel', 'scheduled', now(), 'manual', $6::timestamptz, $7, $8)`,
-      [id, A, e.id, e.cycle, `Coming ${alpha(++seq)}`, at, o.archived ? new Date() : null, o.deleted ? new Date() : null]);
+      `INSERT INTO social_posts (id, tenant_id, engagement_id, cycle_id, title, format, pipeline_status, status_since, schedule_via, scheduled_at,
+                                archived_at, archived_by, archive_reason, deleted_at)
+       VALUES ($1, $2, $3, $4, $5, 'reel', 'scheduled', now(), 'manual', $6::timestamptz, $7, $8, $9, $10)`,
+      [id, A, e.id, e.cycle, `Coming ${alpha(++seq)}`, at, o.archived ? new Date() : null, o.archived ? U.officer : null,
+        o.archived ? "Mock archive" : null, o.deleted ? new Date() : null]);
     return id;
   }
 
