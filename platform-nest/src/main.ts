@@ -137,6 +137,7 @@ import { startCycleReadyByLoop } from "./modules/social/pipeline/cycle-ready-by-
 import { startPostStatusSyncLoop } from "./modules/social/post-status-sync-job";
 import { SIMULATED_DUE_INTERVAL_MS, startSimulatedDueLoop } from "./modules/social/simulated-due-job";
 import { SIMULATED_BOOST_INTERVAL_MS, startSimulatedBoostLoop } from "./modules/social/simulated-boost-job";
+import { REPORT_RUNS_INTERVAL_MS, startReportRunsLoop } from "./modules/social/pipeline/report-runs";
 import { isSocialSimulationEnabled } from "./modules/social/publisher/simulation";
 import { installCreatorInfoVerifier } from "./modules/social/creator-info-verifier";
 // SM-54 (tracker §6ad Ruling 1 / addendum §A13.2) — the search department's cadence loop lives in the
@@ -844,6 +845,12 @@ async function bootstrap(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`social post-status reconcile (smm-post-status-sync) on: every ${config.social.reconcileIntervalMs}ms`);
   }
+  // SCP-5 W5-A3: `social-report-runs`, every minute (BFF §63.24.5): starts the "Generate with AI" runs still queued behind another run of
+  // their company and resumes a running one whose worker died (its beat over five minutes old). Always on: it spends a gateway call only
+  // for a run a person started (SCP-Q17), and without it a run a deploy interrupted would never finish.
+  startReportRunsLoop(REPORT_RUNS_INTERVAL_MS);
+  // eslint-disable-next-line no-console
+  console.log(`social report runs (social-report-runs) on: every ${REPORT_RUNS_INTERVAL_MS}ms`);
   // SCP-Sc: `social-simulated-due`, the simulator's every-minute due job (plan §5). Started ONLY while SOCIAL_SIMULATION_ENABLED is on
   // (and each tick re-reads the switch), independent of the safety poll above: a simulated post goes live at its scheduled time.
   if (isSocialSimulationEnabled()) {
