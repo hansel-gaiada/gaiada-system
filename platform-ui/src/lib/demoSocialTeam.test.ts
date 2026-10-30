@@ -223,7 +223,7 @@ describe("the other sections and the partial option", () => {
   it("puts the cycles table's clients in, with health, and every kind of row in a known kind", () => {
     const d = dashboard("u-pm");
     expect(d.clients.map((c) => c.clientName).sort()).toEqual(["Harborlight Hotel", "Northwind Traders", "Saltmarsh Day Spa"]);
-    const kinds = new Set(["late", "at_risk", "blocked", "failed_post", "boost_waiting", "report_due", "report_to_check"]);
+    const kinds = new Set(["late", "at_risk", "blocked", "failed_post", "boost_waiting", "cycle_step_late", "report_due", "report_to_check"]);
     for (const i of d.needsAttention) expect(kinds.has(i.kind), i.kind).toBe(true);
   });
 
