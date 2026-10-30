@@ -358,7 +358,7 @@ export async function finalizeAudit(principal: Principal, tenantId: string, audi
     if (row.status === "final") return false;
     // The scorecard as it stands NOW, under the audit's own rules, frozen once.
     const live = await computeCard(c, tenantId, row);
-    const businessType = row.subject === "client" ? live.client?.businessType ?? null : row.business_type;
+    const businessType = row.subject === "client" ? (live.client?.businessType ?? null)?.slice(0, 60) ?? null : row.business_type; // the column holds 60
     const frozen = buildFrozen({
       card: live.card, scorecard: live.scorecard, rulesRef: row.rules_ref, fixtureVersion: live.rules.defaultsVersion, subject: row.subject, month: monthLabel(row.month),
       businessType, publicNumbers: row.public_numbers, simulated: live.simulated, benchmark: live.benchmark,

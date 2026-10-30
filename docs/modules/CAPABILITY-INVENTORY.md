@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **296** capabilities across **17** owners
-- **157** writes · 139 reads
-- Writes by impact: **high 28** · medium 44 · low 85
+- **301** capabilities across **17** owners
+- **160** writes · 141 reads
+- Writes by impact: **high 28** · medium 44 · low 88
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | pm | `pm` | 19 |
 | reports | `checkins` · `reports` | 24 |
 | search | `search` | 31 |
-| social | `social` | 40 |
+| social | `social` | 41 |
 | webdev | `webdev` | 41 |
 
 ## Capabilities
@@ -241,6 +241,7 @@ unfalsifiable after.
 | social | `social.approvePostVariant` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/approve` | write | `high` |
 | social | `social.approveReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/approve` | write | `low` |
 | social | `social.approveReport` | `POST` | `/api/:tenantId/modules/social/reports/:id/approve` | write | `low` |
+| social | `social.audits` | `GET` | `/api/:tenantId/modules/social/audits` | read | — |
 | social | `social.boostAction` | `POST` | `/api/:tenantId/modules/social/boosts/:boostId/actions` | write | `high` |
 | social | `social.checkPublishPreconditions` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/publish-preconditions` | read | — |
 | social | `social.checkReplySendPreconditions` | `GET` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send-preconditions` | read | — |
@@ -252,8 +253,11 @@ unfalsifiable after.
 | social | `social.draftPostIdeas` | `POST` | `/api/:tenantId/modules/social/posts/draft-ideas` | write | `low` |
 | social | `social.draftPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants/:variantId/draft-caption` | write | `low` |
 | social | `social.draftReport` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/reports` | write | `low` |
+| social | `social.editAudit` | `PATCH` | `/api/:tenantId/modules/social/audits/:auditId` | write | `low` |
 | social | `social.editIdea` | `PATCH` | `/api/:tenantId/modules/social/ideas/:ideaId` | write | `low` |
 | social | `social.editReport` | `PATCH` | `/api/:tenantId/modules/social/reports/:id` | write | `low` |
+| social | `social.finalizeAudit` | `POST` | `/api/:tenantId/modules/social/audits/:auditId/finalize` | write | `low` |
+| social | `social.getAudit` | `GET` | `/api/:tenantId/modules/social/audits/:auditId` | read | — |
 | social | `social.getBestTimeToPost` | `GET` | `/api/:tenantId/modules/social/accounts/:accountId/best-time` | read | — |
 | social | `social.getClientReview` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | read | — |
 | social | `social.getEngagementScope` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | read | — |
@@ -277,6 +281,7 @@ unfalsifiable after.
 | social | `social.requestClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | write | `medium` |
 | social | `social.resetRules` | `POST` | `/api/:tenantId/modules/social/rules/:section/reset` | write | `medium` |
 | social | `social.rules` | `GET` | `/api/:tenantId/modules/social/rules` | read | — |
+| social | `social.saveAudit` | `POST` | `/api/:tenantId/modules/social/audits` | write | `low` |
 | social | `social.savedItems` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/saved` | read | — |
 | social | `social.saveItem` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/saved` | write | `low` |
 | social | `social.sendReply` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send` | write | `high` |
