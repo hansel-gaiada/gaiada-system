@@ -22,6 +22,11 @@
 // <name>` stores the sealed `encrypted_value` as GitHub does (201 new, 204 update; a `key_id` that is not the current key is
 // GitHub's 422; visibility and `selected_repository_ids` are applied). The fake never decrypts on its own: a test proves the
 // sealing by opening the stored box with the private key (`openOrgSecretValue`), exactly what GitHub does on its side.
+//
+// M5-P4 adds the repository Actions VARIABLES (WSK-D92): `GET|POST /repos/<o>/<r>/actions/variables[/<name>]` and `PATCH|DELETE
+// …/variables/<name>`, with GitHub's statuses (GET 404 when unset; POST 201, and 409 when the name already exists; PATCH 204, 404
+// when absent; DELETE 204, 404 when absent). A variable's value is plain text, kept in `variables`. `variablesPermission = false`
+// answers every variables call with GitHub's 403 (the App without the `actions_variables` permission).
 import { createHash } from "node:crypto";
 import sodium from "libsodium-wrappers";
 import { GithubApiError } from "./errors";
@@ -83,6 +88,10 @@ export class FakeGithub {
   /** M6-P6o: the org's Actions key pair (`useOrgKeyPair`), and each secret's stored sealed value. */
   orgKey: FakeOrgKey | null = null;
   readonly orgSecretValues = new Map<string, { encryptedValue: string; keyId: string }>();
+  /** M5-P4: the repository's Actions variables, by name. */
+  readonly variables = new Map<string, { value: string; updatedAt: string }>();
+  /** false: the App lacks the repository `actions_variables` permission; every variables call is GitHub's 403. */
+  variablesPermission = true;
 
   constructor(
     readonly owner = "acme-org",
@@ -232,6 +241,8 @@ export class FakeGithub {
       return { status: 200, data: { id: this.repoId, full_name: `${this.owner}/${this.name}`, default_branch: this.defaultBranch } };
     }
 
+    if (rest === "/actions/variables" || rest.startsWith("/actions/variables/")) return this.handleVariable(method, rawPath, rest.slice("/actions/variables".length), body);
+
     const c = /^\/contents\/(.+)$/.exec(rest);
     if (method === "GET" && c) {
       const filePath = c[1].split("/").map(decodeURIComponent).join("/");
@@ -325,6 +336,39 @@ export class FakeGithub {
       return { status: 200, data: { ref: `refs/heads/${branch}`, object: { sha: next, type: "commit" } } };
     }
 
+    return this.fail(method, rawPath, 404, "Not Found");
+  }
+
+  private handleVariable(method: string, rawPath: string, rest: string, body?: Record<string, unknown>): { status: number; data: unknown } {
+    if (!this.variablesPermission) this.fail(method, rawPath, 403, "Resource not accessible by integration");
+    const now = () => new Date().toISOString();
+    if (rest === "") {
+      if (method !== "POST") this.fail(method, rawPath, 404, "Not Found");
+      const name = body?.name;
+      const value = body?.value;
+      if (typeof name !== "string" || typeof value !== "string") this.fail(method, rawPath, 422, "name and value are required");
+      if (this.variables.has(name)) this.fail(method, rawPath, 409, "Already exists");
+      this.variables.set(name, { value, updatedAt: now() });
+      return { status: 201, data: undefined };
+    }
+    const name = decodeURIComponent(rest.slice(1));
+    const cur = this.variables.get(name);
+    if (method === "GET") {
+      if (!cur) this.fail(method, rawPath, 404, "Not Found");
+      return { status: 200, data: { name, value: cur.value, created_at: cur.updatedAt, updated_at: cur.updatedAt } };
+    }
+    if (method === "PATCH") {
+      if (!cur) this.fail(method, rawPath, 404, "Not Found");
+      const value = body?.value;
+      if (typeof value !== "string") this.fail(method, rawPath, 422, "value is required");
+      this.variables.set(name, { value, updatedAt: now() });
+      return { status: 204, data: undefined };
+    }
+    if (method === "DELETE") {
+      if (!cur) this.fail(method, rawPath, 404, "Not Found");
+      this.variables.delete(name);
+      return { status: 204, data: undefined };
+    }
     return this.fail(method, rawPath, 404, "Not Found");
   }
 
