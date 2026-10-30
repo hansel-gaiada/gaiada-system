@@ -26,7 +26,11 @@ describe("W5-A0 · the migration file (no database needed)", () => {
 
   it("is registered in the social module, after every earlier social migration", () => {
     expect(socialModule.migrations).toContain(MIGRATION);
-    expect(socialModule.migrations[socialModule.migrations.length - 1]).toBe(MIGRATION);
+    // In landing order (wave 5 lands its files after this one, in several trains): every earlier registration is an earlier
+    // file and every later one a later file. It is not necessarily the last social migration.
+    const at = socialModule.migrations.indexOf(MIGRATION);
+    for (const earlier of socialModule.migrations.slice(0, at)) expect(earlier < MIGRATION, earlier).toBe(true);
+    for (const later of socialModule.migrations.slice(at + 1)) expect(later > MIGRATION, later).toBe(true);
   });
 
   it("holds no data change, no grant, no ledger write, nothing that widens, and is LF only", () => {
