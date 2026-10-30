@@ -5,6 +5,8 @@
 //                                                        else read_company: the same WITHOUT a `people` key; else 403
 //   GET /api/:tenantId/ai-usage/company                  read_company or read_people: totals by department, model, surface and day
 // Every answer carries `capabilities` { canSeePeople, canManage, canLiftStop } for the screens. Counts and money only, never any text.
+// AIP-17b: `company` also carries `budgets` and `units/:id` a `budget` (budgets.service.ts), seen exactly where the totals are seen. The owner's
+// writes are budgets.controller.ts.
 // The Cerbos kind is `ai_usage` (resource_ai_usage.yaml); the facts it sees are built in authz.ts, the SQL and shapes are in reads.service.ts.
 //
 // ── THE ORDER OF CHECKS (the dept-notices trap) ──────────────────────────────────────────────────
