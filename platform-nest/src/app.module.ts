@@ -275,6 +275,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 import { AiUsageIngestController } from "./modules/ai-usage/ingest.controller";
 // AIP-15 (FRONTEND-BFF-CONTRACT §66, PERMISSION-CONTRACT §58): the three AI usage reads behind the core Cerbos kind `ai_usage`.
 import { AiUsageReadsController } from "./modules/ai-usage/reads.controller";
+import { AiUsageBudgetsController } from "./modules/ai-usage/budgets.controller";
 
 @Module({
   controllers: [
@@ -409,6 +410,7 @@ import { AiUsageReadsController } from "./modules/ai-usage/reads.controller";
     AiUsageIngestController,
     // AIP-15: GET /api/:t/ai-usage/{me,units/:unitNodeId,company} (Cerbos kind ai_usage).
     AiUsageReadsController,
+    AiUsageBudgetsController,
   ],
 })
 export class AppModule {}

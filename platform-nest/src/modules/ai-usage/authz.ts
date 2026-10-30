@@ -18,12 +18,13 @@
 import type { PoolClient } from "pg";
 import type { Resource } from "../../rbac/cerbos";
 import { loadOrgStructure, loadSeatHoldersByNode } from "../reports/person-scope";
+import { departmentUnits, workspaceSlugFor } from "../reports/dept-kpis";
 import { gmUnitIds } from "../../core/automation-failures-audience";
 import { loadUnitAncestors } from "../../core/org-unit-closure";
 
 export const AI_USAGE_KIND = "ai_usage";
 
-/** The six actions of the kind. `manage` and `lift_stop` have no route yet (AIP-17b, AIP-18); the answer's `capabilities` report them. */
+/** The six actions of the kind. `manage` has its routes with AIP-17b; `lift_stop` has none yet (AIP-18); the answers' `capabilities` report both. */
 export const AI_USAGE_ACTIONS = ["read_own", "read_unit", "read_company", "read_people", "manage", "lift_stop"] as const;
 export type AiUsageAction = (typeof AI_USAGE_ACTIONS)[number];
 
@@ -50,6 +51,22 @@ async function companyVertical(c: PoolClient, tenantId: string): Promise<string 
 export async function loadGmSeatIds(c: PoolClient, tenantId: string, structure?: unknown): Promise<string[]> {
   const tree = structure === undefined ? await loadOrgStructure(c, tenantId) : structure;
   const units = [...gmUnitIds(tree, await companyVertical(c, tenantId))];
+  if (units.length === 0) return [];
+  const byNode = await loadSeatHoldersByNode(c, tenantId, units);
+  const ids = new Set<string>();
+  for (const holders of byNode.values()) for (const id of holders) ids.add(id.toLowerCase());
+  return [...ids].sort();
+}
+
+/**
+ * AIP-19 (AIP-D19): the live lead-seat holders of the company's IT unit(s), lower case, sorted and distinct: the departments of the company's
+ * own org tree whose workspace slug is `it` for the company's vertical (found BY NAME, the way the GM unit is), and the seats are the same
+ * §50 seats. A company with no IT unit, or no seat on it, answers [] (the runaway alert then reaches the owner(s) alone).
+ */
+export async function loadItSeatIds(c: PoolClient, tenantId: string, structure?: unknown): Promise<string[]> {
+  const tree = structure === undefined ? await loadOrgStructure(c, tenantId) : structure;
+  const vertical = await companyVertical(c, tenantId);
+  const units = departmentUnits(tree).filter((u) => workspaceSlugFor(vertical, u.name) === "it").map((u) => u.id);
   if (units.length === 0) return [];
   const byNode = await loadSeatHoldersByNode(c, tenantId, units);
   const ids = new Set<string>();

@@ -313,6 +313,26 @@ export function parseDeptContext(raw: string | undefined): DeptContextSetting {
   return { all: false, companies };
 }
 
+/** AIP-D9: the default daily reply allowance when no `ai_person_allowances` row overrides it. */
+export const DEFAULT_DAILY_REPLY_ALLOWANCE = 200;
+
+/**
+ * AIP-D9: `AI_DAILY_REPLY_ALLOWANCE`. A whole number from 1 up (the table caps an override at 100000, and so does this). Unset, empty,
+ * junk, a fraction, zero or negative falls back to 200: a wrong value must never give everyone an allowance of nothing.
+ */
+export function parseDailyReplyAllowance(raw: string | undefined): number {
+  const v = (raw ?? "").trim();
+  if (!/^[0-9]+$/.test(v)) return DEFAULT_DAILY_REPLY_ALLOWANCE;
+  const n = Number(v);
+  return Number.isSafeInteger(n) && n >= 1 && n <= 100000 ? n : DEFAULT_DAILY_REPLY_ALLOWANCE;
+}
+
+/** AIP-17b / AIP-19: the job's interval. Anything under a minute, junk or empty is the default 10 minutes (never a busy loop). */
+export function parseAiUsageJobIntervalMs(raw: string | undefined): number {
+  const n = Number((raw ?? "").trim());
+  return Number.isFinite(n) && n >= 60_000 ? Math.floor(n) : 10 * 60_000;
+}
+
 const configBase = {
   port: Number(process.env.PLATFORM_PORT ?? 3004),
   host: process.env.HOST ?? "0.0.0.0",
@@ -1854,6 +1874,14 @@ const configBase = {
     internalTenantIds: (process.env.KNOWLEDGE_INTERNAL_TENANT_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     /** Index attached-file CONTENTS (text/spreadsheet only — see ingest/file-text.ts). */
     indexFileContents: (process.env.KNOWLEDGE_INDEX_FILE_CONTENTS ?? "1") === "1",
+  },
+  // AIP-17b / AIP-19: AI budgets, allowances and the runaway alert. `dailyReplyAllowance` is the default of AIP-D9 (200 replies a person a
+  // day, a per-person row overrides it). The job (modules/ai-usage/usage-alerts-job.ts) is ON unless AI_USAGE_JOB_ENABLED is exactly "0":
+  // it only notifies (report mode), it spends nothing, and a company with no budget and no runaway sends nothing at all.
+  aiUsage: {
+    dailyReplyAllowance: parseDailyReplyAllowance(process.env.AI_DAILY_REPLY_ALLOWANCE),
+    jobEnabled: (process.env.AI_USAGE_JOB_ENABLED ?? "") !== "0",
+    jobIntervalMs: parseAiUsageJobIntervalMs(process.env.AI_USAGE_JOB_INTERVAL_MS),
   },
   // MAIL-04 (docs/superpowers/specs/2026-08-04-zone-a-mail-design.md v3 §4.1/§10/§12). `src/mail/`
   // is core infra (A1), not a ModuleContract module — no per-tenant enable gate, same class as

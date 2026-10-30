@@ -25,6 +25,7 @@ import type { Principal } from "../../rbac/principal";
 import { authorize } from "../../core/http";
 import { AI_USAGE_ACTIONS, aiUsageResource, loadAiUsageFacts, type AiUsageAction } from "./authz";
 import * as svc from "./reads.service";
+import * as budgets from "./budgets.service";
 
 type Decisions = Record<AiUsageAction, boolean>;
 
@@ -96,6 +97,8 @@ export class AiUsageReadsController {
       byModel: await svc.readByModel(c, tenantId, month, scope),
       byDay: await svc.readByDay(c, tenantId, month, scope),
       ...(withPeople ? { people: await svc.readPeople(c, tenantId, month, scope) } : {}),
+      // AIP-17b: this unit's own budget with the month's standing, or null. Seen exactly where the unit's totals are seen (no new read action).
+      budget: await budgets.readUnitBudget(c, tenantId, month, facts.structure, unitNodeId),
     }));
     return {
       month: month.month,
@@ -121,6 +124,8 @@ export class AiUsageReadsController {
       byModel: await svc.readByModel(c, tenantId, month, scope),
       bySurface: await svc.readBySurface(c, tenantId, month, scope),
       byDay: await svc.readByDay(c, tenantId, month, scope),
+      // AIP-17b: the company figure and every department's budget, with the month's standing (the callers of this route already see all totals).
+      budgets: await budgets.readBudgets(c, tenantId, month, facts.structure),
     }));
     return {
       month: month.month,

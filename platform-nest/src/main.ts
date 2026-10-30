@@ -11,6 +11,7 @@ import multipart from "@fastify/multipart";
 import { AppModule } from "./app.module";
 import { config, n8nBridgeEnabled, graphBridgeEnabled, knowledgeIngestEnabled } from "./config";
 import { startKnowledgeIngestLoop } from "./modules/knowledge/ingest/scheduler";
+import { startUsageAlertsLoop } from "./modules/ai-usage/usage-alerts-job";
 import { HttpErrorFilter } from "./http-error.filter";
 import { ProviderDispatchErrorFilter } from "./modules/search/provider-dispatch-error.filter";
 import { GatewayNotConfiguredErrorFilter } from "./modules/search/gateway-not-configured-error.filter";
@@ -912,6 +913,13 @@ async function bootstrap(): Promise<void> {
         "(cadence, tool toggles and budget caps all come from each engagement's tool_scope; " +
         "ledger attribution requested_by=NULL correlationId=sched:<tool>)",
     );
+  }
+  // AIP-17b + AIP-19: the AI usage job (budget notices at 80 and 100 percent, the runaway alert), every 10 minutes. A plain Postgres sweep, so it
+  // sits outside the redisUrl gate. ON unless AI_USAGE_JOB_ENABLED=0: it only sends notices, spends nothing, and a company with no budget and no
+  // runaway sends nothing at all. The dedupe ledger (ai_usage_alerts) makes a second replica harmless.
+  if (startUsageAlertsLoop()) {
+    // eslint-disable-next-line no-console
+    console.log(`AI usage job on: budget notices and the runaway alert, every ${config.aiUsage.jobIntervalMs}ms (AI_USAGE_JOB_ENABLED=0 turns it off)`);
   }
   // M5-V4: the daily content-decay job. Dark by default: ON only when SEARCH_DECAY_ENABLED is exactly "1"
   // (an empty compose default is OFF); startContentDecayLoop returns null without a timer or any call otherwise.
