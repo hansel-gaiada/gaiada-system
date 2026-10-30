@@ -107,7 +107,7 @@ export function httpOf(r: StageRefusal): HttpException {
 }
 
 /** D11 (`authorize()`'s last step): a revoked session is 401 on every action. */
-async function assertSessionCurrent(principal: Principal): Promise<void> {
+export async function assertSessionCurrent(principal: Principal): Promise<void> {
   if (principal.userId && !(await memoiseSessionCurrent(principal.userId, principal.sessionVersion, () => sessionVersionCurrent(principal)))) {
     throw new UnauthorizedException("session revoked — re-authenticate");
   }

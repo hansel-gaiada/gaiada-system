@@ -13,6 +13,7 @@ import { readChecks } from "./handoff-checks";
 import { listPostTasks } from "./post-tasks";
 import { readSimulatedPublishOffer } from "./simulated-publish";
 import { readPostBoost } from "./boosts-data";
+import { readPostIdea } from "./ideas-data";
 import {
   actionsFromStatus, cerbosActionsToAsk, changeCaseOf, engineStatusOf, holderOf, phaseOf, postStateFromRow, primaryActionOf, probe,
   type PipelinePostState,
@@ -194,6 +195,7 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
     liveUrl: row.live_url, wentLiveAt: iso(row.went_live_at), simulated: row.simulated, archivedAt: iso(row.archived_at),
     boost: await readPostBoost(c, tenantId, row.id), // SCP-4a: the open boost, else the newest, or null (BFF §63.6.2, §63.11)
     tasks, // the PM tasks that point at this post (SCP-1n, BFF §63.13)
+    idea: await readPostIdea(c, tenantId, row.id), // SCP-5c: the idea this post was planned from, or null (BFF §63.25.4); never in the portal
     copyLog: copyLog.rows.map((r) => ({
       field: r.field, before: r.before, after: r.after, via: r.via, by: person(r.edited_by), suggestedBy: person(r.suggested_by), stage: r.stage, at: iso(r.edited_at),
     })),
