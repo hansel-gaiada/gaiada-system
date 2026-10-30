@@ -9,7 +9,7 @@ import type { PoolClient } from "pg";
 import { config } from "../../../config";
 import { declareSocialModuleScope } from "../module-scope";
 import { userNames } from "./pipeline-data";
-import type { IdeaAnswer, type IdeaPatch, type IdeaStatus } from "./ideas";
+import type { IdeaAnswer, IdeaPatch, IdeaStatus } from "./ideas";
 
 /** A `social_ideas` row, the columns the routes read. Dates are ISO strings. */
 export interface IdeaRow {
