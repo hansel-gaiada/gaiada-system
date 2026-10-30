@@ -11,6 +11,17 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.209.0` + platform-ui `0.227.1` - shared train 20261030-4: AIP Phase 4 budgets, notices and the runaway alert (AIP-17b, AIP-19); SCP-5 W5-A1 and W5-B2 - PROTOTYPED
+
+- **AIP-17b (platform-nest; plan §6.3 items 6 and 7; BFF §66.8 to §66.10).** Budgets and allowances, report-only first (owner ruling AIP-D7):
+  - migration `202610301330_ai_budgets` (three new tables, FORCE RLS): `ai_budgets` (the company alert figure; a department's monthly budget in `report` or `soft_stop` mode), `ai_person_allowances` (per-person daily reply allowances; the default is `AI_DAILY_REPLY_ALLOWANCE`, 200, AIP-D9) and `ai_usage_alerts` (the once-only ledger);
+  - the owner's writes (`manage`): `PUT :t/ai-usage/budgets/company`, `PUT :t/ai-usage/budgets/units/:unitNodeId`, `GET`/`PUT :t/ai-usage/allowances[/:userId]`, each with an activity row; the company and unit reads gain `budgets` / `budget` (spend to date, percent, state);
+  - a job every 10 minutes (`AI_USAGE_JOB_ENABLED=0` turns it off) sends each 80 and 100 percent notice once: a department's to its head(s) and the owner, the company figure's to the owner and the GM. `soft_stop` mode is stored; enforcement is AIP-18's.
+- **AIP-19 (platform-nest).** The runaway alert: a person or an agent at 5 times their own daily average (at least 7 active days in the last 14 and 20 calls today), once a day, naming the person (owner ruling AIP-D19) to the owner and to IT's lead seat; IT's notice carries no link to the company view it cannot open.
+- **SCP-5 W5-A1 (platform-nest).** Tables for periodic reports (daily, weekly, quarterly, semester, yearly beside monthly), AI generation runs and report schedules (migration `202610301300_social_reports_periodic`, additive).
+- **SCP-5 W5-B2 (platform-nest + platform-ui).** Ideas for next month: list, add, edit, share, and Add to next plan (the planned post made in one transaction; discarding it frees the idea); the fixture twin's `release_idea` effect.
+- **Deploy.** Two additive migrations (`202610301300`, `202610301330`). Three new optional env rows on the platform service in `docker-compose.vps.yml` (`AI_DAILY_REPLY_ALLOWANCE`, `AI_USAGE_JOB_ENABLED`, `AI_USAGE_JOB_INTERVAL_MS`; empty = the defaults). No Cerbos change, no IAM change.
+
 ### platform-nest `0.208.0` + platform-ui `0.227.0` - shared train 20261030-3: M5-V3-l, the search property's module tier is the search module's only and CI runs Cerbos's own policy tests; SCP-5 W5-A0, the company rules core (SCP-Q41)
 
 - **M5-V3-l (car 1, gaiada-system-81).**
