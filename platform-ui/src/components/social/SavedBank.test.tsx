@@ -30,6 +30,13 @@ const refused = (status: number, error: string, kind: "add" | "change" | "delete
   return { ok: false as const, refusal, message: savedRefusalText(refusal, kind) };
 };
 
+/** Clicks a button once it is back and enabled (a write in flight disables it and changes its label). */
+const press = async (name: string) => {
+  const b = await screen.findByRole("button", { name });
+  await waitFor(() => expect(b).toBeEnabled());
+  fireEvent.click(b);
+};
+
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe("SavedAddForm", () => {
@@ -106,7 +113,7 @@ describe("SavedAddForm", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(`You cannot do this. ${SAVED_ADD_REASON}`);
     expect(refresh).not.toHaveBeenCalled();
     vi.mocked(addSavedItem).mockResolvedValue(refused(404, "asset_not_found", "add"));
-    fireEvent.click(screen.getByRole("button", { name: "Save to the bank" }));
+    await press("Save to the bank");
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(REFUSAL_WORDS.asset_not_found));
   });
 });
@@ -176,7 +183,7 @@ describe("SavedItemCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Yes, delete it" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(REFUSAL_WORDS.not_officer_or_approver);
     vi.mocked(deleteSavedItem).mockResolvedValueOnce(refused(404, "saved_item_not_found", "delete"));
-    fireEvent.click(screen.getByRole("button", { name: "Yes, delete it" }));
+    await press("Yes, delete it");
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(REFUSAL_WORDS.saved_item_not_found));
     expect(refresh).not.toHaveBeenCalled();
   });
