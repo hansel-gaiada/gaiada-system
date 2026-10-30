@@ -13440,13 +13440,13 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 
 | Route | For a weekly report |
 |---|---|
-| `POST engagements/:engagementId/reports` | `kind: 'weekly'` needs `period`, not after the current week (else 400 `invalid_field` `{field: 'period'}`). It writes an empty draft and calls no gateway (`draftedVia: 'none'`). One per client and week: an existing one is answered as it is (`draftedVia: 'existing'`) under the advisory lock `social_report:<engagementId>:weekly:<period>`, the unique index the backstop |
+| `POST engagements/:engagementId/reports` | `kind: 'weekly'` needs `period`: a week that exists in its year (the CHECK admits `W53` for every year; the route knows which years have one), not after the current week (else 400 `invalid_field` `{field: 'period'}`). It writes an empty draft and calls no gateway (`draftedVia: 'none'`). One per client and week: an existing one is answered as it is (`draftedVia: 'existing'`) under the advisory lock `social_report:<engagementId>:weekly:<period>`, the unique index the backstop |
 | `GET reports?kind=&engagementId=&status=&period=` | `kind` is a new filter (400 `{field: 'kind'}` outside the four); `period` also takes `YYYY-Www`. Rows gain `due` and `summaryPresent` |
 | `GET reports/:id` | The row gains `nextWeek`, `due` and `live`; the document gains the summary, the week's KPIs and the `best_post` and `next_week` tables. `notes` and `actionPlan` stay empty |
 | `PATCH reports/:id` | Gains `nextWeek` (weekly only, ≤ 1,000, else 400 `{field: 'nextWeek'}`); `narrativeMd` ≤ 1,000 on a weekly report; `notes` or `actionPlan` on one is 400 `{field}`. Submitting needs a summary (400 `summary_missing`) and takes the snapshot |
 | `POST reports/:id/ai-draft` | Answers `{narrativeMd, nextWeek, draftedVia: 'ai'\|'template'}`: two sentences on the week and one on the next, from the numbers and the brand-draft lookup, under the same numbers guard. A proposal: nothing is saved |
 | `POST reports/:id/approve` | 400 `summary_missing` in place of `notes_incomplete`, re-checked in the UPDATE as the notes rule is |
-| `POST reports/:id/deliver` | Unchanged: the PDF and the PV7-04a publication; `deliveredReportTitle` reads "Weekly report, 2 to 8 Nov 2026" |
+| `POST reports/:id/deliver` | Unchanged: the PDF and the PV7-04a publication; `deliveredReportTitle` reads "Weekly report, 9 to 15 Nov 2026" |
 
 New code: 400 `summary_missing` (the module's `refuse()`). The fixture's `reports` block lists it and gains `kinds: {monthly: {checkRule: 'notes_complete', snapshotAt: 'create'}, weekly: {checkRule: 'summary_present', snapshotAt: 'submit', due: 'last_working_day_of_week'}}`, in both twins.
 
@@ -13475,7 +13475,7 @@ New code: 400 `summary_missing` (the module's `refuse()`). The fixture's `report
 
 **What it is.** Per client: what we saw, the metric it rests on, and what we suggest. "Add to next plan" turns an idea into a `planned` post of a cycle the person picks, linked both ways; "Mark shared" records that the team shared it with the client. Ideas stay internal: nothing reaches the portal or the report's PDF (SCP-Q27, default). They sit on the monthly report's page, as in the team's design.
 
-**63.25.1 Data: `<prefix+1>_social_ideas.sql`** (social; the third wall in 0105's DO-loop form, FORCE RLS; no DML; the closing DO block asserts the catalogue and, before the FK is added, that no `social_posts.idea_id` is set).
+**63.25.1 Data: `<prefix+1>_social_ideas.sql`** (social; the third wall in 0105's DO-loop form, FORCE RLS; no DML; the closing DO block asserts the catalogue). No `social_posts.idea_id` is set today, and the new FK's own validation checks every existing row, outside RLS. The file must not try to prove it with a count: under the migration's unset tenant GUC a count of a forced-RLS table reads zero rows and proves nothing.
 
 `social_ideas` (new; the name plan §4.2 reserved):
 
