@@ -560,7 +560,31 @@ Then **Kg** switches the skin on for Social Media once 1d, 1e and 1k are live, a
 **Wave 4 · Proof and the first release.** 7a to 7d (QA, Sonnet; the orchestrator drives 7b live and runs 7d with the
 team), covering 5a and 5d too. The first release is complete when SCP-7 is ticked (SCP-Q5).
 
-**After:** the rest of SCP-5 (5b, 5c, 5e to 5h; Sonnet), then SCP-6 when real data is allowed.
+**Wave 5 · The rest of SCP-5** (contract BFF §63.24 to §63.29 and PERMISSION §57, 2026-10-30; build on the open questions' defaults
+unless the owner rules otherwise first). Three lanes in parallel, one implementer each, so never more than three at once. Each
+lane has ONE migration owner, its first ticket, who writes all of that lane's migration files; prefixes are taken at landing, in
+landing order (BFF §63.1's rule). No Cerbos change, so no restart at the deploy.
+
+| Ticket | Builds | Model | Lane | Order | Depends on |
+|---|---|---|---|---|---|
+| W5-A1 | Migrations `social_reports_weekly` and `social_ideas`, with their assertions and migration suite | Opus · medium | A, reports and ideas | 1 | this contract |
+| W5-A2 | 5b's server half: the weekly kind on the report routes, frozen at submit, the ISO week, Needs you, the dashboard's `reportKind`, the allocation's `weeklyReport`, the fixture's `reports.kinds` (both twins) | Sonnet | A | 2 | A1 |
+| W5-A3 | 5c's server half: the ideas routes, "Add to next plan" through `createPostInTx` in one transaction, `release_idea` on discard, the post read's `idea` | Sonnet, with an Opus review of the transaction and the discard effect | A | 3 | A1 |
+| W5-A4 | Pages and demo answers: the weekly report, the Monthly and Weekly switch, the ideas section, "From an idea" | Sonnet | A | 4 | A2, A3 |
+| W5-B1 | Migrations `social_saved_items` (with `ux_creative_assets_id_tenant`) and `social_audits` | Opus · medium | B, bank and audit | 1 | this contract |
+| W5-B2 | 5e's server half: the bank's routes and collections, `savedItemIds` on the post edit | Sonnet | B | 2 | B1 |
+| W5-B3 | 5g's server half: the dimension fixture and twin, the pure scoring with its golden table, the routes, Draft with AI | Sonnet, with an Opus review of the golden table | B | 3 | B1 |
+| W5-B4 | Pages and demo answers: `{D}/saved` and `{D}/social-audit` | Sonnet | B | 4 | B2, B3 |
+| W5-C1 | Migration `pm_task_cycle_steps` and 5f's core: the six step tasks made, re-dated, closed and reopened inside the stage action's transaction, the lock order, the report step on delivery | Opus · high: it runs inside every stage action's transaction, so a wrong lock order deadlocks the whole pipeline; start it on Opus, not cheap then escalate | C, cycle and onboarding | 1 | this contract |
+| W5-C2 | 5f's reads: the health `steps`, the dashboard's `cycle_step_late`, PM's `linkedStep`, the Plan tab's strip | Sonnet | C | 2 | C1 |
+| W5-C3 | Migrations `pm_project_templates` and `social_settings_onboarding`; PM's project template, apply-template (one transaction, idempotent), the applications read and the kickoff move | Opus · medium | C | 3 | C1 (one migration owner per lane) |
+| W5-C4 | 5h's Social half: the template setting, starting onboarding, `GET onboarding`, `{D}/onboarding` | Sonnet | C | 4 | C3, B3 (the baseline audit link) |
+| W5-H1 | Registry and skin: `publish` › `saved` and the Saved pin's move, the rows `social-audit` and `onboarding` ("Client onboarding"), their `AREA_RULES`, the registry and one-area tests | Haiku | the first free lane | 5 | A4, B4, C4 |
+| W5-H2 | DEMO_MODE data for 5b, 5c, 5e, 5f, 5g and 5h, and the mock seed's onboarding template (mock wording only) | Haiku | the first free lane | 5 | the lane's server half |
+| W5-Q | Proof: the six proof lists on the Linux CI gate, then a live drive on the mock seed as an officer, the HoD and the GM | QA, Sonnet | — | 6 | all of the above |
+
+The orchestrator keeps the changelog, `docs/MAP.md` (regenerated from a clean worktree), the board and the landing. Then SCP-6
+when real data is allowed.
 
 At most three implementer agents run at once, and only one sumopod gate at a time, with memory caps.
 
