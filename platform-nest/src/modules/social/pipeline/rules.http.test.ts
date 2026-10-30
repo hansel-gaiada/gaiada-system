@@ -356,7 +356,8 @@ describe.skipIf(!TEST_URL)("SCP-5 W5-A0 · the company rules (BFF §63.30)", () 
     expect(cy.steps[5].due).toBe(cy.cycle!.readyBy);
     expect(cy.steps[1].due! < cy.steps[5].due!).toBe(true); // planning is before ready-by by the estimates
 
-    refused(await send("POST", "smHead", "rules/preview", { section: "audit", value: { dimensions: [] } }), 400, "invalid_field", "bad value", "audit");
+    // A bad value names its path, `<section>.<path>` (rules.controller.ts header): here the first rule broken is the missing bands.
+    refused(await send("POST", "smHead", "rules/preview", { section: "audit", value: { dimensions: [] } }), 400, "invalid_field", "bad value", "audit.bands");
     refused(await send("POST", "smHead", "rules/preview", { section: "ideas", value: ideas(true), engagementId: newId() }), 404, "engagement_not_found", "unknown client");
     refused(await send("POST", "smHead", "rules/preview", { section: "ideas", value: ideas(true), engagementId: engC }), 404, "engagement_not_found", "another company's client");
     expect(await versionsInDb()).toEqual(before);
