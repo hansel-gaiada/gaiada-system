@@ -13,6 +13,8 @@ export const pmModule: ModuleContract = {
     "202610271410_pm_task_links.sql",
     // SCP-5h (BFF §63.29.1) — the `project` template kind and pm_template_applications (apply-template, the kickoff move).
     "202610301200_pm_project_templates.sql",
+    // SCP-5f (BFF §63.27.1) — the monthly cycle's step tasks: `linked_type` 'social_cycle_step' and `linked_step`, one task per step and cycle.
+    "202610301310_pm_task_cycle_steps.sql",
   ],
   // IAM-01d migration: all 3 CLEAN — pure colon-to-dot renames onto the catalog's pm.task.* keys.
   permissions: [
