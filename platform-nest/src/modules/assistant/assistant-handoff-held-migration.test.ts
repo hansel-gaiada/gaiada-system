@@ -1,4 +1,4 @@
-// AIP-18 — migration 202610301340_assistant_handoff_held.sql, the file's own text (no database needed; always runs). The live half (the CHECK
+// AIP-18 — migration 202610301420_assistant_handoff_held.sql, the file's own text (no database needed; always runs). The live half (the CHECK
 // refuses and accepts the right rows on a real table) is in assistant-soft-stop.test.ts.
 //
 // THE CHECK REDECLARE (the DROP+ADD-on-a-shared-CHECK trap): the new status list must carry EVERY value of 0084's inline CHECK, read from
@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 
 const dir = join(__dirname, "..", "..", "..", "migrations");
-const FILE = "202610301340_assistant_handoff_held.sql";
+const FILE = "202610301420_assistant_handoff_held.sql";
 const sql = readFileSync(join(dir, FILE), "utf8");
 const strip = (s: string) => s.split("\n").map((l) => (l.includes("--") ? l.slice(0, l.indexOf("--")) : l)).join("\n");
 const code = strip(sql);

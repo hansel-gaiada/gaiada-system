@@ -14457,7 +14457,7 @@ figure, and never a cost or any text. A budget that jumps past both thresholds i
 
 Plan `docs/plans/2026-10-27-ai-plan.md` §6.3 item 9; rulings AIP-D1, AIP-D7, AIP-D8, AIP-D9. `platform-nest/src/modules/ai-usage/soft-stop.ts` (new: the decision),
 `modules/assistant/turn-budget.ts` (new: what a stopped turn does), `modules/assistant/{assistant.controller,handoffs,context,stream}.ts`,
-`modules/ai-usage/{budgets.controller,budgets.service,usage-alerts-job}.ts`; migration `202610301340_assistant_handoff_held.sql`. The authorization of the lift is
+`modules/ai-usage/{budgets.controller,budgets.service,usage-alerts-job}.ts`; migration `202610301420_assistant_handoff_held.sql`. The authorization of the lift is
 PERMISSION-CONTRACT §58. The UI is a later ticket: everything below is what it reads. **The soft stop never refuses a reply.** The gateway's global cap (429,
 "degraded until tomorrow") stays the only hard stop, unchanged.
 
@@ -14540,7 +14540,7 @@ as before (no `hold` key). **`goalId` is now `string | null`** (null while held,
 The reads already report `canLiftStop` (§66.3 to §66.5: `manage`, or on a unit `manage || lift_stop`) and each unit budget line's `stopLifted` (§66.8). An owner's
 budget or allowance edit (§66.9) also clears this process's cached stop states, so a raised figure is seen at the next send.
 
-**Migration `202610301340_assistant_handoff_held.sql`:** the `assistant_handoffs.status` CHECK is redeclared WHOLE as `queued, running, ok, suspended,
+**Migration `202610301420_assistant_handoff_held.sql`:** the `assistant_handoffs.status` CHECK is redeclared WHOLE as `queued, running, ok, suspended,
 budget_exhausted, failed, interrupted, cancelled, held` (0084's eight, all kept, plus `held`; a self-check asserts every value); `goal_id` becomes nullable,
 allowed only on a row that was held and is `held`, `cancelled` or `failed`; new columns `hold_kind`, `hold_unit_node_id`, `held_at` (one shape CHECK); the
 partial index `ix_assistant_handoffs_held`. No data change.

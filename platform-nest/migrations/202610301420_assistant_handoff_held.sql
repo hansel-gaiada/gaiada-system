@@ -32,7 +32,7 @@
 DO $$
 BEGIN
   IF to_regclass('assistant_handoffs') IS NULL THEN
-    RAISE EXCEPTION '202610301340: assistant_handoffs is missing (0084)';
+    RAISE EXCEPTION '202610301420: assistant_handoffs is missing (0084)';
   END IF;
 END $$;
 
@@ -85,11 +85,11 @@ BEGIN
   SELECT pg_get_constraintdef(oid) INTO def FROM pg_constraint
    WHERE conrelid = 'assistant_handoffs'::regclass AND conname = 'ck_assistant_handoffs_status' AND contype = 'c' AND convalidated;
   IF def IS NULL THEN
-    RAISE EXCEPTION '202610301340: ck_assistant_handoffs_status is missing or not validated';
+    RAISE EXCEPTION '202610301420: ck_assistant_handoffs_status is missing or not validated';
   END IF;
   FOREACH v IN ARRAY ARRAY['queued', 'running', 'ok', 'suspended', 'budget_exhausted', 'failed', 'interrupted', 'cancelled', 'held'] LOOP
     IF position(quote_literal(v) IN def) = 0 THEN
-      RAISE EXCEPTION '202610301340: the status CHECK lost the value % (definition: %)', v, def;
+      RAISE EXCEPTION '202610301420: the status CHECK lost the value % (definition: %)', v, def;
     END IF;
   END LOOP;
 
@@ -99,31 +99,31 @@ BEGIN
      AND conname NOT IN ('ck_assistant_handoffs_status', 'ck_assistant_handoffs_held_has_hold', 'ck_assistant_handoffs_goal_id')
      AND pg_get_constraintdef(oid) LIKE '%status%';
   IF n <> 0 THEN
-    RAISE EXCEPTION '202610301340: % other CHECK(s) on assistant_handoffs still constrain status', n;
+    RAISE EXCEPTION '202610301420: % other CHECK(s) on assistant_handoffs still constrain status', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_constraint
    WHERE conrelid = 'assistant_handoffs'::regclass AND contype = 'c' AND convalidated
      AND conname IN ('ck_assistant_handoffs_hold_shape', 'ck_assistant_handoffs_held_has_hold', 'ck_assistant_handoffs_goal_id');
   IF n <> 3 THEN
-    RAISE EXCEPTION '202610301340: the three hold CHECKs must exist and be validated, found % of 3', n;
+    RAISE EXCEPTION '202610301420: the three hold CHECKs must exist and be validated, found % of 3', n;
   END IF;
 
   SELECT count(*) INTO n FROM information_schema.columns
    WHERE table_schema = current_schema() AND table_name = 'assistant_handoffs' AND column_name = 'goal_id' AND is_nullable = 'YES';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610301340: assistant_handoffs.goal_id must be nullable';
+    RAISE EXCEPTION '202610301420: assistant_handoffs.goal_id must be nullable';
   END IF;
 
   SELECT count(*) INTO n FROM pg_indexes
    WHERE schemaname = current_schema() AND tablename = 'assistant_handoffs' AND indexname = 'ix_assistant_handoffs_held'
      AND indexdef LIKE '%(tenant_id, created_at)%' AND indexdef LIKE '%status = ''held''%';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610301340: ix_assistant_handoffs_held is missing';
+    RAISE EXCEPTION '202610301420: ix_assistant_handoffs_held is missing';
   END IF;
 
   SELECT count(*) INTO n FROM pg_class WHERE oid = 'assistant_handoffs'::regclass AND relrowsecurity AND relforcerowsecurity;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610301340: assistant_handoffs must keep RLS ENABLED and FORCED';
+    RAISE EXCEPTION '202610301420: assistant_handoffs must keep RLS ENABLED and FORCED';
   END IF;
 END $$;

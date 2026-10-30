@@ -51,7 +51,7 @@
 // collide on `assistant_messages`' `UNIQUE (thread_id, seq)`.
 //
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
-// AIP-18 — HELD HAND-OFFS (docs/plans/2026-10-27-ai-plan.md §6.3 item 9; BFF §66.11; migration 202610301340)
+// AIP-18 — HELD HAND-OFFS (docs/plans/2026-10-27-ai-plan.md §6.3 item 9; BFF §66.11; migration 202610301420)
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // While the chatting user is soft-stopped (their daily allowance, or their department's `soft_stop` budget), a hand-off starts NO agent run:
 // `createHandoff` validates everything exactly as before (the goal, the runner's roster, the agent, the OBO envelope's principal) and then,
