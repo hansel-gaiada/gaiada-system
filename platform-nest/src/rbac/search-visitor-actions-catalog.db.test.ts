@@ -79,15 +79,22 @@ describe("M5-V3-f · visitor actions: catalog, groups, bundles, policy and migra
 
   it("the policy's role arm is module_manager + company_admin only, and each perm mirror names exactly one action", () => {
     const doc: any = yaml.load(readFileSync(POLICY, "utf8"));
-    const rules = doc.resourcePolicy.rules as Array<{ actions: string[]; effect: string; derivedRoles?: string[] }>;
+    const rules = doc.resourcePolicy.rules as Array<{ actions: string[]; effect: string; derivedRoles?: string[]; condition?: { match: { expr: string } } }>;
     const touching = (a: string) => rules.filter((r) => r.actions.includes(a));
     for (const a of Object.values(ACTION_OF)) {
       const rs = touching(a);
-      // platform_admin wildcard is "*", not literal, so it is not in this list: the role rule + one mirror.
-      expect(rs, a).toHaveLength(2);
-      const roleRule = rs.find((r) => r.derivedRoles?.includes("module_manager"))!;
-      expect(roleRule.derivedRoles!.slice().sort()).toEqual(["company_admin", "module_manager"]);
-      expect(roleRule.effect).toBe("EFFECT_ALLOW");
+      // platform_admin wildcard is "*", not literal, so it is not in this list. M5-V3-l split the role arm in two: the
+      // module tier (search's only: its condition requires module == "search") and company_admin (not module-mediated),
+      // plus one mirror.
+      expect(rs, a).toHaveLength(3);
+      const moduleRule = rs.find((r) => r.derivedRoles?.includes("module_manager"))!;
+      expect(moduleRule.derivedRoles).toEqual(["module_manager"]);
+      expect(moduleRule.effect).toBe("EFFECT_ALLOW");
+      expect(moduleRule.condition?.match.expr, `${a}: the module tier must be the search module's only`).toContain('request.resource.attr.module == "search"');
+      const adminRule = rs.find((r) => r.derivedRoles?.includes("company_admin"))!;
+      expect(adminRule.derivedRoles).toEqual(["company_admin"]);
+      expect(adminRule.effect).toBe("EFFECT_ALLOW");
+      expect(adminRule.condition?.match.expr).not.toContain("attr.module");
       const mirror = rs.find((r) => r.derivedRoles?.some((d) => d.startsWith("perm_")))!;
       expect(mirror.actions).toEqual([a]);
       expect(mirror.derivedRoles).toEqual([`perm_resource_search_property_${a}`]);
