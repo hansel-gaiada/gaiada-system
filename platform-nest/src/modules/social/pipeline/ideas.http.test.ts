@@ -306,8 +306,8 @@ describe.skipIf(!TEST_URL)("SCP-5 W5-B2 · ideas for next month (BFF §63.25)", 
 
     ok(await call("DELETE", "officer", `ideas/${idea.id}`), 200, "delete");
     expect((await ideaDb(idea.id)).deleted_at).not.toBeNull();
-    refused(await call("DELETE", "officer", `ideas/${idea.id}`), 404, "idea_not_found", "delete again");
-    refused(await call("PATCH", "officer", `ideas/${idea.id}`, { saw: "x" }), 404, "idea_not_found", "edit a deleted idea");
+    refused(await call("DELETE", "smHead", `ideas/${idea.id}`), 404, "idea_not_found", "delete again (a deleted idea is an unknown id: 404 for the four, 403 for an officer who cannot write the unknown)");
+    refused(await call("PATCH", "smHead", `ideas/${idea.id}`, { saw: "x" }), 404, "idea_not_found", "edit a deleted idea");
     expect(ok<{ items: IdeaJson[] }>(await call("GET", "smHead", `engagements/${engA}/ideas`), 200, "list").items.some((i) => i.id === idea.id)).toBe(false);
     expect((await activities("social_idea", idea.id)).map((a) => a.verb)).toEqual(["created", "updated", "shared", "updated", "deleted"]);
   });
