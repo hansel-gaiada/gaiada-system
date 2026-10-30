@@ -54,7 +54,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `bot-media-worker` | ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-wa-chat-bot:${GAIADA_TAG:-latest} | `bot` | — | pg-bot, redis-bot |
 | `cerbos` | ghcr.io/cerbos/cerbos:0.54.0 | — | — | — |
 | `clamav` | clamav/clamav:1.5.3 | `scan` | — | — |
-| `keycloak` | quay.io/keycloak/keycloak:26.0 | `auth` | `127.0.0.1:8080:8080` | postgres |
+| `keycloak` | quay.io/keycloak/keycloak:26.8.1 | `auth` | `127.0.0.1:8080:8080` | postgres |
 | `knowledge` | ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-ai-agents:${GAIADA_TAG:-latest} | — | — | postgres, platform, ai-gateway |
 | `mailpit` | axllent/mailpit:v1.30.6 | `mail-dev` | `127.0.0.1:8025:8025` | — |
 | `mcp-hub` | ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-mcp-hub:${GAIADA_TAG:-latest} | — | `127.0.0.1:3003:3003` | ai-gateway, platform, cerbos |
