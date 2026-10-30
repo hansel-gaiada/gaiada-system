@@ -314,8 +314,10 @@ export interface PmTask {
   clientVisible?: boolean;
   /** SCP-1n (BFF §63.13): the row this task points at, both set or both null. `social_post` is set through the PM routes; `social_cycle` marks a
    *  cycle's content-month task, which the social pipeline owns. Absent on older backends. */
-  linkedType?: "social_post" | "social_cycle" | null;
+  linkedType?: "social_post" | "social_cycle" | "social_cycle_step" | null;
   linkedId?: string | null;
+  /** SCP-5f (BFF §63.27.3): the step key of a `social_cycle_step` task (`linkedId` is its cycle), else null. */
+  linkedStep?: string | null;
 }
 
 // Boundary guarantee for the fields above that every render site reads WITHOUT a null-check

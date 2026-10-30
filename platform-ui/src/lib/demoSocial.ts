@@ -6,6 +6,7 @@ import { validateBrandBook, type BrandBook } from "./socialBrandBook";
 import { demoDesignQueue } from "./demoSocialDesignQueue";
 import { demoSocialMetrics } from "./demoSocialMetrics";
 import { demoTeamRoute } from "./demoSocialTeam";
+import { demoStepsOfCycle } from "./demoSocialCycleStepsRead";
 import {
   DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCalendar, demoCreatePost, demoCycleHealth, demoCycleTable, demoDeadlineRange,
   demoFeed, demoNeedsYou, demoOverview, demoPipelineRead, demoRealDate, demoWaiting, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement,
@@ -982,7 +983,12 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
     return ok(demoCycleTable(month, userId));
   }
   const cycleHealthM = tail.match(/^cycles\/([^/]+)\/health$/);
-  if (cycleHealthM && m === "GET") return demoCycleHealth(cycleHealthM[1]);
+  if (cycleHealthM && m === "GET") {
+    // SCP-5f (BFF §63.27.4): the health also answers the cycle's six steps (`demoSocialCycleStepsRead.ts`); a demo engagement always has its project, so no reason.
+    const h = demoCycleHealth(cycleHealthM[1]);
+    const withSteps = h.status === 200 ? demoStepsOfCycle(cycleHealthM[1]) : null;
+    return withSteps ? { ...h, json: { ...(h.json as Record<string, unknown>), steps: withSteps.steps, stepsReason: null } } : h;
+  }
   // ── SCP-3d: the client's feed preview and its swap (BFF §63.10), in demoSocialFeedPreview.ts ─────────────────
   { const feedPreview = demoFeedPreviewRoute(m, tail, body, userId); if (feedPreview) return feedPreview; }
   // ── SCP-Sg: the client's accounts read back, followers, 30-day reach and last sync (BFF §63.10), in demoSocialAccountsSummary.ts ──
