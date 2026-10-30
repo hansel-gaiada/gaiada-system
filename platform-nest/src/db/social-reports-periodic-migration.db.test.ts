@@ -425,7 +425,7 @@ describe.skipIf(!TEST_URL)("SCP-5 W5-A1 · social_reports_periodic", () => {
       await refusedWith(run({ ...done(), trigger: "'run_now'", schedule_id: `'${schedC}'` }), FK);
       await refusedWith(run({ ...done(), trigger: "'run_now'", schedule_id: `'${newId()}'` }), FK);
       await insert("social_report_runs", { tenant_id: `'${C}'`, kind: "'yearly'", period: "'2026'", requested_by: `'${user}'`,
-        rules_ref: "'company:1'", total: "1", trigger: "'run_now'", schedule_id: `'${schedC}'` }, done());
+        rules_ref: "'company:1'", total: "3", trigger: "'run_now'", schedule_id: `'${schedC}'` }, done());
       await refusedWith(q(`DELETE FROM social_report_schedules WHERE id = $1`, [schedC]), FK);
     });
 
@@ -479,7 +479,7 @@ describe.skipIf(!TEST_URL)("SCP-5 W5-A1 · social_reports_periodic", () => {
       ids.social_report_runs = {
         mine: await run(done()),
         theirs: await insert("social_report_runs", { tenant_id: `'${C}'`, kind: "'yearly'", period: `'${year()}'`, requested_by: `'${user}'`,
-          rules_ref: "'company:1'", total: "1" }, done()),
+          rules_ref: "'company:1'", total: "3" }, done()),
       };
     });
 
