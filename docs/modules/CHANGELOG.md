@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.211.0` + platform-ui `0.229.0` - shared train 20261030-7: AIP-18 the soft stop, AIP-17b's owner forms, SCP-5 W5-A3; WDV and PID-2 plans (docs, scripts) - PROTOTYPED
+
+- **AIP-18 (platform-nest; plan §6.3 item 9; owner ruling AIP-D8; BFF §66.11).** The soft stop: when a person is at their daily reply allowance, or their home department is over a budget set to `soft_stop` and not lifted this month, the assistant keeps answering in a lighter mode and never refuses:
+  - the turn runs on the `fast` tier (the thread's tier and any named-provider hint are overridden for that turn only) with half the knowledge passages and half the prompt's history budget; the reply carries a `turn_budget` part, the stream sends a `budget` event first, and the ask answer a `turnBudget` field, with no figures;
+  - an agent hand-off made while stopped is `held` and never posted; it starts by itself when the stop ends (a lift, the next month, or the next day for an allowance), released by the 10-minute job and right after a lift, once even under a race; its owner can cancel it (`POST :t/assistant/threads/:id/handoffs/:handoffId/cancel`);
+  - `POST :t/ai-usage/budgets/units/:unitNodeId/lift`: the owner (`manage`) or the unit's head (`lift_stop`), for the rest of the UTC month, with an activity row;
+  - the check fails OPEN (a soft stop never blocks a turn when it cannot compute) and is cached 60 s; the release fails closed.
+  - **AIP-D1, plainly:** while every tier maps to one model the `fast` tier costs the same; the real effects are the trimmed retrieval, the held runs and the line in the chat.
+- **AIP-17b + AIP-18 (platform-ui; BFF §66.12).** Budget lines on the company view and the department page; the owner's forms for the company alert figure, department budgets (Report only by default, or Soft stop) and per-person allowances; the Lift button (a soft-stopped department at or over 100 percent, this month only); one quiet line in the chat on a stopped reply; "Waiting: over budget" with Cancel on a held hand-off.
+- **SCP-5 W5-A3 (platform-nest).** Generate with AI (SCP-Q37): POST reports/generate drafts a report for one client or every client the person may draft, as a background run (four drafts in flight, one running run per company, resume after a crash with no client drafted twice, per-client results); GET reports/generate/:runId reads progress and the run's AI spend (SCP-Q40, never capped); tools social.generateReports and social.reportRun; the `social-report-runs` job (every minute); AI task label `social.report_generate`.
+- **WDV (docs).** The Web Dev skin plan (`docs/plans/2026-10-30-webdev-skin.md`, WDV-D1 to D10).
+- **PID-2 (docs + ops scripts, no deploy effect).** The passkey realm script and its tests (`infra/scripts/keycloak-passkey-realm*`), plan and MFA runbook updates.
+- **Deploy.** One migration, `202610301420_assistant_handoff_held` (assistant_handoffs: three hold columns, `goal_id` nullable for held rows only, the status CHECK redeclared with `held`; no data rewrite). No Cerbos, IAM or compose change.
+
 ### infra `0.14.0` - shared train 20261030-6, ALONE: PID-1c, Keycloak 26.0 (resolved 26.0.8) to 26.8.1, the prerequisite for passkeys (plan `docs/plans/2026-10-30-phone-identity.md`; runbook `infra/runbooks/keycloak-upgrade.md`) - PROTOTYPED
 
 - **What changes.** `infra/compose/docker-compose.vps.yml`: the `keycloak` image `quay.io/keycloak/keycloak:26.8.1`, and `KC_HTTP_HOST: "0.0.0.0"` stated (26.6+ makes `start-dev` listen on localhost by default). Still `start-dev --import-realm`; nothing else in the service moves.

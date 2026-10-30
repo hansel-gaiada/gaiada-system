@@ -314,6 +314,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/ideas.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/metrics.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/pipeline.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/report-runs.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/rules.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/saved.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/sheet-import.controller.ts` |
