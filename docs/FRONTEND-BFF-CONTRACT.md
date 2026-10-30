@@ -13614,7 +13614,7 @@ Activity on entity `social_report_schedule`: `created`, `updated`, `paused`, `re
 
 ### 63.25 Ideas for next month (SCP-5c) — **STATUS: PLANNED (2026-10-30)**
 
-**What it is.** Per client: what we saw, the metric it rests on, and what we suggest. "Add to next plan" turns an idea into a `planned` post of a cycle the person picks, linked both ways; "Mark shared" records that the team shared it with the client. Ideas stay internal: nothing reaches the portal or the report's PDF (SCP-Q27). They sit on the monthly report's page, as in the team's design.
+**What it is.** Per client: what we saw, the metric it rests on, and what we suggest. "Add to next plan" turns an idea into a `planned` post of a cycle the person picks, linked both ways; "Mark shared" records that the team shared it with the client. By default ideas stay internal and nothing reaches the portal or the report's PDF (SCP-Q27). A company may set shared ideas to print in the next monthly report (`ideas.sharedInMonthlyReport`, 63.30): that report's document and PDF then list its client's ideas marked shared since the previous monthly report, by the report's own rules. They sit on the monthly report's page, as in the team's design.
 
 **63.25.1 Data: `<prefix+1>_social_ideas.sql`** (social; the third wall in 0105's DO-loop form, FORCE RLS; no DML; the closing DO block asserts the catalogue). No `social_posts.idea_id` is set today, and the new FK's own validation checks every existing row, outside RLS. The file must not try to prove it with a count: under the migration's unset tenant GUC a count of a forced-RLS table reads zero rows and proves nothing.
 
@@ -13625,7 +13625,7 @@ Activity on entity `social_report_schedule`: `created`, `updated`, `paused`, `re
 | `id`, `tenant_id` | uuid PK; `ux_social_ideas_id_tenant UNIQUE (id, tenant_id)` |
 | `engagement_id` | `uuid NOT NULL`, composite FK to `social_engagements (id, tenant_id)` |
 | `saw` | `text NOT NULL`, 1 to 500 characters |
-| `metric` | `text NOT NULL`, 1 to 300: required, as in the design |
+| `metric` | `text NULL`, 1 to 300 when given. Required by default, as in the design; a company may make it optional (`ideas.metricRequired`, 63.30), and the route enforces the rule (400 `{field: 'metric'}`) |
 | `suggestion` | `text NOT NULL`, 1 to 500 |
 | `status` | `text NOT NULL DEFAULT 'proposed'`: `proposed`, `shared`, `planned` |
 | `report_id` | `uuid NULL`, composite FK to `social_reports`: the monthly report it was raised with, when it was |
@@ -13676,7 +13676,7 @@ CHECKs (`status` is NOT NULL; every other side is written with `IS NULL`): `(sta
 
 ### 63.26 Saved: the content bank (SCP-5e) — **STATUS: PLANNED (2026-10-30)**
 
-**What it is.** Each client's bank, seen by the team only: the Asset Library's photos with used, unused and source; the client's approved posts; saved captions, templates and references; and the brand book's hashtag sets. It reuses before it stores: a design's photo, an approved post and a hashtag set are READ from where they live, and the bank stores only what has no home (a caption, a template, a reference, a Drive link, an asset saved for later). Per client (SCP-Q28).
+**What it is.** Each client's bank, seen by the team only: the Asset Library's photos with used, unused and source; the client's approved posts; saved captions, templates and references; and the brand book's hashtag sets. It reuses before it stores: a design's photo, an approved post and a hashtag set are READ from where they live, and the bank stores only what has no home (a caption, a template, a reference, a Drive link, an asset saved for later). Per client (SCP-Q28). Its categories are the company's (`saved.categories`, 63.30): the design's six by default, renamed, reordered, hidden or added to in Settings.
 
 **63.26.1 Data: `<prefix+2>_social_saved_items.sql`** (social; no DML; closing DO-block assertions):
 - On `creative_assets` (plain wall, Creatives' table): `ux_creative_assets_id_tenant UNIQUE (id, tenant_id)` when missing, the 0075 pattern (it cannot fail: `id` is the key), so the bank's FK carries the tenant.
@@ -13686,7 +13686,7 @@ CHECKs (`status` is NOT NULL; every other side is written with `IS NULL`): `(sta
 |---|---|
 | `id`, `tenant_id` | uuid PK; `ux_social_saved_items_id_tenant UNIQUE (id, tenant_id)` |
 | `engagement_id` | `uuid NOT NULL`, composite FK to `social_engagements` |
-| `kind` | `text NOT NULL`: `asset` (an Asset Library group kept for this client), `media_link` (a Drive link to a photo or video), `caption`, `template`, `reference` |
+| `holds`, `category` | `text NOT NULL`: what the item is, `asset` (an Asset Library group kept for this client), `link` (a Drive or web link) or `text` (a caption, a template or any text), a structural shape; and the company category it sits in (a key of `saved.categories`, ≤ 40, checked by the route against the rules) |
 | `title` | `text NOT NULL`, 1 to 120 |
 | `body` | `text NULL`, 1 to 5,000: a caption's or a template's text |
 | `url` | `text NULL`, http(s), ≤ 500 |
@@ -13697,14 +13697,14 @@ CHECKs (`status` is NOT NULL; every other side is written with `IS NULL`): `(sta
 | `use_count`, `last_used_at`, `last_used_post_id` | `integer NOT NULL DEFAULT 0`; NULL; `uuid NULL`, composite FK to `social_posts` |
 | `created_by` (NOT NULL), `created_at`, `updated_by`, `updated_at`, `deleted_at`, `deleted_by`, `origin_site` | as usual |
 
-CHECKs, one shape per kind (every side written with `IS NULL`, since a CHECK passes on NULL):
+CHECKs, one shape per `holds` (every side written with `IS NULL`, since a CHECK passes on NULL; the seeded categories map as photos to `asset` or `link`, captions and templates to `text`, references to `link` or `asset`):
 - `asset`: `asset_group_id IS NOT NULL`, and `url`, `body`, `media`, `source` and `ai_note` all NULL;
-- `media_link`: `url`, `media` and `source` NOT NULL; `asset_group_id` and `body` NULL;
-- `caption`, `template`: `body IS NOT NULL`; `url`, `asset_group_id`, `media`, `source` and `ai_note` NULL;
-- `reference`: `(url IS NULL) <> (asset_group_id IS NULL)`, `body` and `media` NULL, a link with a `source`, an asset without one;
+- `link`: `url` and `source` NOT NULL; `asset_group_id` and `body` NULL; `media` (`photo`, `video` or NULL) says what it points at;
+- `text`: `body IS NOT NULL`; `url`, `asset_group_id`, `media`, `source` and `ai_note` NULL;
+- `category ~ '^[a-z][a-z0-9_]{0,39}$'`;
 - `source IS DISTINCT FROM 'ai' OR ai_note IS NOT NULL`; `use_count >= 0`; `(last_used_at IS NULL) = (last_used_post_id IS NULL)`; `(deleted_at IS NULL) = (deleted_by IS NULL)`; the lengths.
 
-`ux_social_saved_items_asset UNIQUE (engagement_id, asset_group_id) WHERE kind = 'asset' AND deleted_at IS NULL` (the kind CHECK makes the group NOT NULL there); index `(tenant_id, engagement_id, kind, created_at DESC) WHERE deleted_at IS NULL`.
+`ux_social_saved_items_asset UNIQUE (engagement_id, asset_group_id) WHERE holds = 'asset' AND deleted_at IS NULL` (the shape CHECK makes the group NOT NULL there); index `(tenant_id, engagement_id, category, created_at DESC) WHERE deleted_at IS NULL`. A category later removed from the rules keeps its items, which show under "Other" until someone moves them.
 
 **63.26.2 Who** (SCP-Q29). Reading is `social_post` · `read` (the team). Adding is `social_post` · `create` on the client's would-be post (63.25.2's resource): the Social Media team's seats carry it (63.2). Changing or deleting an item is its author's; anyone else needs `manage` on the client's would-be post (the officer, the HoD and GM seats; 403 `not_officer_or_approver`). An automation principal is refused every write. No new action (PERMISSION §57).
 
@@ -13712,17 +13712,17 @@ CHECKs, one shape per kind (every side written with `IS NULL`, since a CHECK pas
 
 | Route | What it does |
 |---|---|
-| `GET engagements/:engagementId/saved` (`read`) | Without `collection`: `{collections: [{key, label, count, previews: string[]}], canAdd}`, the six of the design: `photos` "Photos and videos", `posts` "Approved posts", `captions`, `hashtags` "Hashtag sets", `templates`, `references`. 404 `engagement_not_found` |
+| `GET engagements/:engagementId/saved` (`read`) | Without `collection`: `{collections: [{key, label, holds, derived, count, previews: string[]}], canAdd}`, the company's enabled categories in their order. Seeded: `photos` "Photos and videos", `posts` "Approved posts", `captions`, `hashtags` "Hashtag sets", `templates`, `references`. 404 `engagement_not_found` |
 | `GET engagements/:engagementId/saved?collection=&pillar=&used=&source=&cursor=&limit=` (`read`) | `{items, nextCursor}` (63.0's paging; `hashtags` unpaged). Shapes below |
-| `POST engagements/:engagementId/saved` | `{id?, kind, title, body?, url?, media?, assetGroupId?, pillar?, source?, aiNote?}` → 201 `{item, created}`. 404 `asset_not_found` for a group outside the company; an asset already kept for the client answers 200 `{item, created: false}`; a replayed `id` likewise |
+| `POST engagements/:engagementId/saved` | `{id?, category, holds, title, body?, url?, media?, assetGroupId?, pillar?, source?, aiNote?}` → 201 `{item, created}`. The category must be an enabled, stored category of the company that takes `holds` (400 `{field: 'category'}`). 404 `asset_not_found` for a group outside the company; an asset already kept for the client answers 200 `{item, created: false}`; a replayed `id` likewise |
 | `PATCH saved/:itemId` | `{title?, body?, pillar?, source?, aiNote?}` (the kind's shape); 404 `saved_item_not_found` |
 | `DELETE saved/:itemId` | A soft delete |
 | `PATCH posts/:postId/pipeline` (63.6.3) | Gains `savedItemIds?: string[]` (1 to 10, items of the post's client, else 400 `{field: 'savedItemIds'}`). When the edit applies, the same transaction adds one to each item's `use_count` and sets `last_used_at` and `last_used_post_id`; a refused edit counts nothing |
 
 **The collections' items:**
-- `photos`: the union, without repeats, of (a) the asset groups on the live designs of this client's live posts (`social_post_designs`, derived, never stored), (b) the client's `asset` items and (c) its `media_link` items: `{key, savedItemId \| null, kind: 'asset'\|'media_link', title, media, asset: {groupId, versionId, versionNo, contentType} \| null, url, source, aiNote, pillar, used, usedIn, addedBy, addedAt}`. **Used** means a live design of a live post of this client names the group, or, for a link, `use_count > 0`; `usedIn` counts the posts. The image comes from the Asset Library's own `GET creative/assets/:id/content` (`file` · `read`, §35).
+- `photos`: the union, without repeats, of (a) the asset groups on the live designs of this client's live posts (`social_post_designs`, derived, never stored), (b) the category's `asset` items and (c) its `link` items: `{key, savedItemId \| null, holds: 'asset'\|'link', title, media, asset: {groupId, versionId, versionNo, contentType} \| null, url, source, aiNote, pillar, used, usedIn, addedBy, addedAt}`. **Used** means a live design of a live post of this client names the group, or, for a link, `use_count > 0`; `usedIn` counts the posts. The image comes from the Asset Library's own `GET creative/assets/:id/content` (`file` · `read`, §35).
 - `posts`: this client's pipeline posts from `approved` on that have a stored design, newest first: `{postId, title, format, cycleMonth, thumbFileId, pipelineStatus, simulated}`; read-only, each linking to its post.
-- `captions`, `templates`, `references`: the items, `{id, kind, title, body, url, asset, source, aiNote, pillar, useCount, lastUsedAt, addedBy, addedAt}`.
+- `captions`, `templates`, `references` and any category the company added: the items, `{id, category, holds, title, body, url, asset, source, aiNote, pillar, useCount, lastUsedAt, addedBy, addedAt}`.
 - `hashtags`: the brand book's `hashtag_strategy.sets` (63.4), read-only here; they are edited in the brand book.
 
 **Use in a post.** The edit is the machine's own: the fixture's `editRules` decide which posts may take what. A caption, a template or a hashtag set goes into the copy (`drafting` and the team's copy change cases); a reference or a photo link goes into `rawAssets` (`planned`, `drafting`). The page offers only the posts and fields the rules allow and sends the edit with `savedItemIds`. An asset becomes a design only through `POST posts/:postId/designs` (63.6.6), by the designer, unchanged; that design row is its use.
@@ -13744,7 +13744,7 @@ An agent uses an item through `social.editPost` with `savedItemIds` (63.15, `low
 
 **Simulated.** The `posts` collection carries each post's `simulated` and the page its SIMULATED mark; nothing else in the bank is a number.
 
-**63.26.5 Proofs:** each kind's CHECK with its NULL cases; the asset FK refusing another company's group; one `asset` item per client and group; the derived photos (a design's group shows as used without a saved row; removing the design makes a kept asset unused); `used`, `source` and `pillar` filters; the author edits and deletes their item, the officer and a seat anyone's, another member is 403 `not_officer_or_approver`; `savedItemIds` counted only when the edit applies, and refused for another client's item; the hashtag sets read from the brand book; nothing of the bank reachable from the portal.
+**63.26.5 Proofs:** each shape's CHECK with its NULL cases; an item refused for a category the company does not have, or one that does not take its shape; a removed category's items shown under "Other"; the asset FK refusing another company's group; one `asset` item per client and group; the derived photos (a design's group shows as used without a saved row; removing the design makes a kept asset unused); `used`, `source` and `pillar` filters; the author edits and deletes their item, the officer and a seat anyone's, another member is 403 `not_officer_or_approver`; `savedItemIds` counted only when the edit applies, and refused for another client's item; the hashtag sets read from the brand book; nothing of the bank reachable from the portal.
 
 ### 63.27 The monthly cycle as PM tasks (SCP-5f; plan §4.5, SCP-D4) — **STATUS: PLANNED (2026-10-30)**
 
