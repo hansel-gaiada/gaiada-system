@@ -19,7 +19,7 @@ import {
 
 const NEST_SEED = join(__dirname, "..", "social-rules-defaults.json");
 const UI_SEED = join(__dirname, "..", "..", "..", "..", "..", "platform-ui", "src", "lib", "socialRulesDefaults.json");
-const MIGRATION = join(__dirname, "..", "..", "..", "..", "migrations", "202610301000_social_rules.sql");
+const MIGRATION = join(__dirname, "..", "..", "..", "..", "migrations", "202610301210_social_rules.sql");
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 /** The field a 400 names, or a failure when nothing was refused. */

@@ -1,4 +1,4 @@
--- 202610301000_social_rules.sql — SCP-5 W5-A0: the company rules (SCP-Q41). Each company sets its own SCP-5 rules in Settings, and
+-- 202610301210_social_rules.sql — SCP-5 W5-A0: the company rules (SCP-Q41). Each company sets its own SCP-5 rules in Settings, and
 -- the owner's rulings SCP-Q25 to SCP-Q40 are the seeded defaults (platform-nest/src/modules/social/social-rules-defaults.json).
 -- Contract: docs/FRONTEND-BFF-CONTRACT.md §63.30.3 ("<prefix+7>_social_rules.sql", landing before the other wave-5 files); plan
 -- docs/plans/2026-10-15-social-content-pipeline.md §7 wave 5, row W5-A0. The reader, the validation and the routes are
@@ -148,12 +148,12 @@ BEGIN
        OR (column_name = 'edited_by' AND data_type = 'uuid')
        OR (column_name = 'origin_site' AND data_type = 'text'));
   IF n <> 9 THEN
-    RAISE EXCEPTION '202610301000: social_rule_versions needs its nine NOT NULL columns with their types, found % of 9 right', n;
+    RAISE EXCEPTION '202610301210: social_rule_versions needs its nine NOT NULL columns with their types, found % of 9 right', n;
   END IF;
   SELECT count(*) INTO n FROM information_schema.columns
    WHERE table_schema = current_schema() AND table_name = 'social_rule_versions';
   IF n <> 9 THEN
-    RAISE EXCEPTION '202610301000: social_rule_versions must hold exactly nine columns, found %', n;
+    RAISE EXCEPTION '202610301210: social_rule_versions must hold exactly nine columns, found %', n;
   END IF;
 
   -- The key, the CHECKs with their exact expressions, and the two foreign keys.
@@ -165,13 +165,13 @@ BEGIN
        OR (conname = 'social_rule_versions_section_ck' AND pg_get_constraintdef(oid) LIKE 'CHECK ((section = ANY (ARRAY[''reports''::text, ''ideas''::text, ''cycle''::text, ''audit''::text, ''saved''::text])))')
        OR (conname = 'social_rule_versions_defaults_version_ck' AND contype = 'c'));
   IF n <> 5 THEN
-    RAISE EXCEPTION '202610301000: social_rule_versions needs its key and four CHECKs with their exact expressions, found % of 5', n;
+    RAISE EXCEPTION '202610301210: social_rule_versions needs its key and four CHECKs with their exact expressions, found % of 5', n;
   END IF;
   SELECT count(*) INTO n FROM pg_constraint
    WHERE conrelid = to_regclass('social_rule_versions') AND contype = 'f'
      AND confrelid IN (to_regclass('companies'), to_regclass('users'));
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610301000: social_rule_versions needs its foreign keys to companies and users, found % of 2', n;
+    RAISE EXCEPTION '202610301210: social_rule_versions needs its foreign keys to companies and users, found % of 2', n;
   END IF;
 
   -- The two row triggers: append-only (BEFORE UPDATE OR DELETE) and consecutive (BEFORE INSERT).
@@ -182,25 +182,25 @@ BEGIN
        OR (tg.tgname = 'trg_social_rule_versions_consecutive'
            AND (tg.tgtype & 1) = 1 AND (tg.tgtype & 2) = 2 AND (tg.tgtype & 4) = 4 AND (tg.tgtype & 8) = 0 AND (tg.tgtype & 16) = 0));
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610301000: social_rule_versions needs its BEFORE UPDATE OR DELETE and BEFORE INSERT row triggers, found % of 2', n;
+    RAISE EXCEPTION '202610301210: social_rule_versions needs its BEFORE UPDATE OR DELETE and BEFORE INSERT row triggers, found % of 2', n;
   END IF;
 
   -- The third wall: RLS enabled and forced, one policy, the composed tenant + module predicate on USING and WITH CHECK.
   SELECT count(*) INTO n FROM pg_class
    WHERE oid = to_regclass('social_rule_versions') AND relrowsecurity AND relforcerowsecurity;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610301000: social_rule_versions must have RLS ENABLED and FORCED';
+    RAISE EXCEPTION '202610301210: social_rule_versions must have RLS ENABLED and FORCED';
   END IF;
   SELECT count(*) INTO n FROM pg_policies
    WHERE schemaname = current_schema() AND tablename = 'social_rule_versions' AND policyname = 'tenant_isolation'
      AND qual LIKE '%app_current_tenants()%' AND qual LIKE '%app_module_allowed(''social''::text)%'
      AND with_check LIKE '%app_current_tenants()%' AND with_check LIKE '%app_module_allowed(''social''::text)%';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610301000: social_rule_versions needs the composed tenant + module policy on USING and WITH CHECK';
+    RAISE EXCEPTION '202610301210: social_rule_versions needs the composed tenant + module policy on USING and WITH CHECK';
   END IF;
   SELECT count(*) INTO n FROM pg_policies WHERE schemaname = current_schema() AND tablename = 'social_rule_versions';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610301000: social_rule_versions must carry exactly one policy, found %', n;
+    RAISE EXCEPTION '202610301210: social_rule_versions must carry exactly one policy, found %', n;
   END IF;
 
   -- rules_ref on both tables: text NOT NULL DEFAULT 'default:scp-5a', and its shape CHECK.
@@ -208,7 +208,7 @@ BEGIN
    WHERE table_schema = current_schema() AND table_name IN ('social_reports', 'social_cycles') AND column_name = 'rules_ref'
      AND data_type = 'text' AND is_nullable = 'NO' AND column_default LIKE '''default:scp-5a''%';
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610301000: social_reports and social_cycles need rules_ref text NOT NULL DEFAULT ''default:scp-5a'', found % of 2', n;
+    RAISE EXCEPTION '202610301210: social_reports and social_cycles need rules_ref text NOT NULL DEFAULT ''default:scp-5a'', found % of 2', n;
   END IF;
   SELECT count(*) INTO n FROM pg_constraint
    WHERE contype = 'c'
@@ -216,18 +216,18 @@ BEGIN
        OR (conrelid = to_regclass('social_cycles') AND conname = 'social_cycles_rules_ref_ck'))
      AND pg_get_constraintdef(oid) LIKE '%company:[1-9][0-9]{0,9}|default:[A-Za-z0-9][A-Za-z0-9._-]{0,59}%';
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610301000: social_reports_rules_ref_ck and social_cycles_rules_ref_ck must hold the ref shape, found % of 2', n;
+    RAISE EXCEPTION '202610301210: social_reports_rules_ref_ck and social_cycles_rules_ref_ck must hold the ref shape, found % of 2', n;
   END IF;
 
   -- The walls of the two existing tables are untouched (third wall, forced).
   SELECT count(*) INTO n FROM pg_class
    WHERE oid IN (to_regclass('social_reports'), to_regclass('social_cycles')) AND relrowsecurity AND relforcerowsecurity;
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610301000: social_reports and social_cycles must keep RLS ENABLED and FORCED';
+    RAISE EXCEPTION '202610301210: social_reports and social_cycles must keep RLS ENABLED and FORCED';
   END IF;
   SELECT count(*) INTO n FROM pg_policies
    WHERE schemaname = current_schema() AND tablename IN ('social_reports', 'social_cycles') AND qual LIKE '%app_module_allowed%';
   IF n < 2 THEN
-    RAISE EXCEPTION '202610301000: social_reports and social_cycles must keep their module wall (app_module_allowed) policies';
+    RAISE EXCEPTION '202610301210: social_reports and social_cycles must keep their module wall (app_module_allowed) policies';
   END IF;
 END $$;

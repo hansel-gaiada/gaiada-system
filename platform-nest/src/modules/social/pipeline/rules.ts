@@ -39,7 +39,7 @@
 // off, a category that holds nothing. The seed itself is validated at load, so a bad seed fails the boot.
 //
 // ── VERSIONS ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-// `social_rule_versions` (202610301000_social_rules.sql) is append-only, one row per save, consecutive per company. A save
+// `social_rule_versions` (202610301210_social_rules.sql) is append-only, one row per save, consecutive per company. A save
 // takes `pg_advisory_xact_lock` on 'social_rules:<tenantId>', compares `expectedVersion` (409 `rules_changed`
 // `{detail: {currentVersion}}` when another save came first) and writes version + 1 with the whole document.
 import { BadRequestException, ConflictException, InternalServerErrorException } from "@nestjs/common";

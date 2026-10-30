@@ -172,7 +172,7 @@ export const socialModule: ModuleContract = {
     // SCP-5 W5-A0 (BFF §63.30.3, SCP-Q41) — the company rules: `social_rule_versions` (append-only, consecutive per company, third
     // wall) and `rules_ref` on `social_reports` and `social_cycles` (existing rows read 'default:scp-5a'). Lands before the other
     // wave-5 files.
-    "202610301000_social_rules.sql",
+    "202610301210_social_rules.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is

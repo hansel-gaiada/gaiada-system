@@ -1,4 +1,4 @@
-// SCP-5 W5-A0 — 202610301000_social_rules.sql (BFF §63.30.3) against LIVE Postgres. Needs DATABASE_URL_TEST; skipped without it (the
+// SCP-5 W5-A0 — 202610301210_social_rules.sql (BFF §63.30.3) against LIVE Postgres. Needs DATABASE_URL_TEST; skipped without it (the
 // file-text checks at the top always run). initTestDb() hands us a fully migrated database; the CHECKs and triggers are proved through the
 // superuser pool, which bypasses RLS but never a CHECK, a NOT NULL or a trigger; the WALL through `withTenants` / `withGlobal` (the runtime
 // role, which RLS binds).
@@ -17,7 +17,7 @@ import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setu
 import { createClient, createCompany, createUser } from "../testing/fixtures";
 import { socialModule } from "../modules/social/index";
 
-const MIGRATION = "202610301000_social_rules.sql";
+const MIGRATION = "202610301210_social_rules.sql";
 const PATH = join(__dirname, "..", "..", "migrations", MIGRATION);
 
 describe("W5-A0 · the migration file (no database needed)", () => {
