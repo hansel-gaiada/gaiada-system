@@ -381,8 +381,11 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/agents`
 - `/agents/goals/[goalId]`
 - `/agents/runs/[runId]`
+- `/ai-usage`
 - `/analytics/activity`
 - `/analytics/activity/team`
+- `/analytics/ai-usage`
+- `/analytics/ai-usage/department`
 - `/appraisals`
 - `/appraisals/[id]`
 - `/appraisals/cycles`
