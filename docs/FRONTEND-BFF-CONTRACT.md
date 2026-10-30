@@ -13649,6 +13649,80 @@ Without estimates, every step but `report` falls due on R; the Team dashboard al
 - a new officer on the allocation takes the Ball of every open step; new estimates re-date them;
 - no project: no steps, and the reason; the link locked; two stage actions on posts of one cycle at once never deadlock.
 
+### 63.28 The social audit (SCP-5g) — **STATUS: PLANNED (2026-10-30)**
+
+**What it is.** A twelve-dimension scorecard: each dimension 0 to 5 by halves, an overall score out of 100, a band, the three weakest dimensions as the fixes, and a summary. For an existing client six dimensions are automatic from pipeline data and six are typed; for a prospect all twelve are typed, as plan §8 says. A draft is live; finalizing freezes it as a dated record, such as a new client's baseline (63.29).
+
+**63.28.1 The dimensions** (fixture `platform-nest/src/modules/social/social-audit-dimensions.json` with a byte-identical twin `platform-ui/src/lib/socialAuditDimensions.json` and a test comparing the bytes, the `clientHealthGolden.json` pattern; its `version` is stored on every audit). SCP-Q32, default: the 15 Oct design's twelve, reworded here, each with weight 1; bands `strong` from 75, `fair` from 50, else `needs_work`; all reviewed with the team at SCP-7d.
+
+Automatic for a client, over the audit's month M. Each score is `5 × min(1, actual ÷ expected)` rounded to the half, or none, with its reason, when either side is unknown:
+
+| Key | Label | Actual | Expected |
+|---|---|---|---|
+| `consistency` | Posting consistency | counted posts that went live in M | the client's target (`posts_per_cycle`) |
+| `format_mix` | Format mix | the allocated formats (`formats`) among M's live posts | the number of allocated formats |
+| `engagement_rate` | Engagement against the benchmark | the client's mean rate over M's live posts (63.10's rule) | the median rate of the company's other clients of the same business type over 90 days (all other clients when fewer than three share it) |
+| `reels` | Reels | the mean rate of M's live reels | the mean rate of M's other live feed posts |
+| `stories` | Stories | the weeks touching M with a live story | the ISO weeks touching M |
+| `boosting` | Paid boosting | the cycles of the three months to M with a boost that ran (`stopped`, `completed`) | the cycles among them with an agreed boost budget above 0 |
+
+Typed: `profile` (profile, bio and link), `highlights` (highlights and pinned posts), `visual` (visual consistency), `caption_cta` (captions and calls to action), `community` (answers to comments and messages), `cross_platform` (the client's other networks). A typed score may override an automatic one, with a note. For a prospect all twelve are typed, and the public numbers they were read from are kept as evidence.
+
+**Overall** = `round(100 × Σ(weight × score ÷ 5) ÷ Σ weight)` over the scored dimensions; none when nothing is scored. **Fixes** = the three lowest-scored dimensions, each with the fixture's advice line.
+
+**63.28.2 Data: `<prefix+4>_social_audits.sql`** (social; third wall; no DML; closing assertions). `social_audits`:
+
+| Column | Type and rule |
+|---|---|
+| `id`, `tenant_id` | uuid PK; `ux_social_audits_id_tenant UNIQUE (id, tenant_id)` |
+| `subject` | `text NOT NULL`: `client` or `prospect` |
+| `engagement_id` | `uuid NULL`, composite FK: the client; on a prospect's audit, the client it became (attach, 63.28.4) |
+| `prospect_name` | `text NULL`, 1 to 200: a prospect lives on its audit (SCP-Q33, default) |
+| `business_type` | `text NULL`, ≤ 60: a client's is copied from `client_centre_profiles.business_type` at finalize; a prospect's is typed |
+| `month` | `date NULL`, the first of a month: a client audit's data month |
+| `public_numbers` | `jsonb NOT NULL DEFAULT '{}'`: a prospect's typed `{followers, postsLast30Days, avgLikes, avgComments, lastPostOn}`, each optional (validated by the route) |
+| `scores` | `jsonb NOT NULL DEFAULT '{}'`: the typed part only, `{<key>: {score: 0 to 5 by halves \| null, note ≤ 500}}` |
+| `frozen` | `jsonb NULL`: at finalize, every dimension `{auto, typed, used, evidence, reason}`, the overall, band, fixes and fixture version |
+| `overall`, `band` | `smallint NULL` 0 to 100; `text NULL` `strong`, `fair`, `needs_work`. Set at finalize |
+| `summary`, `summary_via` | `text NULL` ≤ 3,000; `text NULL` `ai`, `template`, `typed` |
+| `status` | `text NOT NULL DEFAULT 'draft'`: `draft` or `final` |
+| `dimensions_version` | `text NOT NULL` |
+| `simulated` | `boolean NOT NULL DEFAULT false`: an automatic score read a simulated row (set at finalize; a draft answers it live) |
+| `created_by` (NOT NULL), `created_at`, `updated_by`, `updated_at`, `finalized_by`, `finalized_at`, `deleted_at`, `deleted_by`, `origin_site` | as usual |
+
+CHECKs (NULL-safe): `subject <> 'client' OR (engagement_id IS NOT NULL AND month IS NOT NULL AND prospect_name IS NULL AND public_numbers = '{}'::jsonb)`; `subject <> 'prospect' OR (prospect_name IS NOT NULL AND month IS NULL)`; `month IS NULL OR month = date_trunc('month', month)::date`; `(status = 'final') = (finalized_at IS NOT NULL)`, the same for `finalized_by` and `frozen`; `status = 'final' OR overall IS NULL`; `(overall IS NULL) = (band IS NULL)`; the value lists and lengths; `(summary IS NULL) = (summary_via IS NULL)`; `(deleted_at IS NULL) = (deleted_by IS NULL)`; `deleted_at IS NULL OR status = 'draft'` (a final audit is a record and is never deleted). `ux_social_audits_client_draft UNIQUE (engagement_id) WHERE subject = 'client' AND status = 'draft' AND deleted_at IS NULL`; index `(tenant_id, subject, status, created_at DESC) WHERE deleted_at IS NULL`.
+
+**63.28.3 Who** (SCP-Q34, default). Reading is `social_post` · `read`. A client's audit is written by its officer, the HoD or the GM: `social_post` · `manage` on the client's would-be post (63.25.2's resource; the superadmin through the wildcard; 403 `not_officer_or_approver`). A prospect's audit is the four's: `social_engagement` · `plan` (403 `not_a_social_approver`). Automation principals are refused every write. No new action (PERMISSION §57).
+
+**63.28.4 Routes** (base 63.0; order 404, 403, 400, 409; the gate is chosen from the audit's subject, read before the body; an unknown audit is 404 `audit_not_found`):
+
+| Route | What it does |
+|---|---|
+| `GET audits?subject=client\|prospect` (`read`) | `{items, canAddProspect}`: every open engagement with its draft's live score, else its latest final's frozen one, else none; and every prospect audit. Worst first, as the design. Item `{auditId \| null, subject, engagementId, name, status, month, overall, band, scored, total: 12, topFix, finalizedAt, simulated}` |
+| `GET audits/:auditId` (`read`) | The scorecard: per dimension `{key, label, kind, weight, auto: {score, evidence, reason} \| null, typed: {score, note} \| null, used}`, the overall, band, fixes and summary, `canWrite`, `canFinalize`. A draft computes its automatic part on the read; a final one answers `frozen` |
+| `POST audits` | `{id?, subject: 'client', engagementId, month?}` (default the last full month) or `{id?, subject: 'prospect', prospectName, businessType?, publicNumbers?}` → 201 `{audit, created}`. A client with a draft answers it with `created: false`, the unique index the backstop; 404 `engagement_not_found` |
+| `PATCH audits/:auditId` | `{scores?, summary?, month?, prospectName?, businessType?, publicNumbers?}` while `draft`, else 409 `audit_final`. A score is 0 to 5 by halves or null (400 `{field: 'scores.<key>.score'}`); overriding an automatic score needs its note (400 `{field: 'scores.<key>.note'}`); a key outside the fixture is 400 |
+| `POST audits/:auditId/ai-summary` | A proposal `{summary, draftedVia: 'ai'\|'template'}` from the scores and the evidence, through the gateway under the reports' numbers guard; nothing is saved |
+| `POST audits/:auditId/finalize` | Freezes the scorecard into `frozen` and sets `overall`, `band`, `simulated`, `business_type` and who finalized it; on a final audit, 200 `{alreadyApplied: true}` |
+| `POST audits/:auditId/attach` | `{engagementId}`: a prospect's audit records the client it became (`plan`, the four); 409 `audit_attached` when already attached to another |
+| `DELETE audits/:auditId` | A draft only, else 409 `audit_final` |
+
+**63.28.5 Pages.** `{D}/social-audit`, the list (worst first: name, client or prospect, score and band, scored of 12, the first fix), and `{D}/social-audit/[auditId]`, the scorecard (the twelve with 0 to 5 by halves, "Use automatic" to drop an override, the evidence, the summary with Draft with AI, Finalize), in one area. Never `{D}/audit`, which is SEO's Site Audit in every department. Registry: a new row `social-audit`, "Audit", in More, not pinned and ungated (the server decides each write); "New prospect audit" shows to the four.
+
+**DEMO_MODE.** A client's draft (automatic scores from the demo metrics, one override), a client's final audit and a prospect's audit, under 63.16's clock pin.
+
+**Agents:**
+
+| Tool | Route | Class |
+|---|---|---|
+| `social.audits`, `social.getAudit` | the two GETs | read |
+| `social.saveAudit` | `POST audits`, `PATCH audits/:auditId` | `write`, impact `low` |
+| `social.finalizeAudit` | `POST audits/:auditId/finalize` | `write`, impact `low`: an internal record that reaches no client |
+
+**Simulated.** An audit whose automatic part read a simulated row says `simulated: true`, and the page draws its SIMULATED mark.
+
+**63.28.6 Proofs:** the fixture twins byte-equal; the six automatic rules on a golden table (no target, no allocated formats, no benchmark peers, no reels, a month touching six weeks, no agreed budget), each with its reason; the overall over the scored dimensions only, and the band edges; the CHECKs with their NULL cases, and one draft per client; a final audit refuses edits and deletion, and its `frozen` stays put when the pipeline moves; another client's officer 403, the client's officer and a seat allowed, the owner refused a client's audit and allowed a prospect's; Draft with AI saves nothing; attach once.
+
 
 ## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
 
