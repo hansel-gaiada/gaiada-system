@@ -3130,6 +3130,9 @@ longer task to a specialist," deliberately NOT per-department personas).
   out into several, which the run-linking model doesn't support). **No `writeActivity()`/`notify()`**
   on the write (same reasoning as ASST-05/06 — the shared tenant feed must never learn a private
   thread exists).
+  **AIP-18 (2026-10-30):** while the owner is soft-stopped the hand-off is stored `held` with
+  `goalId: null` and a `hold` object, and the runner is not called; it starts later on its own, and
+  the owner can cancel it (`POST .../threads/:id/handoffs/:handoffId/cancel`). See §66.11.
 - ✅ **`GET /api/:t/assistant/threads/:id/handoffs`** (`listHandoffs()`,
   `handoffs.ts::listHandoffsForThread`/`refreshHandoff`) — the run-watch view's one read. Owner-only
   (same thread `"read"` action, unchanged). LAZILY syncs each non-terminal row from the runner's own
@@ -14449,3 +14452,101 @@ Payloads carry `title`, `body`, `href`, `entityType`, `severity` (`warning`; `cr
 or `day`, `calls`, `usualDaily`, `agent`). **A runaway notice NAMES the person** (AIP-D19: the owner and IT both see the name) with today's calls and the usual daily
 figure, and never a cost or any text. A budget that jumps past both thresholds in one pass sends both notices, once each. Owners are the holders of a company-scope
 `owner` grant on the company.
+
+### 66.11 The soft stop: a lighter turn, held hand-offs, lifting a department's stop (AIP-18, 2026-10-30, BUILT server only)
+
+Plan `docs/plans/2026-10-27-ai-plan.md` §6.3 item 9; rulings AIP-D1, AIP-D7, AIP-D8, AIP-D9. `platform-nest/src/modules/ai-usage/soft-stop.ts` (new: the decision),
+`modules/assistant/turn-budget.ts` (new: what a stopped turn does), `modules/assistant/{assistant.controller,handoffs,context,stream}.ts`,
+`modules/ai-usage/{budgets.controller,budgets.service,usage-alerts-job}.ts`; migration `202610301340_assistant_handoff_held.sql`. The authorization of the lift is
+PERMISSION-CONTRACT §58. The UI is a later ticket: everything below is what it reads. **The soft stop never refuses a reply.** The gateway's global cap (429,
+"degraded until tomorrow") stays the only hard stop, unchanged.
+
+**When a person is stopped** (`budgetState(tenant, person)`, one cached read per company and person, 60 seconds, never past the stop's own reset):
+
+| Kind | Holds when | Resets |
+|---|---|---|
+| `allowance` | the person's assistant replies TODAY (UTC day; usage rows surface `assistant`, outcome `ok`) are at or above their daily allowance (their override, else `AI_DAILY_REPLY_ALLOWANCE`, 200) | the next 00:00 UTC |
+| `department` | a unit on the path from the person's HOME node (their primary placement, the same one AIP-15a records) up through its ancestors has a budget in mode `soft_stop`, its month-to-date subtree spend (UTC month; unknown costs never count) is at or above its figure, and it was not lifted this month. The NEAREST such unit is named | the first of the next UTC month |
+
+Both at once: `allowance` is reported. A `report` budget never stops anyone (AIP-D7). **It fails open:** if the state cannot be computed (or a cache miss takes
+longer than 1.5 seconds) the turn is NOT stopped. The person who pays is the thread's owner (the usage row's attribution).
+
+**What a stopped turn does** (`POST .../threads/:id/messages` + `GET .../stream`, and `POST /api/:t/assistant/ask`). The decision is made ONCE, at send time, and
+written on the reply's placeholder row as a `parts` entry beside `turn_mode` and `turn_context`; the stream reads it back from the row.
+
+- The gateway call goes on **`tier: "fast"`** with **no `provider` hint and no `providerSession`**, for THIS turn only. The thread's stored `brainTier`,
+  `brainProvider` and Hermes session are not changed; the next unstopped turn uses them again. The usage row records the tier the gateway applied (`fast`).
+- **Retrieval is trimmed:** half the knowledge passages (`ASSISTANT_KNOWLEDGE_TOPK`, 4 becomes 2; never below 1 while retrieval is on) and half the transcript's
+  character budget for this prompt (older messages are left out of the prompt, the newest is always kept; compaction still runs on the full budget, so the
+  thread's stored summary moves exactly as on an unstopped turn).
+- **The part:** `{ "type": "turn_budget", "kind": "allowance" | "department", "unitNodeId"?: "<node>" (department only), "resetsAt": "<ISO instant>" }`, on
+  the placeholder AND kept on the finished reply (`GET .../threads/:id` returns it in the message's `parts`). **Never a figure.**
+- **The stream** emits it ONCE, as the first frame: `event: budget` with `data: { "kind", "unitNodeId"?, "resetsAt" }`. Non-terminal; absent on every unstopped
+  turn. The UI shows ONE line from it, for example "You have reached today's AI allowance; replies continue in a lighter mode until 00:00 UTC" or "Your
+  department has reached its AI budget for October; replies continue in a lighter mode".
+- **`POST assistant/ask`** answers the same object as `turnBudget` (on `ok: true` and `ok: false` answers alike), and only when the turn was stopped: an
+  unstopped answer has no `turnBudget` key.
+- A tool turn (`mode: "tools"`) keeps its part and its frame too, and its retrieval is trimmed; it calls the agent runner, not the gateway, so it has no tier
+  to change.
+- An **unstopped** turn is byte for byte what it was: the same gateway body, no frame, no part.
+
+**The honest consequence of AIP-D1:** while every tier maps to the one model (GLM 5.3 Flash), `fast` costs the same as `standard`. Until a second model is
+approved, a stop's real effects are the trimmed retrieval, the held agent runs and the line in the chat. Nothing else is pretended.
+
+**Held hand-offs** (`POST /api/:t/assistant/threads/:id/handoff`, §18). While the owner is stopped, the request is validated exactly as before (goal, the
+runner's roster, the agent, the OBO principal: the same 400s), then stored with status **`held`** and NO goal id; the runner is NOT called. Answer `201`:
+
+```json
+{ "id": "<handoff id>", "goalId": null, "status": "held",
+  "hold": { "kind": "allowance", "resetsAt": "2026-10-31T00:00:00.000Z" } }
+```
+
+(`hold.kind` is `"allowance"` or `"department"`; a department hold also carries `hold.unitNodeId`.) An unstopped hand-off answers `{ id, goalId, status: "queued" }`
+as before (no `hold` key). **`goalId` is now `string | null`** (null while held, and on a hand-off cancelled or failed while it waited).
+
+- `GET .../threads/:id/handoffs` lists held rows with `status: "held"` and three new fields on EVERY row: `holdKind` (`"allowance"` | `"department"` | null),
+  `holdUnitNodeId` (string | null) and `heldAt` (ISO | null). They are kept after a held hand-off starts (a record of the wait). A held row is never polled from
+  the runner. Suggested UI line: "Waiting: over budget".
+- **It starts** when its owner is no longer stopped: the next UTC day (allowance), the next UTC month (department), a lift, or a raised allowance. The 10-minute
+  AI usage job (§66.10) checks every company's held hand-offs after its notices, and the lift route checks right after a lift. The owner's state is read fresh,
+  and a failure to read it keeps the hand-off held. It is then posted to the runner exactly as a fresh hand-off is (the owner's own envelope,
+  `fileOnSuspend: false`) and becomes `queued` with its goal id. **It is posted once**, even when two releases race (a conditional update from `held` claims
+  it). If the runner is unreachable or answers 5xx, 429 or 408, it stays held for the next try; a 4xx refusal or an agent no longer in the roster ends it as
+  `failed` with `errorKind` `release_refused` or `agent_unavailable`. While the owner is still stopped, `holdKind` and `holdUnitNodeId` are kept true (an
+  allowance hold can become a department hold).
+- **Cancel (new):** `POST /api/:t/assistant/threads/:id/handoffs/:handoffId/cancel`, no body. Owner-only (the thread's Cerbos `handoff` action, the same as
+  creating one). `200` answers the row with `status: "cancelled"`; `409 not_held` when the hand-off is not held (a started run belongs to the runner; this route
+  never stops one); `404` when the id is not a hand-off of this thread; `403` for anyone but the thread's owner. A cancelled hand-off never starts.
+
+**Lifting a department's stop (new):** `POST /api/:t/ai-usage/budgets/units/:unitNodeId/lift`, no body.
+
+- **Who:** `manage` (the owner, the superadmin: any unit) is asked FIRST; else `lift_stop` on THAT unit: its `org_unit_lead`, or the lead of an enclosing unit
+  (`unitAncestors`, computed with the tenant). A sibling unit's head, company_admin, the GM, a member, a bot and automation are 403.
+- **What:** sets `stop_lifted_month` to the current UTC month on the unit's `soft_stop` budget. The lift lasts for the rest of that UTC month; next month's spend
+  can stop the unit again. It writes ONE `activities` row (entity type `ai_budget`, verb `lifted`, entity id null, metadata `scope: "unit"`, `unitNodeId`,
+  `month`, `previousStopLiftedMonth`; ids only). Lifting again in the same month answers `changed: false` and writes nothing.
+- **Then**, after the commit: this process forgets its cached stop states for the company (another replica catches up within 60 seconds), and the held
+  hand-offs of people under the unit are released (each starts only if its owner is no longer stopped: someone also over their own allowance stays held). A
+  release problem never fails the lift. The answer waits for the release.
+- Answer `200 { "month": "YYYY-MM", "changed": true | false, "budget": <the unit's budget line, §66.8, with "stopLifted": true> }`.
+
+| Status | When |
+|---|---|
+| 200 | an allowed caller, a unit with a `soft_stop` budget (`changed` says whether anything moved) |
+| 403 | everyone else, **before the unit is looked at**: a head naming an unknown unit gets 403 (no ancestry, no grant matches) |
+| 404 `unit_not_found` | an allowed caller (the owner) names a node that is not in this company's org tree |
+| 404 `no_soft_stop` | the unit has no budget, or a `report` budget: there is no stop to lift |
+
+The reads already report `canLiftStop` (§66.3 to §66.5: `manage`, or on a unit `manage || lift_stop`) and each unit budget line's `stopLifted` (§66.8). An owner's
+budget or allowance edit (§66.9) also clears this process's cached stop states, so a raised figure is seen at the next send.
+
+**Migration `202610301340_assistant_handoff_held.sql`:** the `assistant_handoffs.status` CHECK is redeclared WHOLE as `queued, running, ok, suspended,
+budget_exhausted, failed, interrupted, cancelled, held` (0084's eight, all kept, plus `held`; a self-check asserts every value); `goal_id` becomes nullable,
+allowed only on a row that was held and is `held`, `cancelled` or `failed`; new columns `hold_kind`, `hold_unit_node_id`, `held_at` (one shape CHECK); the
+partial index `ix_assistant_handoffs_held`. No data change.
+
+**Tests:** pure `modules/ai-usage/soft-stop.test.ts` (the decision table, the reset instants, the ancestor walk, the strict and cached reads),
+`modules/assistant/turn-budget.test.ts` (the part, the trims, the routing, `assembleContext` under the trims) and
+`modules/assistant/assistant-handoff-held-migration.test.ts` run anywhere; `modules/assistant/assistant-soft-stop.test.ts` (send path, ask, held hand-offs,
+cancel, release by the job, the release race, the live CHECKs) and `modules/ai-usage/lift.http.test.ts` (the lift matrix and release on lift) run on the
+Linux CI gate and skip without Postgres and Cerbos.

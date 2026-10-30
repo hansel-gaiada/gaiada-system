@@ -3416,7 +3416,7 @@ added to `Resource` AND to the `resourcePayload()` allow-list (an attribute miss
 | `read_company` | `company_admin`; **its own rule** for the new seat role `ai_usage_gm_seat` (the GM); the owner through `perm_ai_usage_read_company` | company totals by department, model, surface and day; NO per-person lines |
 | `read_people` | the owner ONLY, through `perm_ai_usage_read_people` (no role rule) | per-person lines in EVERY unit |
 | `manage` | the owner ONLY, through `perm_ai_usage_manage` (no role rule) | budgets, the alert figure, modes, allowances, lifting any stop (routes: AIP-17b, AIP-18) |
-| `lift_stop` | **its own rule** for `org_unit_lead` over `unitAncestors` | lift one unit's soft stop (route: AIP-18; the handler asks `manage` first) |
+| `lift_stop` | **its own rule** for `org_unit_lead` over `unitAncestors` | lift one unit's soft stop: `POST /api/:t/ai-usage/budgets/units/:unitNodeId/lift` (AIP-18, BUILT 2026-10-30; the handler asks `manage` first, then `lift_stop` with `unitAncestors` computed WITH the tenant; BFF §66.11) |
 
 Every rule but the wildcard is `variables.inTenant && variables.notLow` (the four mirrors add `inRoot`). **`platform_admin`** keeps the house
 wildcard (the superadmin of AIP-D16 and AIP-D18). **Nobody reads a peer:** a member reads only their own line, a head reads the people of their
@@ -3444,6 +3444,12 @@ attribute-dependent rule and the lead holds both keys in its bundle, so a flat m
 **Handlers** (`modules/ai-usage/reads.controller.ts`, BFF §66): one advisory `checkActions` over the six actions, then `authorize()` on the
 action that decides (so the denial, its audit row and the delegation intersection are the house ones); the month is validated after it (a
 refused caller always gets 403, never 400). The unit route decides `read_people`, else `read_unit`, else `read_company` (no `people` key), else 403.
+
+**The lift route (AIP-18, 2026-10-30)** (`modules/ai-usage/budgets.controller.ts` `liftUnit`, BFF §66.11): the unit's ancestry is read WITH the tenant
+first; a bare `check` probes `manage` (no audit row for a head who lacks it), then `authorize()` runs on `manage` when held, else on `lift_stop`, the
+AIP-13b key split. So the owner and the superadmin lift any unit, the head of the unit or of an enclosing unit lifts that unit, and a sibling's head,
+company_admin, the GM, a member, a bot and automation are 403. Only after the decision: 404 `unit_not_found` (not in this company's tree) or
+404 `no_soft_stop` (no budget, or a `report` budget). No policy, catalog or bundle change: the kind already had both actions.
 
 **Bundles:**
 

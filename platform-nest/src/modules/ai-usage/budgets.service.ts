@@ -310,3 +310,35 @@ export async function putAllowance(c: PoolClient, tenantId: string, actorId: str
   await activity(c, tenantId, actorId, previous === null ? "created" : "updated", "ai_allowance", userId, { dailyReplies, previousDailyReplies: previous });
   return { dailyReplies, changed: true };
 }
+
+// ── AIP-18: lifting a department's soft stop ─────────────────────────────────────────────────────────────────────────────────────
+
+export interface LiftResult {
+  /** False when the unit has no `soft_stop` budget (the route answers 404). */
+  found: boolean;
+  /** False when the stop was already lifted for this month: nothing changed and nothing is written. */
+  changed: boolean;
+}
+
+/**
+ * Lift one unit's soft stop for the rest of `month` (`YYYY-MM`, the current UTC month): `stop_lifted_month` on its `soft_stop` row. A unit
+ * with no budget, or a `report` budget, has no stop to lift (`found` false). Lifting twice in a month changes nothing the second time and
+ * writes no second activity row. A lift lasts until the month ends: the next month's spend can stop the unit again.
+ */
+export async function liftUnitStop(c: PoolClient, tenantId: string, actorId: string, unitNodeId: string, month: string): Promise<LiftResult> {
+  const prev = await c.query<{ stop_lifted_month: string | null }>(
+    `SELECT stop_lifted_month FROM ai_budgets WHERE tenant_id = $1 AND scope = 'unit' AND unit_node_id = $2 AND mode = 'soft_stop' FOR UPDATE`,
+    [tenantId, unitNodeId],
+  );
+  if (prev.rows.length === 0) return { found: false, changed: false };
+  if (prev.rows[0].stop_lifted_month === month) return { found: true, changed: false };
+  await c.query(
+    `UPDATE ai_budgets SET stop_lifted_month = $3, updated_by = $4, updated_at = now()
+      WHERE tenant_id = $1 AND scope = 'unit' AND unit_node_id = $2 AND mode = 'soft_stop'`,
+    [tenantId, unitNodeId, month, actorId],
+  );
+  await activity(c, tenantId, actorId, "lifted", "ai_budget", null, {
+    scope: "unit", unitNodeId, month, previousStopLiftedMonth: prev.rows[0].stop_lifted_month,
+  });
+  return { found: true, changed: true };
+}

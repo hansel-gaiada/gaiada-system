@@ -784,7 +784,10 @@ export type AssistantSseEvent =
   // ASST-18 — emitted once, right after context assembly, BEFORE the first `token` (context
   // assembly, including retrieval, has already finished by the time any of this route's other
   // frames could be written). Non-terminal, like the ASST-17 trio above.
-  | "citations";
+  | "citations"
+  // AIP-18 — the soft stop's one line: emitted once, first, when the turn's placeholder carries a `turn_budget` part
+  // (`{ kind, unitNodeId?, resetsAt }`, never a figure). Non-terminal. Absent on every unstopped turn.
+  | "budget";
 
 export function sseLine(event: AssistantSseEvent, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -812,12 +815,16 @@ export async function persistGenerationOutcome(input: {
   messageId: string;
   result: RelayResult;
   citations: { sourceRef: string; text: string }[];
+  /** AIP-18: parts the turn carried from its placeholder and keeps on the finished reply (the `turn_budget` part of a stopped turn).
+   *  Absent or empty leaves the persisted `parts` byte for byte as before. */
+  keepParts?: unknown[];
 }): Promise<void> {
   const { tenantId, threadId, messageId, result, citations } = input;
   const parts = JSON.stringify([
     ...usageMetaParts(result),
     ...citationParts(citations),
     ...sessionResumeMismatchParts(result),
+    ...(input.keepParts ?? []),
   ]);
   await withTenants(
     [tenantId],

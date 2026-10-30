@@ -324,6 +324,10 @@ export async function assembleContext(
      *  row (`readTurnContext`). Only ever passed when the company's flag is on; absent or null leaves the prompt and the
      *  knowledge call exactly as they were. */
     turnContext?: TurnContext | null;
+    /** AIP-18 (soft stop) — a smaller character budget for THIS prompt's transcript only. Compaction still folds on `charBudget` (so the
+     *  thread's stored summary moves exactly as on an unstopped turn); the kept messages are then cut, oldest first, to fit this budget,
+     *  always keeping the newest message. Absent leaves the prompt exactly as before. */
+    promptCharBudget?: number;
   },
 ): Promise<AssembledContext> {
   const budget = opts?.charBudget ?? config.assistant.contextCharBudget;
@@ -359,6 +363,13 @@ export async function assembleContext(
     summary = newSummary;
     const uptoSeq = toFold[toFold.length - 1].seq;
     compactionUpdate = { summary: newSummary, uptoSeq };
+  }
+
+  // AIP-18: a stopped turn's lighter prompt. Nothing is folded or stored for it: the older kept messages are simply left out of THIS prompt
+  // (they stay in the transcript, and the next unstopped turn sees them again). The newest message is always kept, as above.
+  const promptBudget = opts?.promptCharBudget;
+  if (promptBudget !== undefined && Number.isFinite(promptBudget) && promptBudget < budget) {
+    while (kept.length > 1 && renderTranscript(kept).length > promptBudget) kept = kept.slice(1);
   }
 
   // ASST-19: the quarantine gate — `fetchConfirmedMemory` reads ONLY `confirmed_at IS NOT NULL`

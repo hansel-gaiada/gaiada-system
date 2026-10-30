@@ -49,10 +49,30 @@
 // this handoff's one-and-only suspension" check, taken under the SAME per-thread advisory lock
 // `sendMessage` uses (`thread-lock.ts`) so a concurrent chat turn on the same thread can never
 // collide on `assistant_messages`' `UNIQUE (thread_id, seq)`.
+//
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// AIP-18 — HELD HAND-OFFS (docs/plans/2026-10-27-ai-plan.md §6.3 item 9; BFF §66.11; migration 202610301340)
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// While the chatting user is soft-stopped (their daily allowance, or their department's `soft_stop` budget), a hand-off starts NO agent run:
+// `createHandoff` validates everything exactly as before (the goal, the runner's roster, the agent, the OBO envelope's principal) and then,
+// instead of posting the goal, stores the row with status `held`, NO goal id, and why (`hold_kind`, `hold_unit_node_id`). A held hand-off:
+//   * STARTS (`releaseHeldHandoffs`) when its owner is no longer stopped (a lift, the next UTC month, the next UTC day, a raised allowance).
+//     The 10-minute AI usage job asks for every company, and the lift route asks right after a lift. The owner's state is read FRESH and
+//     STRICT (`computeBudgetState` throws on failure, and a failure keeps the row held). It is posted to the runner by `postGoal`, the same
+//     function and the same body a fresh hand-off uses.
+//   * is posted ONCE, even with two releasers racing: the claim is a conditional `UPDATE .. WHERE status = 'held'` inside the transaction
+//     that then posts the goal and stores its id. A second releaser's claim waits on the row lock and, once the first commits, matches no row
+//     (status is now `queued`). If the post fails before the runner accepted it (no runner, a network error, a 5xx), the transaction rolls
+//     back and the row stays held for the next try; a 4xx refusal or an agent that left the roster ends it as `failed` (`error_kind`
+//     `release_refused` / `agent_unavailable`) rather than retrying it forever.
+//   * can be CANCELLED by its owner (`cancelHeldHandoff`, `POST .../handoffs/:handoffId/cancel`): only while it is held (a started run is the
+//     runner's). The same row lock makes a cancel and a release exclusive: whichever commits first wins, the other matches no row.
+//   * is listed with its status wherever hand-offs are listed (`GET .../handoffs`), and is never polled from the runner (it has no goal).
 import type { PoolClient } from "pg";
 import { config } from "../../config";
-import { newId } from "../../db";
+import { newId, withTenants } from "../../db";
 import { BadRequestException } from "@nestjs/common";
+import { computeBudgetState, type BudgetState, type BudgetStop } from "../ai-usage/soft-stop";
 import { ensurePlatformSelfLink, oboEnvelopeFor, redactToolArgs, type ChattingUser } from "./broker";
 import { intentTtlMs, storableIntentArgs } from "./write-intents";
 import { lockAssistantThread } from "./thread-lock";
@@ -160,21 +180,31 @@ export interface HandoffRow {
   ownerUserId: string;
   agent: string;
   goalText: string;
-  goalId: string;
+  /** The runner's goal id; null only while the hand-off is `held` (AIP-18) or was cancelled while held. */
+  goalId: string | null;
   runId: string | null;
   status: string;
   outcome: string | null;
   errorKind: string | null;
   approvalId: string | null;
+  /** AIP-18: why the hand-off was held (`allowance` | `department`), kept after it starts; null for one that was never held. */
+  holdKind: string | null;
+  /** AIP-18: the stopped unit, for a `department` hold. */
+  holdUnitNodeId: string | null;
+  /** AIP-18: when it was held. */
+  heldAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-const HANDOFF_SELECT = `
-  SELECT id, tenant_id AS "tenantId", thread_id AS "threadId", owner_user_id AS "ownerUserId",
+const HANDOFF_COLS = `id, tenant_id AS "tenantId", thread_id AS "threadId", owner_user_id AS "ownerUserId",
          agent, goal_text AS "goalText", goal_id AS "goalId", run_id AS "runId", status, outcome,
          error_kind AS "errorKind", approval_id AS "approvalId",
-         created_at AS "createdAt", updated_at AS "updatedAt"
+         hold_kind AS "holdKind", hold_unit_node_id AS "holdUnitNodeId", held_at AS "heldAt",
+         created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+const HANDOFF_SELECT = `
+  SELECT ${HANDOFF_COLS}
   FROM assistant_handoffs`;
 
 export async function fetchHandoffsForThread(c: PoolClient, threadId: string): Promise<HandoffRow[]> {
@@ -335,18 +365,77 @@ async function harvestSuspendedIntent(c: PoolClient, row: HandoffRow, intent: Ru
   );
 }
 
+/** What the runner said to one goal post. `retry`: nothing was started and asking again later may work (a 5xx, a 429, a 408). */
+type PostGoalResult = { ok: true; goalId: string } | { ok: false; retry: boolean; message: string };
+
+/**
+ * Post ONE goal to the runner: the body every hand-off sends, fresh or released (AIP-18: "posted exactly as a fresh one would be"). The
+ * envelope is the caller's `oboEnvelopeFor` result, never anything body-supplied. Throws only on a transport failure (the runner was not
+ * reached, or the timeout fired); every HTTP answer comes back as a result.
+ */
+async function postGoal(
+  input: { tenantId: string; goal: string; agent: string; envelope: ReturnType<typeof oboEnvelopeFor> },
+  opts: FetchOpts & { timeoutMs?: number },
+): Promise<PostGoalResult> {
+  const base = runnerBase(opts);
+  const token = opts.runnerToken ?? config.services.agents.token;
+  const init: RequestInit = {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({
+      tenantId: input.tenantId,
+      goal: input.goal,
+      agent: input.agent,
+      // The ONE envelope, from the ONE function that can spell one. Never body-supplied.
+      envelope: input.envelope,
+      requestedBy: input.envelope.externalId,
+      // 2026-08-07 (closing the confirm-chip bypass, see this file's header) — a handoff's write
+      // half now defers filing exactly like the chat-path tool turn (`broker.ts`'s `runToolTurn`):
+      // a `high_write` suspends as a DRAFT the owner must confirm in-thread, never filed on their
+      // behalf just because they clicked "hand off". Harmless for a read-only agent or a goal that
+      // never suspends (the flag is only ever consulted on the write-gate's throw).
+      fileOnSuspend: false,
+    }),
+  };
+  const res = opts.timeoutMs !== undefined
+    ? await timedFetch(`${base}/goals`, { ...opts, timeoutMs: opts.timeoutMs }, init)
+    : await (opts.fetchImpl ?? fetch)(`${base}/goals`, init);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    return {
+      ok: false,
+      retry: res.status >= 500 || res.status === 429 || res.status === 408,
+      message: `the agent runner refused the handoff (HTTP ${res.status})${text ? `: ${text}` : ""}`,
+    };
+  }
+  const body = (await res.json()) as { id?: unknown };
+  // A 2xx with no id may still have queued a goal: never retried (a retry could start the run twice).
+  if (typeof body?.id !== "string" || !body.id) return { ok: false, retry: false, message: "the agent runner returned no goal id" };
+  return { ok: true, goalId: body.id };
+}
+
+/** AIP-18: a held hand-off's answer carries why, and when the stop ends on its own (never a figure). */
+export interface HandoffHold {
+  kind: BudgetStop["kind"];
+  unitNodeId?: string;
+  resetsAt: string;
+}
+
 /**
  * Create a handoff: validate the agent against the REAL registry, mint the OBO envelope for the
  * CHATTING USER (never any other identity), submit the goal to the runner, and persist the link row.
  *
  * `ownerId` is the caller's own `req.principal.userId` — the route's `authorize(..., "handoff")` has
  * already proven they own `threadId` before this is ever called (see assistant.controller.ts).
+ *
+ * AIP-18: with `opts.stop` (the owner is soft-stopped, decided by the route from the cached `budgetState`), every check above still runs,
+ * then the row is stored `held` with no goal and the runner is NOT called. See this file's AIP-18 header for how it starts later.
  */
 export async function createHandoff(
   c: PoolClient,
   input: { tenantId: string; threadId: string; ownerId: string; agent: string; goal: string },
-  opts: FetchOpts & { ensureLink?: (userId: string) => Promise<void> } = {},
-): Promise<{ id: string; goalId: string; status: string }> {
+  opts: FetchOpts & { ensureLink?: (userId: string) => Promise<void>; stop?: BudgetStop | null } = {},
+): Promise<{ id: string; goalId: string | null; status: string; hold?: HandoffHold }> {
   const goal = input.goal.trim();
   if (!goal) throw new BadRequestException("goal is required");
   if (goal.length > MAX_GOAL_LENGTH) throw new BadRequestException(`goal exceeds max length (${MAX_GOAL_LENGTH})`);
@@ -365,43 +454,196 @@ export async function createHandoff(
 
   const user: ChattingUser = { userId: input.ownerId, tenantId: input.tenantId };
   const envelope = oboEnvelopeFor(user); // throws ServicePrincipalRefusedError on anything but a real user id
+
+  // AIP-18: soft-stopped — stored held, nothing posted. The goal text is kept exactly as a fresh hand-off stores it.
+  if (opts.stop) {
+    const stop = opts.stop;
+    const unitNodeId = stop.kind === "department" ? stop.unitNodeId ?? null : null;
+    const id = newId();
+    await c.query(
+      `INSERT INTO assistant_handoffs
+         (id, tenant_id, thread_id, owner_user_id, agent, goal_text, goal_id, status, hold_kind, hold_unit_node_id, held_at, origin_site)
+       VALUES ($1,$2,$3,$4,$5,$6,NULL,'held',$7,$8,now(),$9)`,
+      [id, input.tenantId, input.threadId, input.ownerId, input.agent, goal, stop.kind, unitNodeId, config.originSite],
+    );
+    return { id, goalId: null, status: "held", hold: { kind: stop.kind, ...(unitNodeId ? { unitNodeId } : {}), resetsAt: stop.resetsAt } };
+  }
+
   await (opts.ensureLink ?? ensurePlatformSelfLink)(input.ownerId);
 
-  const base = runnerBase(opts);
-  const token = opts.runnerToken ?? config.services.agents.token;
-  const fetchImpl = opts.fetchImpl ?? fetch;
-  const res = await fetchImpl(`${base}/goals`, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify({
-      tenantId: input.tenantId,
-      goal,
-      agent: input.agent,
-      // The ONE envelope, from the ONE function that can spell one. Never body-supplied.
-      envelope,
-      requestedBy: envelope.externalId,
-      // 2026-08-07 (closing the confirm-chip bypass, see this file's header) — a handoff's write
-      // half now defers filing exactly like the chat-path tool turn (`broker.ts`'s `runToolTurn`):
-      // a `high_write` suspends as a DRAFT the owner must confirm in-thread, never filed on their
-      // behalf just because they clicked "hand off". Harmless for a read-only agent or a goal that
-      // never suspends (the flag is only ever consulted on the write-gate's throw).
-      fileOnSuspend: false,
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new BadRequestException(`the agent runner refused the handoff (HTTP ${res.status})${text ? `: ${text}` : ""}`);
-  }
-  const body = (await res.json()) as { id?: unknown };
-  if (typeof body?.id !== "string" || !body.id) throw new BadRequestException("the agent runner returned no goal id");
+  const posted = await postGoal({ tenantId: input.tenantId, goal, agent: input.agent, envelope }, opts);
+  if (!posted.ok) throw new BadRequestException(posted.message);
 
   const id = newId();
   await c.query(
     `INSERT INTO assistant_handoffs (id, tenant_id, thread_id, owner_user_id, agent, goal_text, goal_id, status, origin_site)
      VALUES ($1,$2,$3,$4,$5,$6,$7,'queued',$8)`,
-    [id, input.tenantId, input.threadId, input.ownerId, input.agent, goal, body.id, config.originSite],
+    [id, input.tenantId, input.threadId, input.ownerId, input.agent, goal, posted.goalId, config.originSite],
   );
-  return { id, goalId: body.id, status: "queued" };
+  return { id, goalId: posted.goalId, status: "queued" };
+}
+
+// ── AIP-18: cancel and release a held hand-off ──────────────────────────────────────────────────────
+
+/**
+ * The owner cancels a HELD hand-off of this thread (the route has already authorized the thread's owner). `not_found` for an id that is not
+ * a hand-off of this thread (or not a uuid); `not_held` for one that already started or ended (a started run is the runner's to stop).
+ * The conditional UPDATE is the whole race story: a release that claimed the row first makes this match nothing, and the reverse.
+ */
+export async function cancelHeldHandoff(c: PoolClient, threadId: string, handoffId: string): Promise<HandoffRow | "not_found" | "not_held"> {
+  if (!UUID_RE.test(handoffId)) return "not_found";
+  const r = await c.query<HandoffRow>(
+    `UPDATE assistant_handoffs SET status = 'cancelled', updated_at = now()
+      WHERE id = $1 AND thread_id = $2 AND status = 'held'
+      RETURNING ${HANDOFF_COLS}`,
+    [handoffId, threadId],
+  );
+  if (r.rows[0]) return r.rows[0];
+  const exists = await c.query(`SELECT 1 FROM assistant_handoffs WHERE id = $1 AND thread_id = $2`, [handoffId, threadId]);
+  return (exists.rowCount ?? 0) > 0 ? "not_held" : "not_found";
+}
+
+/** How long a release waits for the runner to accept one goal before rolling back (the row then stays held for the next try). */
+export const RELEASE_POST_TIMEOUT_MS = 15_000;
+
+export interface ReleaseDeps extends FetchOpts {
+  ensureLink?: (userId: string) => Promise<void>;
+  /** The owner's state, read fresh and STRICT (default `computeBudgetState`: it throws, and a throw keeps the hand-offs held). */
+  state?: (tenantId: string, userId: string) => Promise<BudgetState>;
+}
+
+export interface ReleaseResult {
+  /** Posted to the runner by this call. */
+  started: number;
+  /** Still held: the owner is still stopped (the reason is refreshed when it changed). */
+  stillHeld: number;
+  /** Ended as `failed`: the runner refused the goal (4xx) or the agent left the roster. */
+  failed: number;
+  /** Claimed by someone else first (another releaser, or the owner's cancel). */
+  skipped: number;
+  /** A state read or a post that failed: those stay held for the next try. */
+  errors: number;
+}
+
+/**
+ * Start ONE held hand-off, at most once. One transaction: claim (`UPDATE .. WHERE status = 'held'`, which takes the row lock: a second
+ * releaser or a cancel waits on it and then matches nothing), check the runner and the agent, post the goal exactly as a fresh hand-off does,
+ * store its id. A transport failure or a retryable answer THROWS, which rolls the claim back: the row stays held.
+ */
+export async function startHeldHandoff(tenantId: string, handoffId: string, deps: ReleaseDeps = {}): Promise<"started" | "skipped" | "failed"> {
+  return withTenants(
+    [tenantId],
+    async (c) => {
+      const claimed = await c.query<HandoffRow>(
+        `UPDATE assistant_handoffs SET updated_at = now() WHERE id = $1 AND status = 'held' RETURNING ${HANDOFF_COLS}`,
+        [handoffId],
+      );
+      const row = claimed.rows[0];
+      if (!row) return "skipped" as const;
+      const fail = async (errorKind: string) => {
+        await c.query(`UPDATE assistant_handoffs SET status = 'failed', error_kind = $2, updated_at = now() WHERE id = $1`, [row.id, errorKind]);
+        return "failed" as const;
+      };
+      const roster = await fetchRoster(deps);
+      if (!roster.runnerConfigured) throw new Error("the agent runner is not configured or not reachable; the hand-off stays held");
+      if (!roster.agents.some((a) => a.name === row.agent)) return fail("agent_unavailable");
+      const envelope = oboEnvelopeFor({ userId: row.ownerUserId, tenantId: row.tenantId });
+      await (deps.ensureLink ?? ensurePlatformSelfLink)(row.ownerUserId);
+      const posted = await postGoal(
+        { tenantId: row.tenantId, goal: row.goalText, agent: row.agent, envelope },
+        { ...deps, timeoutMs: deps.timeoutMs ?? RELEASE_POST_TIMEOUT_MS },
+      );
+      if (!posted.ok) {
+        if (posted.retry) throw new Error(posted.message);
+        return fail("release_refused");
+      }
+      await c.query(`UPDATE assistant_handoffs SET status = 'queued', goal_id = $2, updated_at = now() WHERE id = $1`, [row.id, posted.goalId]);
+      return "started" as const;
+    },
+    { modules: ["assistant"] },
+  );
+}
+
+/**
+ * Release the held hand-offs of one company whose owner is no longer stopped. `unitNodeIds` narrows to hand-offs held because of one of
+ * those units (the lift route passes the lifted unit's subtree); absent, every held hand-off of the company is looked at (the job). Each
+ * owner's state is read fresh and strict, once per call. Never throws: a failure is counted and the hand-off stays held.
+ */
+export async function releaseHeldHandoffs(
+  tenantId: string,
+  filter: { unitNodeIds?: string[] } = {},
+  deps: ReleaseDeps = {},
+): Promise<ReleaseResult> {
+  const out: ReleaseResult = { started: 0, stillHeld: 0, failed: 0, skipped: 0, errors: 0 };
+  let rows: HandoffRow[];
+  try {
+    rows = await withTenants(
+      [tenantId],
+      async (c) => {
+        const r = filter.unitNodeIds
+          ? await c.query<HandoffRow>(
+              `${HANDOFF_SELECT} WHERE tenant_id = $1 AND status = 'held' AND hold_kind = 'department' AND hold_unit_node_id = ANY($2::text[])
+                ORDER BY created_at, id`,
+              [tenantId, filter.unitNodeIds],
+            )
+          : await c.query<HandoffRow>(`${HANDOFF_SELECT} WHERE tenant_id = $1 AND status = 'held' ORDER BY created_at, id`, [tenantId]);
+        return r.rows;
+      },
+      { modules: ["assistant"] },
+    );
+  } catch (err) {
+    console.error(`[AIP-18] listing held hand-offs of company ${tenantId} failed:`, (err as Error)?.message ?? err);
+    out.errors++;
+    return out;
+  }
+  if (rows.length === 0) return out;
+
+  const byOwner = new Map<string, HandoffRow[]>();
+  for (const r of rows) byOwner.set(r.ownerUserId, [...(byOwner.get(r.ownerUserId) ?? []), r]);
+  const readState = deps.state ?? ((t: string, u: string) => computeBudgetState(t, u));
+
+  for (const [owner, held] of byOwner) {
+    let state: BudgetState;
+    try {
+      state = await readState(tenantId, owner);
+    } catch (err) {
+      console.error(`[AIP-18] budget state of a hand-off owner could not be read; ${held.length} hand-off(s) stay held:`, (err as Error)?.message ?? err);
+      out.errors += held.length;
+      continue;
+    }
+    if (state.stopped) {
+      // Still stopped: keep them held, and keep the reason true (an allowance hold may have become a department one, or another unit).
+      const kind = state.stop.kind;
+      const unit = kind === "department" ? state.stop.unitNodeId ?? null : null;
+      try {
+        await withTenants(
+          [tenantId],
+          (c) =>
+            c.query(
+              `UPDATE assistant_handoffs SET hold_kind = $2, hold_unit_node_id = $3, updated_at = now()
+                WHERE id = ANY($1::uuid[]) AND status = 'held'
+                  AND (hold_kind IS DISTINCT FROM $2 OR hold_unit_node_id IS DISTINCT FROM $3)`,
+              [held.map((h) => h.id), kind, unit],
+            ),
+          { modules: ["assistant"] },
+        );
+      } catch (err) {
+        console.error("[AIP-18] refreshing a hold's reason failed:", (err as Error)?.message ?? err);
+      }
+      out.stillHeld += held.length;
+      continue;
+    }
+    for (const h of held) {
+      try {
+        const r = await startHeldHandoff(tenantId, h.id, deps);
+        out[r]++;
+      } catch (err) {
+        out.errors++;
+        console.error(`[AIP-18] starting held hand-off ${h.id} failed; it stays held:`, (err as Error)?.message ?? err);
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -411,6 +653,8 @@ export async function createHandoff(
  * last-known state, which is honest (the UI already shows "queued"/"running" as in-flight).
  */
 export async function refreshHandoff(c: PoolClient, row: HandoffRow, opts: FetchOpts = {}): Promise<HandoffRow> {
+  // AIP-18: a held hand-off (or one cancelled while held) has no goal at the runner: there is nothing to ask about.
+  if (row.status === "held" || !row.goalId) return row;
   if (!NON_TERMINAL_GOAL_STATUSES.has(row.status) && row.runId) return row; // nothing left to learn
   const base = runnerBase(opts);
   const token = opts.runnerToken ?? config.services.agents.token;
@@ -435,10 +679,7 @@ export async function refreshHandoff(c: PoolClient, row: HandoffRow, opts: Fetch
       `UPDATE assistant_handoffs
          SET status = $1, outcome = $2, error_kind = $3, approval_id = $4, run_id = COALESCE($5, run_id), updated_at = now()
          WHERE id = $6
-         RETURNING id, tenant_id AS "tenantId", thread_id AS "threadId", owner_user_id AS "ownerUserId",
-                   agent, goal_text AS "goalText", goal_id AS "goalId", run_id AS "runId", status, outcome,
-                   error_kind AS "errorKind", approval_id AS "approvalId",
-                   created_at AS "createdAt", updated_at AS "updatedAt"`,
+         RETURNING ${HANDOFF_COLS}`,
       [goal.status, goal.outcome ?? null, goal.errorKind ?? null, goal.approvalId ?? null, runId ?? null, row.id],
     );
     return updated.rows[0] ?? row;

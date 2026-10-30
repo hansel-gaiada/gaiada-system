@@ -51,12 +51,14 @@ import {
 import { assembleCapabilities } from "./capabilities";
 import { getBrains } from "./brains";
 import { resolveCitation } from "./citations";
-import { createHandoff, fetchEpisodicHistory, fetchRoster, listHandoffsForThread } from "./handoffs";
+import { cancelHeldHandoff, createHandoff, fetchEpisodicHistory, fetchRoster, listHandoffsForThread } from "./handoffs";
 import { confirmWriteIntent, dismissWriteIntent, reapExpiredIntents, storableIntentArgs, type ToolCallIntent } from "./write-intents";
 import { notifyApprovalFiled } from "../../core/approval-filing";
 import { deriveServerThreadTitle } from "./thread-title";
 import { lockAssistantThread } from "./thread-lock";
 import { deptContextEnabled, readRawContext, readTurnContext, resolveTurnContext, type TurnContext } from "./department-context";
+import { budgetState } from "../ai-usage/soft-stop";
+import { readTurnBudget, stoppedContextOpts, turnBudgetPart, turnBudgetWire, turnRouting, type TurnBudgetPart } from "./turn-budget";
 
 // ── ASST-06 — the send->stream engine ────────────────────────────────────────────────────────────
 //
@@ -622,6 +624,9 @@ export class AssistantController {
     // while the company's flag is on, `departmentId` must resolve to an active org unit of THIS company, and a wrong type is
     // ignored rather than refused (department-context.ts). Resolved inside the transaction below, written next to `turn_mode`.
     const rawContext = readRawContext(body);
+    // AIP-18: is the thread's owner (who pays for the reply, as the usage row's attribution says) soft-stopped? One cached read that never
+    // throws and never stops a turn on a failure (soft-stop.ts). Decided HERE, once, and written on the placeholder for the stream to read.
+    const budgetPart = turnBudgetPart(await budgetState(tenantId, thread.ownerUserId));
 
     const assistantMessageId = await withTenants(
       [tenantId],
@@ -671,10 +676,14 @@ export class AssistantController {
         }
         // The placeholder — see file header. Reserves seq userSeq+1 for the reply BEFORE the
         // upstream call even starts, so no later sender can ever land a message between the two.
-        // `parts` is `[]` unless this is a tool turn and/or the turn carries a department or page (flag on): the row of a plain
-        // turn is byte for byte what it was before AIP-10.
+        // `parts` is `[]` unless this is a tool turn and/or the turn carries a department or page (flag on) and/or the owner is
+        // soft-stopped (AIP-18 `turn_budget`): the row of a plain turn is byte for byte what it was before AIP-10.
         const turnContext = await resolveTurnContext(c, tenantId, rawContext);
-        const placeholderParts = JSON.stringify([...(toolMode ? [turnModePart(agent)] : []), ...(turnContext ? [turnContext] : [])]);
+        const placeholderParts = JSON.stringify([
+          ...(toolMode ? [turnModePart(agent)] : []),
+          ...(turnContext ? [turnContext] : []),
+          ...(budgetPart ? [budgetPart] : []),
+        ]);
         const assistantId = newId();
         await c.query(
           `INSERT INTO assistant_messages (id, tenant_id, thread_id, seq, role, content, parts, origin_site)
@@ -740,6 +749,9 @@ export class AssistantController {
     // "the knowledge service degraded" at this layer). Hoisted out of the `try` below so both the
     // SSE emit and the later persistence code (well past that block) can read it.
     let citations: ContextCitation[] = [];
+    // AIP-18: the stop this turn was SENT under, read back from the placeholder row (never the query string), so the send and the stream
+    // agree on one decision. Null on every unstopped turn, and then nothing below differs from before.
+    let turnBudget: TurnBudgetPart | null = null;
     try {
       placeholder = await withTenants(
         [tenantId],
@@ -758,9 +770,10 @@ export class AssistantController {
       // AIP-10/12/13: the turn's department and page, read from the ROW (never the query string) and only while the company's
       // flag is on, so a flag switched off between send and stream also gives the context-free prompt.
       const turnContext: TurnContext | null = deptContextEnabled(tenantId) ? readTurnContext(placeholder.parts) : null;
+      turnBudget = readTurnBudget(placeholder.parts);
       const assembled = await withTenants(
         [tenantId],
-        (c) => assembleContext(c, id, thread, placeholder!.seq, { tenantId, principal: req.principal, turnContext }),
+        (c) => assembleContext(c, id, thread, placeholder!.seq, { tenantId, principal: req.principal, turnContext, ...stoppedContextOpts(turnBudget) }),
         { modules: ["assistant"] },
       );
       prompt = assembled.prompt;
@@ -789,6 +802,9 @@ export class AssistantController {
     // Mirrors portal-stream.controller.ts: a client that leaves mid-generation must not leave the
     // upstream gateway call running (and DLP/budget/audit spend accruing) into the void.
     raw.on("close", () => abortForClientDisconnect(id));
+
+    // AIP-18 — the soft stop's one line, first: it is known before anything else is written. Absent on an unstopped turn.
+    if (turnBudget) write(sseLine("budget", turnBudgetWire(turnBudget)));
 
     // ASST-18 — citations are known BEFORE any generation starts (context assembly already ran, in
     // the try block above), so they render the instant the stream opens rather than only after
@@ -859,6 +875,8 @@ export class AssistantController {
         turnModePart(turnMode.agent),
         ...usageMetaParts({ usageSource: "estimate" }),
         ...citationParts(citations),
+        // AIP-18: a stopped tool turn keeps its line on the finished reply (the runner call itself is not a gateway call: no tier to set).
+        ...(turnBudget ? [turnBudget] : []),
       ]);
       await withTenants(
         [tenantId],
@@ -925,20 +943,26 @@ export class AssistantController {
       return;
     }
 
+    // ASST-16 — route this generation with the thread's chosen brain, and resume its Hermes
+    // session if one is already open. `provider` is a HINT only (OQ-6: "fail over and label") —
+    // a down/unavailable hermes silently falls through to the gateway's normal failover chain,
+    // never a hard error; `result.provider`/`result.model` (persisted below) always name the
+    // ACTUAL server, never the requested one, which is what makes the ASST-12 badge truthful.
+    // AIP-08b: a provider session belongs to the provider hint; without the hint there is no session to resume.
+    // AIP-18: a soft-stopped turn goes on the `fast` tier with no hint and no session, for THIS turn only (nothing on the thread changes).
+    const routing = turnRouting(turnBudget !== null, {
+      provider: providerHint,
+      tier: thread.brainTier ?? undefined,
+      providerSession: providerHint ? thread.hermesSessionId ?? undefined : undefined,
+    });
     const result = await relayGeneration(generation, {
       tenantId,
       // AIP-03a: the thread owner's reply, on this thread. The department is resolved from the owner's primary placement.
       attribution: { tenantId, userId: thread.ownerUserId, surface: "assistant", threadId: id, task: "assistant.reply" },
       prompt,
-      // ASST-16 — route this generation with the thread's chosen brain, and resume its Hermes
-      // session if one is already open. `provider` is a HINT only (OQ-6: "fail over and label") —
-      // a down/unavailable hermes silently falls through to the gateway's normal failover chain,
-      // never a hard error; `result.provider`/`result.model` (persisted below) always name the
-      // ACTUAL server, never the requested one, which is what makes the ASST-12 badge truthful.
-      provider: providerHint,
-      tier: thread.brainTier ?? undefined,
-      // AIP-08b: a provider session belongs to the provider hint; without the hint there is no session to resume.
-      providerSession: providerHint ? thread.hermesSessionId ?? undefined : undefined,
+      provider: routing.provider,
+      tier: routing.tier,
+      providerSession: routing.providerSession,
       emit: {
         token: (text) => write(sseLine("token", { text })),
         // ASST-12/15: relayed the instant `meta` arrives (before `done`) so a live-streaming
@@ -986,7 +1010,7 @@ export class AssistantController {
     // semantics all have to stay identical. No lock needed: this UPDATE is addressed by the
     // placeholder's own id (never re-derives a seq), so it cannot race sendMessage's seq allocation
     // — only a NEW sendMessage, which clearing `content IS NULL` here is what unblocks.
-    await persistGenerationOutcome({ tenantId, threadId: id, messageId, result, citations });
+    await persistGenerationOutcome({ tenantId, threadId: id, messageId, result, citations, keepParts: turnBudget ? [turnBudget] : [] });
 
     if (!raw.destroyed) raw.end();
   }
@@ -1126,11 +1150,36 @@ export class AssistantController {
     const goal = typeof body?.goal === "string" ? body.goal : "";
     if (!agent) throw new BadRequestException("agent is required");
 
+    // AIP-18: while the owner is soft-stopped the hand-off is stored `held` and starts no agent run (handoffs.ts's AIP-18 header). The same
+    // cached, fail-open read the send path asks: a failure to compute holds nothing.
+    const state = await budgetState(tenantId, ownerId);
     return withTenants(
       [tenantId],
-      (c) => createHandoff(c, { tenantId, threadId: id, ownerId, agent, goal }),
+      (c) => createHandoff(c, { tenantId, threadId: id, ownerId, agent, goal }, { stop: state.stopped ? state.stop : null }),
       { modules: ["assistant"] },
     );
+  }
+
+  // AIP-18 — the owner cancels a HELD hand-off (one that is waiting because they were soft-stopped). Owner-only, the same Cerbos action as
+  // creating one (`handoff` on the thread: cancelling your own waiting hand-off is the same authority as making it). Only a held hand-off
+  // can be cancelled here: a started run belongs to the runner, so anything else is a 409 `not_held`; an id that is not a hand-off of THIS
+  // thread is a 404. Answers the hand-off row, now `cancelled`.
+  @Post(":tenantId/assistant/threads/:id/handoffs/:handoffId/cancel")
+  @HttpCode(200)
+  async cancelHandoff(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Param("handoffId") handoffId: string,
+  ) {
+    const thread = await withTenants([tenantId], (c) => fetchThread(c, id), { modules: ["assistant"] });
+    if (!thread) throw new NotFoundException("thread not found");
+    await authorize(req.principal, { kind: "assistant_thread", id, tenantId, ownerId: thread.ownerUserId }, "handoff");
+
+    const out = await withTenants([tenantId], (c) => cancelHeldHandoff(c, id, handoffId), { modules: ["assistant"] });
+    if (out === "not_found") throw new NotFoundException("handoff not found");
+    if (out === "not_held") throw new ConflictException("not_held: only a hand-off that is waiting (held) can be cancelled here");
+    return out;
   }
 
   // Owner-only run-watch read: the thread's handoffs, lazily refreshed from the runner (status,
@@ -1479,6 +1528,8 @@ export class AssistantController {
 
     const thread = await withTenants([tenantId], (c) => fetchThread(c, threadId), { modules: ["assistant"] });
     if (!thread) throw new NotFoundException("thread not found");
+    // AIP-18: the same soft-stop decision the send route makes (the thread owner pays), written on the placeholder the same way.
+    const turnBudget = turnBudgetPart(await budgetState(tenantId, thread.ownerUserId));
 
     // The user turn and the assistant placeholder, under the same advisory lock the chat surface
     // takes — so an ask and a concurrent UI send on one thread cannot interleave their seqs.
@@ -1508,7 +1559,7 @@ export class AssistantController {
         await c.query(
           `INSERT INTO assistant_messages (id, tenant_id, thread_id, seq, role, content, parts, origin_site)
            VALUES ($1, $2, $3, $4, 'assistant', NULL, $5::jsonb, $6)`,
-          [asstId, tenantId, threadId, userSeq + 1, JSON.stringify(turnContext ? [turnContext] : []), config.originSite],
+          [asstId, tenantId, threadId, userSeq + 1, JSON.stringify([...(turnContext ? [turnContext] : []), ...(turnBudget ? [turnBudget] : [])]), config.originSite],
         );
         return { messageId: asstId, seq: userSeq + 1, turnContext };
       },
@@ -1525,7 +1576,7 @@ export class AssistantController {
     try {
       const assembled = await withTenants(
         [tenantId],
-        (c) => assembleContext(c, threadId, thread, turn.seq, { tenantId, principal: req.principal, turnContext: turn.turnContext }),
+        (c) => assembleContext(c, threadId, thread, turn.seq, { tenantId, principal: req.principal, turnContext: turn.turnContext, ...stoppedContextOpts(turnBudget) }),
         { modules: ["assistant"] },
       );
       citations = assembled.citations;
@@ -1538,20 +1589,28 @@ export class AssistantController {
       }
       // No-op emit: a tool caller has nowhere to stream to. `relayGeneration` accumulates the full
       // text into `result.text` regardless, which is exactly what request/response wants.
+      // AIP-18: a soft-stopped turn goes on `fast` with no hint and no session (this turn only), exactly as the stream route does.
+      const routing = turnRouting(turnBudget !== null, {
+        provider: providerHint,
+        tier: thread.brainTier ?? undefined,
+        providerSession: providerHint ? thread.hermesSessionId ?? undefined : undefined,
+      });
       result = await relayGeneration(generation, {
         tenantId,
         attribution: { tenantId, userId: thread.ownerUserId, surface: "assistant", threadId, task: "assistant.reply" },
         prompt: assembled.prompt,
-        provider: providerHint,
-        tier: thread.brainTier ?? undefined,
-        providerSession: providerHint ? thread.hermesSessionId ?? undefined : undefined,
+        provider: routing.provider,
+        tier: routing.tier,
+        providerSession: routing.providerSession,
         emit: { token: () => {}, meta: () => {}, session: () => {}, usage: () => {}, done: () => {}, error: () => {} },
       });
     } finally {
       releaseGeneration(threadId);
     }
 
-    await persistGenerationOutcome({ tenantId, threadId, messageId: turn.messageId, result, citations });
+    await persistGenerationOutcome({ tenantId, threadId, messageId: turn.messageId, result, citations, keepParts: turnBudget ? [turnBudget] : [] });
+    // AIP-18: the answer carries the stop (both outcomes), and ONLY when there is one: an unstopped answer is exactly what it was.
+    const budgetField = turnBudget ? { turnBudget: turnBudgetWire(turnBudget) } : {};
 
     // A failed generation is reported as a typed REFUSAL, never as an empty answer — the same
     // criterion-5 reasoning the UI sweep applied all session: `""` would read as "the assistant had
@@ -1563,6 +1622,7 @@ export class AssistantController {
         messageId: turn.messageId,
         errorKind: result.errorKind ?? "unknown",
         partialAnswer: result.text || null,
+        ...budgetField,
       };
     }
     return {
@@ -1574,6 +1634,7 @@ export class AssistantController {
       model: result.model ?? null,
       tokens: result.tokensEstimate,
       citations: citations.map((c) => c.sourceRef),
+      ...budgetField,
     };
   }
 }

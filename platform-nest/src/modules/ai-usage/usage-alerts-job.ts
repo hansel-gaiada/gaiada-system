@@ -20,6 +20,11 @@
 // SINGLE RUNNER, FAIL SOFT. One session advisory lock per sweep (the house pattern: search content-decay) keeps two sweeps in one database from
 // overlapping; the ledger is the real guarantee. Chained setTimeout (a slow sweep never stacks), a jittered first tick (a restart of several
 // replicas does not align them), one company's failure is logged and never stops the next, and nothing here ever throws out of a tick.
+// AIP-18 (§6.3 item 9): after each company's checks the sweep RELEASES that company's held hand-offs whose owner is no longer soft-stopped
+// (the next UTC day for an allowance, the next UTC month for a department, a lift, a raised allowance). `releaseHeldHandoffs` reads each
+// owner's state fresh and strict, claims each row with a conditional UPDATE from `held` (so two runners post a goal once), and never throws;
+// its own failure never stops the next company, and the alerts' failure never stops the release.
+//
 // SWITCH: AI_USAGE_JOB_ENABLED=0 turns the loop off (any other value, or unset, leaves it on); AI_USAGE_JOB_INTERVAL_MS (default 600000, minimum 60000).
 import type { PoolClient } from "pg";
 import { withGlobal, withTenants } from "../../db";
@@ -33,6 +38,7 @@ import {
   RUNAWAY_LEDGER_THRESHOLD, RUNAWAY_MIN_CALLS_TODAY, RUNAWAY_WINDOW_DAYS, isRunaway, thresholdsCrossed, usualDaily, utcDay, utcDayMinus,
 } from "./budgets";
 import { findOrgUnit } from "../reports/dept-kpis";
+import { releaseHeldHandoffs, type ReleaseResult } from "../assistant/handoffs";
 
 /** The advisory lock's namespace: 'AU' (AI usage) + 1, beside the other jobs' (search 0x5343000N, agency 0x4149000N). */
 export const USAGE_ALERTS_LOCK_NS = 0x41550001;
@@ -49,6 +55,8 @@ export interface AlertsDeps {
   notify?: NotifyFn;
   /** Test seam: one company's pass. Defaults to `runCompanyAlerts`. */
   runCompany?: (tenantId: string, now: Date, deps: AlertsDeps) => Promise<CompanyAlertsResult>;
+  /** AIP-18 test seam: one company's release of held hand-offs. Defaults to `releaseHeldHandoffs`. */
+  releaseHeld?: (tenantId: string) => Promise<ReleaseResult>;
 }
 
 export interface CompanyAlertsResult {
@@ -60,6 +68,8 @@ export interface AlertsSweepResult extends CompanyAlertsResult {
   skippedLocked: boolean;
   companies: number;
   errors: number;
+  /** AIP-18: held hand-offs this sweep started. */
+  handoffsReleased: number;
 }
 
 // ── who gets told ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -279,7 +289,7 @@ export async function runCompanyAlerts(tenantId: string, now: Date = new Date(),
 
 /** Every company, one at a time. One company's failure is logged and never stops the others. Never throws. */
 export async function runUsageAlertsSweep(now: Date = new Date(), deps: AlertsDeps = {}): Promise<AlertsSweepResult> {
-  const result: AlertsSweepResult = { skippedLocked: false, companies: 0, errors: 0, budgetNotices: 0, runawayNotices: 0 };
+  const result: AlertsSweepResult = { skippedLocked: false, companies: 0, errors: 0, budgetNotices: 0, runawayNotices: 0, handoffsReleased: 0 };
   try {
     return await withGlobal(async (c) => {
       const lock = await c.query<{ locked: boolean }>("SELECT pg_try_advisory_lock($1, $2) AS locked", [USAGE_ALERTS_LOCK_NS, USAGE_ALERTS_LOCK_KEY]);
@@ -298,6 +308,15 @@ export async function runUsageAlertsSweep(now: Date = new Date(), deps: AlertsDe
           } catch (err) {
             result.errors++;
             console.error(`[AI-USAGE-ALERTS] company ${id} failed:`, (err as Error)?.message ?? err);
+          }
+          // AIP-18: its own try, after the alerts: neither one's failure stops the other.
+          try {
+            const released = await (deps.releaseHeld ?? ((t: string) => releaseHeldHandoffs(t)))(id);
+            result.handoffsReleased += released.started;
+            result.errors += released.errors > 0 ? 1 : 0;
+          } catch (err) {
+            result.errors++;
+            console.error(`[AI-USAGE-ALERTS] releasing held hand-offs of company ${id} failed:`, (err as Error)?.message ?? err);
           }
         }
         return result;
@@ -334,8 +353,10 @@ export function startUsageAlertsLoop(
     if (stopped) return;
     try {
       const r = await sweep();
-      if (r.budgetNotices > 0 || r.runawayNotices > 0 || r.errors > 0) {
-        console.log("[AI-USAGE-ALERTS] tick:", { companies: r.companies, budgetNotices: r.budgetNotices, runawayNotices: r.runawayNotices, errors: r.errors });
+      if (r.budgetNotices > 0 || r.runawayNotices > 0 || r.handoffsReleased > 0 || r.errors > 0) {
+        console.log("[AI-USAGE-ALERTS] tick:", {
+          companies: r.companies, budgetNotices: r.budgetNotices, runawayNotices: r.runawayNotices, handoffsReleased: r.handoffsReleased, errors: r.errors,
+        });
       }
     } catch (err) {
       console.error("[AI-USAGE-ALERTS] tick failed:", (err as Error)?.message ?? err);
