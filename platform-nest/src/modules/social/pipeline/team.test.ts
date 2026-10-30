@@ -281,6 +281,22 @@ describe("needs attention: late, at risk, blocked, failed and boosts, optional f
     // a total order: the same set in another order sorts the same
     expect(sortAttention([...shuffled].reverse())).toEqual(sorted);
   });
+  it("a late cycle step (SCP-5f) sits after the boosts and before the reports; two steps of one client on one day keep a total order", () => {
+    const step = (step: string, since: string, engagementId = "e") => ({ kind: "cycle_step_late" as const, engagementId, clientName: "A", step, dueDate: since, since });
+    const rows = [
+      { kind: "report_due" as const, engagementId: "e", clientName: "A", since: "2026-10-01" },
+      step("report", "2026-10-03"), { kind: "boost_waiting" as const, engagementId: "e", clientName: "A", postId: "p", since: "2026-10-09" },
+      step("planning", "2026-10-03"), step("deploy", "2026-10-01", "e2"),
+    ];
+    const sorted = sortAttention(rows);
+    expect(sorted.map((i) => i.kind)).toEqual(["boost_waiting", "cycle_step_late", "cycle_step_late", "cycle_step_late", "report_due"]);
+    expect(sorted.filter((i) => i.kind === "cycle_step_late").map((i) => `${i.since}/${i.engagementId}/${i.step}`)).toEqual([
+      "2026-10-01/e2/deploy", "2026-10-03/e/planning", "2026-10-03/e/report",
+    ]);
+    expect(sortAttention([...rows].reverse())).toEqual(sorted);
+    expect(ATTENTION_ORDER.indexOf("cycle_step_late")).toBeGreaterThan(ATTENTION_ORDER.indexOf("boost_waiting"));
+    expect(ATTENTION_ORDER.indexOf("cycle_step_late")).toBeLessThan(ATTENTION_ORDER.indexOf("report_due"));
+  });
 });
 
 describe("simulated rows are counted as GET overview counts them", () => {

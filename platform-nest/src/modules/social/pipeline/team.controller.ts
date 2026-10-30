@@ -38,8 +38,9 @@ import {
 } from "./feed-data";
 import { isMonthKey, previousMonth } from "./schedule-health";
 import { readPeriodicDue } from "../report-periodic-due";
+import { lateStepAttention } from "./cycle-steps-read";
 import {
-  TEAM_ROW_CAP, TEAM_TAG, readBoostsWaiting, readFailedPosts, readNames, readReportFacts, readRequestAssignees, readRosterFacts, readSimulatedPipelineIds,
+  TEAM_ROW_CAP, TEAM_TAG, readBoostsWaiting, readFailedPosts, readLateCycleSteps, readNames, readReportFacts, readRequestAssignees, readRosterFacts, readSimulatedPipelineIds,
   readSocialUnitPeople, readStepMoves,
 } from "./team-data";
 import {
@@ -130,6 +131,12 @@ export class SocialTeamController {
       const rows = await withTenants([tenantId], (c) => readBoostsWaiting(c, tenantId, includeSimulated, month), SOCIAL);
       if (rows.length > TEAM_ROW_CAP) partial.add("needsAttention");
       attention.push(...boostAttention(rows.slice(0, TEAM_ROW_CAP)));
+    } catch (e) { fail("needsAttention", e); }
+    // SCP-5f (§63.27.4): the month's cycles' open steps past their due date, team-level (a client, a step, a date; no person).
+    try {
+      const rows = await withTenants([tenantId], (c) => readLateCycleSteps(c, tenantId, month, today), SOCIAL);
+      if (rows.length > TEAM_ROW_CAP) partial.add("needsAttention");
+      attention.push(...lateStepAttention(rows.slice(0, TEAM_ROW_CAP)));
     } catch (e) { fail("needsAttention", e); }
     try {
       const facts = await withTenants([tenantId], (c) => readReportFacts(c, tenantId, previousMonth(month)), SOCIAL);
