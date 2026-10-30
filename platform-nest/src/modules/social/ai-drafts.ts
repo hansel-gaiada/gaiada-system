@@ -301,6 +301,8 @@ export interface ReportNarrativeGroundingFacts {
   kpis: ReportNarrativeKpiFact[];
   topPosts: Array<{ network: string; publishedAt: string | null; impressions: number | null }>;
   knowledgeHits: Array<{ sourceRef: string; text: string }>;
+  /** SCP-5 W5-A2: other text the prompt names (a post's title and date), whose digits a draft may repeat. Absent for a monthly report. */
+  extraGrounding?: string[];
 }
 export interface ReportNarrativeDraftResult {
   text: string;
@@ -518,6 +520,7 @@ function groundedNumericTokens(facts: ReportNarrativeGroundingFacts): Set<string
   push(facts.periodLabel);
   push(facts.clientName);
   push(facts.engagementName);
+  for (const t of facts.extraGrounding ?? []) push(t);
   return out;
 }
 

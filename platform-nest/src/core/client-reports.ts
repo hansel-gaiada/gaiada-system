@@ -26,6 +26,7 @@ import { storage } from "./storage";
 import { sha256Hex } from "./content-hash";
 import { emitEvent } from "../events/outbox.service";
 import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
+import { periodicWhen } from "./report-period-label";
 
 /** The `files.role` of a client report's file (migration 202610151720). Not `_pdf`: search reports are Markdown. */
 export const CLIENT_REPORT_FILE_ROLE = "client_report_file";
@@ -173,8 +174,17 @@ export async function announceClientReportPublished(
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-/** The title a delivered report is published under: what it is and which period, in plain words. Deterministic (no AI). */
+const PERIODIC_TITLES: Readonly<Record<string, string>> = {
+  daily: "Daily report", weekly: "Weekly report", quarterly: "Quarterly report", semester: "Half-year report", yearly: "Yearly report",
+};
+
+/** The title a delivered report is published under: what it is and which period, in plain words. Deterministic (no AI). The
+ *  periodic social kinds (SCP-5 W5-A2) read "Daily report, 9 Nov 2026" and the like; every other kind is named as before. */
 export function deliveredReportTitle(source: "social_report" | "search_report", kind: string, period: string | null, start: string, end: string): string {
+  if (source === "social_report" && PERIODIC_TITLES[kind]) {
+    const when = periodicWhen(kind, period, start, end);
+    if (when) return `${PERIODIC_TITLES[kind]}, ${when}`;
+  }
   const what =
     source === "social_report"
       ? kind === "campaign" ? "Social media campaign report" : "Social media report"

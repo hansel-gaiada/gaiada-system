@@ -21,7 +21,9 @@
 import type { PoolClient } from "pg";
 import { declareSocialModuleScope } from "./module-scope";
 import { minorUnitSql } from "./pipeline/boosts-data";
-import type { BoostSpendInput, DailyMetricInput, KpiTargetInput, PostMetricInput } from "./reports";
+import { phaseOf } from "./pipeline/machine";
+import { SCP } from "./pipeline/fixture";
+import type { BestPostFact, BoostSpendInput, DailyMetricInput, KpiTargetInput, NextPostFact, PostMetricInput } from "./reports";
 
 export interface ReportInputs {
   daily: DailyMetricInput[];
@@ -207,4 +209,98 @@ export async function readReportsToAct(c: PoolClient, tenantId: string, max: num
     id: r.id, kind: r.kind, period: r.period, status: r.status, clientName: r.client_name,
     reportDueDay: r.report_due_day === null ? null : Number(r.report_due_day), since: new Date(r.since).toISOString(),
   }));
+}
+
+// ── The short kinds' own numbers (SCP-5 W5-A2, §63.24.1) ──────────────────────────────────────────────────────────────────
+// A daily or weekly report adds three things to `readReportInputs`: the posts the client approved in the period (one per post, by the
+// decision's time), the best post of the period by reach, and the pipeline's posts dated in the next day or week. Simulated rows are
+// counted as above: only while the simulator switch is on, and `simulated` is then true when any counted row was.
+
+export interface ShortKindExtras {
+  approvedPosts: number;
+  bestPost: BestPostFact | null;
+  nextPosts: NextPostFact[];
+  /** Any counted row was simulated. Always false while `includeSimulated` is false. */
+  simulated: boolean;
+}
+
+/** At most this many posts of the next day or week are listed (a week of a busy client holds far fewer). */
+export const NEXT_POSTS_MAX = 50;
+
+export async function readShortKindExtras(
+  c: PoolClient,
+  a: { tenantId: string; engagementId: string; start: string; end: string; nextStart: string; nextEnd: string; tz: string; includeSimulated: boolean },
+): Promise<ShortKindExtras> {
+  await declareSocialModuleScope(c);
+  let simulated = false;
+
+  // The posts the client approved in the period: a post once, whatever its variants or how often it went back and forth, by the time of
+  // the decision in the company's day. An approval that was later undone (the review is no longer 'approved') does not count.
+  const approved = await c.query<{ n: number; simulated: boolean | null }>(
+    `SELECT count(DISTINCT p.id)::int AS n, bool_or(p.simulated OR v.simulated) AS simulated
+       FROM social_post_client_reviews r
+       JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id AND v.deleted_at IS NULL
+       JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id AND p.deleted_at IS NULL
+      WHERE r.tenant_id = $1 AND p.engagement_id = $2 AND r.status = 'approved' AND r.decided_at IS NOT NULL
+        AND (r.decided_at AT TIME ZONE $5)::date >= $3::date AND (r.decided_at AT TIME ZONE $5)::date <= $4::date
+        AND ($6::boolean OR NOT (p.simulated OR v.simulated))`,
+    [a.tenantId, a.engagementId, a.start, a.end, a.tz, a.includeSimulated],
+  );
+  if (approved.rows[0]?.simulated) simulated = true;
+
+  // The best post by reach: the engagement's published variants of the period, each with its latest metric row (as readReportInputs
+  // reads it), the highest reach first; a post with no reach on record cannot be the best.
+  const best = await c.query<{ title: string | null; network: string; published_at: string | null; reach: number; is_simulated: boolean }>(
+    `SELECT p.title, a.network, v.published_at::text AS published_at, pm.reach,
+            (p.simulated OR v.simulated OR pm.source = 'simulated') AS is_simulated
+       FROM social_post_variants v
+       JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
+       JOIN social_accounts a ON a.id = v.account_id AND a.tenant_id = v.tenant_id
+       JOIN LATERAL (
+         SELECT pm2.reach, pm2.source FROM social_post_metrics pm2
+          WHERE pm2.variant_id = v.id AND ($4::boolean OR pm2.source <> 'simulated')
+          ORDER BY pm2.fetched_at DESC LIMIT 1
+       ) pm ON pm.reach IS NOT NULL
+      WHERE p.engagement_id = $1 AND v.status = 'published' AND v.deleted_at IS NULL
+        AND v.published_at >= $2::date AND v.published_at < ($3::date + interval '1 day')
+        AND ($4::boolean OR NOT (p.simulated OR v.simulated))
+      ORDER BY pm.reach DESC, v.published_at, v.id
+      LIMIT 1`,
+    [a.engagementId, a.start, a.end, a.includeSimulated],
+  );
+  const b = best.rows[0];
+  if (b?.is_simulated) simulated = true;
+
+  // What the pipeline has dated in the next day or week: a pipeline post with a schedule day in that range (the company's day),
+  // archived and deleted posts left out. Its phase is the stage machine's own (fixture `phaseOf`), the word the client page shows.
+  const next = await c.query<{
+    id: string; title: string | null; format: string | null; scheduled_at: Date; pipeline_status: string;
+    change_by: string | null; change_kind: string | null; return_to: string | null; simulated: boolean;
+  }>(
+    `SELECT p.id::text AS id, p.title, p.format, p.scheduled_at, p.pipeline_status, p.change_by, p.change_kind, p.return_to, p.simulated
+       FROM social_posts p
+      WHERE p.tenant_id = $1 AND p.engagement_id = $2 AND p.pipeline_status IS NOT NULL AND p.deleted_at IS NULL AND p.archived_at IS NULL
+        AND p.scheduled_at IS NOT NULL
+        AND (p.scheduled_at AT TIME ZONE $5)::date >= $3::date AND (p.scheduled_at AT TIME ZONE $5)::date <= $4::date
+        AND ($6::boolean OR NOT p.simulated)
+      ORDER BY p.scheduled_at, p.id
+      LIMIT ${NEXT_POSTS_MAX}`,
+    [a.tenantId, a.engagementId, a.nextStart, a.nextEnd, a.tz, a.includeSimulated],
+  );
+  const nextPosts: NextPostFact[] = next.rows.map((r) => {
+    if (r.simulated) simulated = true;
+    let phase: string | null = null;
+    try { phase = phaseOf({ pipelineStatus: r.pipeline_status, changeBy: r.change_by, changeKind: r.change_kind, returnTo: r.return_to } as Parameters<typeof phaseOf>[0]); } catch { phase = null; }
+    return {
+      postId: r.id, title: r.title ?? "Untitled post", format: r.format, scheduledAt: new Date(r.scheduled_at).toISOString(), phase,
+      phaseLabel: phase ? SCP.phases.find((p) => p.key === phase)?.label ?? null : null,
+    };
+  });
+
+  return {
+    approvedPosts: Number(approved.rows[0]?.n ?? 0),
+    bestPost: b ? { title: b.title ?? "Untitled post", network: b.network, publishedAt: b.published_at, reach: Number(b.reach) } : null,
+    nextPosts,
+    simulated: a.includeSimulated && simulated,
+  };
 }

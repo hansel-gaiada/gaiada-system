@@ -24,14 +24,27 @@ import type {
   ReportHeader, ReportKpi, ReportSeries, ReportSeriesPoint, ReportTable, ReportHighlight, ReportDocument,
 } from "../reports/report-document";
 import { NOTE_AREAS, type ReportAction, type ReportNotes } from "./report-notes";
+import { periodicWhen } from "../../core/report-period-label";
+import { periodRange } from "./pipeline/rules-periods";
+import type { PeriodicKind } from "./pipeline/rules";
 
-export type ReportKind = "monthly" | "campaign" | "adhoc";
+/** SCP-5 W5-A2 (BFF §63.24.1): the six periodic kinds and SMM-23's two. */
+export type ReportKind = PeriodicKind | "campaign" | "adhoc";
 
 /** Mirrors `search/reports.ts#periodDateRange` byte-for-byte (see that file's own header on why a
  *  small duplicated helper is this estate's idiom across separate modules): `period` as `YYYY-MM`
  *  resolves to that calendar month; anything else (adhoc/campaign with no period, or a malformed
  *  one) falls back to the trailing 30 days ending at `fallbackEnd`. */
-export function periodDateRange(period: string | null, fallbackEnd: Date): { start: string; end: string } {
+export function periodDateRange(
+  period: string | null, fallbackEnd: Date, opts: { kind?: PeriodicKind; fiscalYearStartMonth?: number } = {},
+): { start: string; end: string } {
+  // SCP-5 W5-A2 (BFF §63.24.1): given the report's periodic kind, every form of period resolves to its range (quarters, halves
+  // and years from the company's fiscal year start). Without `kind` (campaign, ad hoc, the monthly as SCP-5a built it) nothing
+  // changes: `YYYY-MM` is that month and anything else the trailing 30 days.
+  if (opts.kind && period) {
+    const r = periodRange(opts.kind, period.trim(), opts.fiscalYearStartMonth ?? 1);
+    if (r) return r;
+  }
   const m = period ? /^(\d{4})-(\d{2})$/.exec(period.trim()) : null;
   if (m) {
     const y = Number(m[1]);
@@ -47,6 +60,8 @@ export function periodDateRange(period: string | null, fallbackEnd: Date): { sta
 }
 
 function periodLabel(kind: ReportKind, period: string | null, start: string, end: string): string {
+  const periodic = periodicWhen(kind, period, start, end);
+  if (periodic) return periodic;
   if (kind === "monthly" && period && /^\d{4}-\d{2}$/.test(period)) {
     const [y, mo] = period.split("-").map(Number);
     return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
@@ -175,6 +190,48 @@ export interface FrozenSocialReportMetrics {
   narrativeModel?: string;
   /** SCP-5a: the client's own ad spend of the period (boosts), absent when no boost ran or on a snapshot frozen before SCP-5a. */
   adSpend?: FrozenAdSpend[];
+  /** SCP-5 W5-A2 (BFF §63.24.1): the short kinds' own facts, the counts the tables below summarise (a real 0 is a fact: "nothing is
+   *  scheduled"). Absent on every other kind. */
+  shortKind?: { approvedPosts: number; nextPosts: number; nextLabel: "day" | "week"; bestPostReach: number | null };
+}
+
+/** SCP-5 W5-A2: the best post of a short report's period by reach, and the next period's pipeline posts. */
+export interface BestPostFact { title: string; network: string; publishedAt: string | null; reach: number }
+export interface NextPostFact { postId: string; title: string; format: string | null; scheduledAt: string; phase: string | null; phaseLabel: string | null }
+export interface ShortKindFactsInput { approvedPosts: number; bestPost: BestPostFact | null; nextPosts: NextPostFact[]; nextLabel: "day" | "week" }
+
+/**
+ * SCP-5 W5-A2 (BFF §63.24.1): a daily or weekly report's own numbers on top of the snapshot: the posts the client approved in the
+ * period (a real count: 0 is a fact), the best post by reach (a table when one has a reach) and what the pipeline has dated in the
+ * next day or week (a table when there is any). The snapshot is returned as a new object.
+ */
+export function withShortKindFacts(frozen: FrozenSocialReportMetrics, x: ShortKindFactsInput): FrozenSocialReportMetrics {
+  const tables = [...frozen.tables];
+  if (x.bestPost) {
+    tables.push({
+      key: "best_post", label: "Best post by reach",
+      columns: [
+        { key: "post", label: "Post" }, { key: "network", label: "Network" }, { key: "publishedAt", label: "Published" },
+        { key: "reach", label: "Reach", unit: "count", align: "right" },
+      ],
+      rows: [{ post: x.bestPost.title, network: x.bestPost.network, publishedAt: x.bestPost.publishedAt, reach: x.bestPost.reach }],
+    });
+  }
+  if (x.nextPosts.length > 0) {
+    tables.push({
+      key: "next_period", label: x.nextLabel === "day" ? "Coming up the next day" : "Coming up the next week",
+      columns: [
+        { key: "title", label: "Post" }, { key: "format", label: "Format" }, { key: "scheduledAt", label: "Scheduled" }, { key: "phaseLabel", label: "Where it is" },
+      ],
+      rows: x.nextPosts.map((p) => ({ postId: p.postId, title: p.title, format: p.format, scheduledAt: p.scheduledAt, phase: p.phase, phaseLabel: p.phaseLabel })),
+    });
+  }
+  return {
+    ...frozen,
+    kpis: [...frozen.kpis, { metricKey: "posts_approved_period", label: "Posts approved by the client", unit: "count", value: x.approvedPosts, appraisalSafe: false }],
+    tables,
+    shortKind: { approvedPosts: x.approvedPosts, nextPosts: x.nextPosts.length, nextLabel: x.nextLabel, bestPostReach: x.bestPost?.reach ?? null },
+  };
 }
 
 function seriesFor(
@@ -375,6 +432,8 @@ export function buildSocialReportDocument(input: {
   actionPlan?: ReportAction[];
   /** SCP-5a: the row's `simulated` (the frozen numbers include simulated rows): the page and the PDF draw the watermark. */
   simulated?: boolean;
+  /** SCP-5 W5-A2: a short report's line about what comes next; printed under the summary, as the client receives it. */
+  nextPeriod?: string | null;
 }): ReportDocument {
   const header: ReportHeader = {
     tenantId: input.tenantId,
@@ -396,7 +455,12 @@ export function buildSocialReportDocument(input: {
     distributions: [],
     tables: [...input.frozen.tables, ...notesTables(input.notes ?? {}, input.actionPlan ?? [])],
     highlights: input.frozen.highlights,
-    narrative: { source: input.frozen.narrativeSource ?? "deterministic", text: input.narrativeText, model: input.frozen.narrativeModel },
+    narrative: {
+      source: input.frozen.narrativeSource ?? "deterministic", model: input.frozen.narrativeModel,
+      text: input.nextPeriod && /\S/.test(input.nextPeriod)
+        ? `${input.narrativeText}\n\nNext ${input.frozen.shortKind?.nextLabel ?? (input.kind === "daily" ? "day" : "week")}: ${input.nextPeriod.trim()}`
+        : input.narrativeText,
+    },
     ...(input.simulated ? { simulated: true } : {}),
   };
 }
