@@ -170,11 +170,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610301201_social_settings_onboarding.sql`
+- Head: `202610301210_social_rules.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 358 (121 legacy `NNNN_`, 237 timestamped)
+- Applied files on disk: 359 (121 legacy `NNNN_`, 238 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -312,6 +312,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/feed.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/metrics.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/pipeline.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/rules.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/sheet-import.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/team.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/simulated-accounts.controller.ts` |

@@ -11,16 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.207.1` - M5-V3-l: the search property's module tier is the search module's only; CI runs Cerbos's own policy tests
+### platform-nest `0.208.0` + platform-ui `0.227.0` - shared train 20261030-3: M5-V3-l, the search property's module tier is the search module's only and CI runs Cerbos's own policy tests; SCP-5 W5-A0, the company rules core (SCP-Q41)
 
-- **Why.** `module_staff`/`module_manager` are composed from `resource.attr.module`. So on a search property whose `module` named another module, that module's staff and managers could read, edit, delete, attest and read visitor profiles and recordings. Nothing was exposed live, because every caller passes `module: "search"`. `search_visitors_test.yaml` showed 10 failures from 2026-10-13, and no CI step ran it.
-- **platform-nest.**
-  - `resource_search_property.yaml`: every module-tier rule also requires `request.resource.attr.module == "search"`.
-  - company_admin keeps its own unchanged rule, because it is not module-mediated.
-  - No catalog, bundle or migration change (2213 pairs before and after).
-  - `search_manage_tags_test.yaml` gains the `prop_webdev` case.
-- **CI.** `nest-static-gates` runs `cerbos compile --tests` (the cerbos 0.54.0 image, read-only mount), so every `cerbos/tests/*_test.yaml` runs on every push.
-- **Deploy.** A Cerbos restart. Contract: `docs/PERMISSION-CONTRACT.md` §33.2.
+- **M5-V3-l (car 1, gaiada-system-81).**
+  - **Why.** `module_staff`/`module_manager` are composed from `resource.attr.module`. So on a search property whose `module` named another module, that module's staff and managers could read, edit, delete, attest and read visitor profiles and recordings. Nothing was exposed live, because every caller passes `module: "search"`. `search_visitors_test.yaml` showed 10 failures from 2026-10-13, and no CI step ran it.
+  - **platform-nest.**
+    - `resource_search_property.yaml`: every module-tier rule also requires `request.resource.attr.module == "search"`.
+    - company_admin keeps its own unchanged rule, because it is not module-mediated.
+    - No catalog, bundle or migration change (2213 pairs before and after).
+    - `search_manage_tags_test.yaml` gains the `prop_webdev` case.
+  - **CI.** `nest-static-gates` runs `cerbos compile --tests` (the cerbos 0.54.0 image, read-only mount), so every `cerbos/tests/*_test.yaml` runs on every push.
+  - **Deploy.** A Cerbos restart. Contract: `docs/PERMISSION-CONTRACT.md` §33.2.
+- **SCP-5 W5-A0 (car 2, gaiada-system-ed).** Company rules for SCP-5 (SCP-Q41). One versioned rules document per company covers reports, ideas, the monthly cycle, audit and Saved, with the owner's rulings as the seeded defaults. Records keep the rules they were made under (`rules_ref`). Routes `rules`, `rules/:section`, reset, versions and preview are edited by the four approvers.
+- **Deploy (train 20261030-3).**
+  - One migration, additive, no data rewrite: `202610301210_social_rules`.
+  - **Cerbos restart**, for M5-V3-l's policy change.
+  - No compose or `.env` change.
 
 ### ai-gateway-go `0.20.0` + platform-nest `0.207.0` + platform-ui `0.226.0` - shared train 20261030-2: AIP-17a, the gateway's daily call counters survive a restart; M5-P4, the site's LinkedIn partner id from the ERP (WSK-D92); the AI usage screens (AIP-16, AIP-05); SCP-5 W5-B1, the tables for ideas, the Saved bank and the audit; SCP-5 W5-C3, PM project templates - PROTOTYPED
 
