@@ -383,10 +383,11 @@ const COLUMN: Record<string, (e: Env) => void> = {
   },
 };
 
-/** Effects the demo store has nothing to write for: notifications, the content month's progress, and the variants and reviews, which the read derives from the
- *  status. (A prefix match covers `notify:` and `notify_after_undo_window:`.) The test fails on a fixture effect in neither this list nor `COLUMN`. */
+/** Effects the demo store has nothing to write for: notifications, the content month's progress and its step tasks (SCP-5f), and the variants and reviews,
+ *  which the read derives from the status. (A prefix match covers `notify:` and `notify_after_undo_window:`.) The test fails on a fixture effect in neither
+ *  this list nor `COLUMN`. */
 export const NOOP_EFFECTS: ReadonlySet<string> = new Set([
-  "content_month_progress", "release_idea", "copy_log_when_in_changes", "copy_log", "copy_log_each_field", "link_asset_to_month_request", "sync_variants_copy_from_master",
+  "content_month_progress", "release_idea", "cycle_steps", "copy_log_when_in_changes", "copy_log", "copy_log_each_field", "link_asset_to_month_request", "sync_variants_copy_from_master",
   "request_client_reviews", "sync_variants_from_master", "request_client_reviews_on_every_variant", "sync_variants_dates_and_networks",
   "approve_every_variant_review_with_args_hash_in_one_transaction", "changes_requested_on_every_variant_review_in_one_transaction", "decision_id", "undo_window_10s",
   "reviews_back_to_pending", "drop_pending_notifications", "recorded_by_and_channel", "schedule_by_hand_at_approved_date_time_and_placement",

@@ -34,9 +34,10 @@ import { declareSocialModuleScope } from "../module-scope";
 import { loadSocialApproverIds } from "../pipeline-authz";
 import { applyAllocationPatchInTx, parseAllocationPatch, readAllocation, type AllocationRow } from "./allocation.controller";
 import {
-  READY_BY_LOOKBACK_DAYS, loadCalendarInfo, readCyclePosts, readCyclesOfMonth, readSettings, todayIsoInTz, writeCycleInTx,
+  CYCLE_STEPS_LOOKBACK_DAYS, loadCalendarInfo, readCyclePosts, readCyclesOfMonth, readSettings, todayIsoInTz, writeCycleInTx,
 } from "./cycles-data";
 import { syncContentMonthProgress } from "./content-month-progress";
+import { syncCycleStepProgress } from "./cycle-steps";
 import { cerbosActionsToAsk } from "./machine";
 import { authorizePlan } from "./plan-authz";
 import { authorizeStage, cerbosDecisionsFor, createPostInTx, isAutomationPrincipal } from "./pipeline.service";
@@ -184,7 +185,8 @@ export class SocialSheetImportController {
       }));
 
     // 2: the working calendar the pre-fill of a missing cycle (and its ready-by) walks over. It declares the hr scope itself, so it is read here.
-    const info = await loadCalendarInfo(tenantId, [`${previousMonth(plan.month)}-01`, `${plan.month}-01`], READY_BY_LOOKBACK_DAYS);
+    // SCP-5f: a missing cycle's step tasks are dated too, and walk back further than its ready-by (CYCLE_STEPS_LOOKBACK_DAYS).
+    const info = await loadCalendarInfo(tenantId, [`${previousMonth(plan.month)}-01`, `${plan.month}-01`], CYCLE_STEPS_LOOKBACK_DAYS);
 
     // 3: Cerbos's `create` answers, one per distinct officer of the engagements the rows reach (apply only: a preview writes nothing).
     const decisions = new Map<string, { resource: Resource; cerbos: Record<string, boolean> }>();
@@ -276,7 +278,7 @@ async function applyPlan(
   const madeCycles = new Map<string, string>();
   for (const [engagementId, deadline] of cyclesToCreate(a.writes)) {
     const readyBy = readyByFor(deadline, buffer, a.calendar.calendar);
-    madeCycles.set(engagementId, (await writeCycleInTx(c, { tenantId, engagementId, month, deadline, readyBy, actorId: callerId })).cycleId);
+    madeCycles.set(engagementId, (await writeCycleInTx(c, { tenantId, engagementId, month, deadline, readyBy, actorId: callerId, calendar: a.calendar.calendar })).cycleId);
   }
 
   const out: Created[] = [];
@@ -297,7 +299,11 @@ async function applyPlan(
     out.push({ row: w.row, postId: r.id, created: r.created, cycleId, engagementId: w.engagementId, to: r.applied.to });
     if (r.created) touched.add(cycleId);
   }
-  // A new counted post that is not approved yet reopens a done content-month task (SCP-1n): once per cycle, after its posts.
-  for (const cycleId of touched) await syncContentMonthProgress(c, tenantId, cycleId, callerId);
+  // A new counted post that is not approved yet reopens a done content-month task (SCP-1n): once per cycle, after its posts; then the
+  // cycle's step tasks (SCP-5f, BFF §63.27.3: a new counted post reopens `planning`), after its content-month task (the lock order).
+  for (const cycleId of touched) {
+    await syncContentMonthProgress(c, tenantId, cycleId, callerId);
+    await syncCycleStepProgress(c, tenantId, cycleId, callerId);
+  }
   return out;
 }

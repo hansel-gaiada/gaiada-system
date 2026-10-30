@@ -29,7 +29,8 @@ import { AuthGuard } from "../../../auth/guards";
 import { ModuleEnabledGuard } from "../../module-enabled.guard";
 import { declareSocialModuleScope } from "../module-scope";
 import { NETWORKS, invalidField } from "./brand-book";
-import { readCyclePosts, readCyclesOfMonth, todayIsoInTz } from "./cycles-data";
+import { CYCLE_STEPS_LOOKBACK_DAYS, loadCalendarInfo, readCyclePosts, readCyclesOfMonth, todayIsoInTz } from "./cycles-data";
+import { openEngagementCycleDeadlines, redateEngagementCycleSteps } from "./cycle-steps";
 import { authorizePlan, canPlanOf } from "./plan-authz";
 import { STEP_KEYS, parseStepEstimates, tallyCounts, type StepEstimates } from "./schedule-health";
 
@@ -287,10 +288,18 @@ export class SocialAllocationController {
     const id = engagementId.toLowerCase();
     const today = todayIsoInTz(config.reportsTz);
 
+    // SCP-5f (BFF §63.27.3): new estimates, a new report day or a new officer re-date the step tasks of the client's open cycles, and the
+    // officer takes the Ball of every open step, in the same transaction. The holidays they walk over are read first (the hr scope is its own).
+    const redatesSteps = patch.stepEstimates !== undefined || patch.reportDueDay !== undefined || patch.ownerId !== undefined;
+    const deadlines = redatesSteps ? await withTenants([tenantId], (c) => openEngagementCycleDeadlines(c, tenantId, id, today), { modules: ["social"] }) : null;
+    const calendar = deadlines ? (await loadCalendarInfo(tenantId, [...deadlines, today], CYCLE_STEPS_LOOKBACK_DAYS)).calendar : null;
+
     const row = await withTenants(
       [tenantId],
       async (c) => {
         await applyAllocationPatchInTx(c, tenantId, id, patch, Object.keys(body as Record<string, unknown>));
+        // After the engagement's own write and lock: its open cycles in id order, then each cycle's step tasks (cycle-steps.ts).
+        if (calendar) await redateEngagementCycleSteps(c, { tenantId, engagementId: id, today, calendar, actorId: req.principal.userId ?? null });
         const [out] = await readAllocation(c, tenantId, today, true, { engagementId: id });
         return out;
       },

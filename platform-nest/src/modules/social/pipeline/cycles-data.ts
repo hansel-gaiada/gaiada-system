@@ -14,6 +14,7 @@ import { loadWorkingCalendar, HOLIDAY_LOOKAHEAD_DAYS } from "../../reports/dept-
 import { addDays, type WorkingCalendar } from "../../hr/working-days";
 import { declareSocialModuleScope } from "../module-scope";
 import { pushReadyByToContentMonthTask, syncContentMonthTask, type ContentMonthTaskResult } from "./content-month";
+import { syncCycleStepTasks, type CycleStepTasksResult } from "./cycle-steps";
 import { rulesRefFor, socialRules } from "./rules";
 import {
   APPROVAL_WINDOW_DAYS, averageApprovalDays, clientHealth, isClientSlower, lastDayOfMonth, looksLikeIsoDate, parseStepEstimates,
@@ -49,6 +50,9 @@ export async function readSettings(c: PoolClient, tenantId: string): Promise<Soc
 
 /** A ready-by walks back at most the buffer (10 working days); the slack covers a calendar with few working days. */
 export const READY_BY_LOOKBACK_DAYS = 120;
+/** SCP-5f (BFF §63.27.2): a cycle's step tasks walk back from ready-by by the client's estimates (up to six steps of 30 working days), so
+ *  every write that dates them reads the holidays over the health window, not the ready-by one. */
+export const CYCLE_STEPS_LOOKBACK_DAYS = 400;
 /** A health handoff walks back up to six steps of 30 working days behind ready-by (about 250 calendar days), plus the 90-day approval look-back. */
 export const HEALTH_LOOKBACK_DAYS = 400;
 
@@ -124,6 +128,9 @@ export interface RecomputeResult {
  * Recompute `ready_by` for every open cycle of the company from its deadline, the buffer and the calendar, in the caller's transaction
  * (rows locked `FOR UPDATE`). Only a changed value is written. A cycle whose deadline is outside `[range.min, range.max]` (one created
  * between the caller's read of the range and this call) is skipped, because its holidays were not loaded.
+ *
+ * SCP-5f (BFF §63.27.3): every open cycle's step tasks are re-dated too, in cycle-id order (the rows' lock order), even when its ready-by
+ * did not move: a holiday between a step's day and ready-by moves the step alone. The calendar must cover `CYCLE_STEPS_LOOKBACK_DAYS`.
  */
 export async function recomputeOpenReadyBy(
   c: PoolClient,
@@ -141,27 +148,32 @@ export async function recomputeOpenReadyBy(
   for (const r of rows) {
     if (r.deadline < a.range.min || r.deadline > a.range.max) { skipped += 1; continue; }
     const next = readyByFor(r.deadline, a.bufferWorkingDays, a.calendar);
-    if (next === r.ready_by) continue;
-    await c.query(
-      `UPDATE social_cycles SET ready_by = $3::date, updated_by = COALESCE($4, updated_by), updated_at = now() WHERE tenant_id = $1 AND id = $2`,
-      [a.tenantId, r.id, next, a.actorId],
-    );
-    // SCP-1n: the cycle's content-month task is due on its ready-by, so it moves with it.
-    await pushReadyByToContentMonthTask(c, a.tenantId, r.id, next, a.actorId);
-    updated += 1;
+    if (next !== r.ready_by) {
+      await c.query(
+        `UPDATE social_cycles SET ready_by = $3::date, updated_by = COALESCE($4, updated_by), updated_at = now() WHERE tenant_id = $1 AND id = $2`,
+        [a.tenantId, r.id, next, a.actorId],
+      );
+      // SCP-1n: the cycle's content-month task is due on its ready-by, so it moves with it.
+      await pushReadyByToContentMonthTask(c, a.tenantId, r.id, next, a.actorId);
+      updated += 1;
+    }
+    // SCP-5f: then its step tasks (after the content-month task: the lock order), re-dated only (never made here).
+    await syncCycleStepTasks(c, { tenantId: a.tenantId, cycleId: r.id, actorId: a.actorId, calendar: a.calendar, create: false });
   }
   return { checked: rows.length, updated, skipped };
 }
 
 /**
  * One `(engagement, month)` deadline written, in the caller's transaction: the upsert of the cycle row with its `ready_by`, then the content-month
- * PM task (`syncContentMonthTask`, BFF §63.13). `PUT cycles` (BFF §63.5) writes each of its rows through this, and so does the sheet import
- * (BFF §63.23) for a month that has no cycle yet. `readyBy` is the caller's (`readyByFor`: the deadline, the buffer and the calendar).
+ * PM task (`syncContentMonthTask`, BFF §63.13), then the cycle's step tasks (`syncCycleStepTasks`, BFF §63.27: made and re-dated, in that order,
+ * which is the lock order). `PUT cycles` (BFF §63.5) writes each of its rows through this, and so does the sheet import (BFF §63.23) for a month
+ * that has no cycle yet. `readyBy` is the caller's (`readyByFor`: the deadline, the buffer and the calendar); `calendar` dates the steps and must
+ * cover `CYCLE_STEPS_LOOKBACK_DAYS` before the deadline.
  */
 export async function writeCycleInTx(
   c: PoolClient,
-  a: { tenantId: string; engagementId: string; month: string; deadline: string; readyBy: string; actorId: string | null },
-): Promise<{ cycleId: string; task: ContentMonthTaskResult }> {
+  a: { tenantId: string; engagementId: string; month: string; deadline: string; readyBy: string; actorId: string | null; calendar: WorkingCalendar },
+): Promise<{ cycleId: string; task: ContentMonthTaskResult; stepTasks: CycleStepTasksResult }> {
   // SCP-5 W5-A0 (BFF §63.30.3): a new cycle keeps the company's rules it was made under; an existing one keeps its own (the
   // upsert's UPDATE never touches `rules_ref`), so a rules change reaches new cycles only.
   const rulesRef = rulesRefFor(await socialRules(c, a.tenantId));
@@ -177,7 +189,8 @@ export async function writeCycleInTx(
   const task = await syncContentMonthTask(c, {
     tenantId: a.tenantId, cycleId, engagementId: a.engagementId, month: a.month, deadline: a.deadline, readyBy: a.readyBy, actorId: a.actorId,
   });
-  return { cycleId, task };
+  const stepTasks = await syncCycleStepTasks(c, { tenantId: a.tenantId, cycleId, actorId: a.actorId, calendar: a.calendar, create: true });
+  return { cycleId, task, stepTasks };
 }
 
 // The content-month PM task of a cycle (BFF §63.13) is SCP-1n's: `content-month.ts` (the task, made by `PUT cycles`) and

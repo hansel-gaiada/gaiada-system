@@ -35,12 +35,13 @@ import { addDays, parseIsoDate } from "../../hr/working-days";
 import { declareSocialModuleScope } from "../module-scope";
 import { loadSocialApproverIds, socialEngagementResource } from "../pipeline-authz";
 import {
-  HEALTH_LOOKBACK_DAYS, READY_BY_LOOKBACK_DAYS, composeCycleHealth, composeCycleTable, loadCalendarInfo,
+  CYCLE_STEPS_LOOKBACK_DAYS, HEALTH_LOOKBACK_DAYS, READY_BY_LOOKBACK_DAYS, composeCycleHealth, composeCycleTable, loadCalendarInfo,
   openCycleDeadlineRange, readApprovalSamples, readCycle, readCyclePosts, readCycleTableData, readEngagements, readSettings,
   recomputeOpenReadyBy, tableAnchors, todayIsoInTz, writeCycleInTx,
   type CalendarInfo, type CycleTable, type SocialSettings,
 } from "./cycles-data";
 import type { ContentMonthTaskResult } from "./content-month";
+import type { CycleStepTasksResult } from "./cycle-steps";
 import { isMonthKey, lastDayOfMonth, readyByFor, looksLikeIsoDate } from "./schedule-health";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -146,7 +147,8 @@ export class SocialCyclesController {
     const today = todayIsoInTz(config.reportsTz);
     // The deadlines of the open cycles decide which holidays to read; the holidays are read before the transaction (the hr scope is its own).
     const range = await withTenants([tenantId], (c) => openCycleDeadlineRange(c, tenantId, today), { modules: ["social"] });
-    const info = await loadCalendarInfo(tenantId, range ? [range.min, range.max, today] : [today], READY_BY_LOOKBACK_DAYS);
+    // SCP-5f: the cycles' step tasks are re-dated in the same transaction, so the holidays cover the window they walk back over.
+    const info = await loadCalendarInfo(tenantId, range ? [range.min, range.max, today] : [today], CYCLE_STEPS_LOOKBACK_DAYS);
 
     const actorId = req.principal.userId ?? null;
     const result = await withTenants(
@@ -217,9 +219,11 @@ export class SocialCyclesController {
     const today = todayIsoInTz(config.reportsTz);
     const actorId = req.principal.userId ?? null;
     // The holidays the new ready-bys walk across, read before the transaction.
-    const info = await loadCalendarInfo(tenantId, [...rows.map((r) => r.deadline), `${month}-01`, today], READY_BY_LOOKBACK_DAYS);
+    // SCP-5f: and the cycles' step tasks, which walk back further (CYCLE_STEPS_LOOKBACK_DAYS).
+    const info = await loadCalendarInfo(tenantId, [...rows.map((r) => r.deadline), `${month}-01`, today], CYCLE_STEPS_LOOKBACK_DAYS);
 
     const tasks = new Map<string, ContentMonthTaskResult>();
+    const stepTasks = new Map<string, CycleStepTasksResult>();
     await withTenants(
       [tenantId],
       async (c) => {
@@ -230,8 +234,9 @@ export class SocialCyclesController {
         for (const r of rows) if (!found.has(r.engagementId)) throw new NotFoundException({ message: "engagement_not_found", failedId: r.engagementId });
         for (const r of rows) {
           const readyBy = readyByFor(r.deadline, buffer, info.calendar);
-          const written = await writeCycleInTx(c, { tenantId, engagementId: r.engagementId, month, deadline: r.deadline, readyBy, actorId });
+          const written = await writeCycleInTx(c, { tenantId, engagementId: r.engagementId, month, deadline: r.deadline, readyBy, actorId, calendar: info.calendar });
           tasks.set(r.engagementId, written.task);
+          stepTasks.set(r.engagementId, written.stepTasks);
         }
       },
       { modules: ["social"] },
@@ -239,11 +244,13 @@ export class SocialCyclesController {
 
     const table = await this.buildTable(req, tenantId, month, today, true);
     // Additive (SCP-1n): each row names the content-month task of the cycle this call wrote, or why it has none. Rows the call did not write carry none.
+    // Additive (SCP-5f, BFF §63.27.3): and its step tasks, `stepTasks: {created, reason}`: how many this call made (0 on a re-run), or why none.
     return {
       ...table,
       rows: table.rows.map((row) => {
         const t = tasks.get(row.engagementId);
-        return t ? { ...row, contentMonthTask: { taskId: t.taskId, reason: t.reason } } : row;
+        const s = stepTasks.get(row.engagementId);
+        return t ? { ...row, contentMonthTask: { taskId: t.taskId, reason: t.reason }, ...(s ? { stepTasks: { created: s.created, reason: s.reason } } : {}) } : row;
       }),
     } as CycleTable;
   }

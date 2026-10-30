@@ -59,8 +59,13 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // ---------------- SCP-1n (BFF §63.13) — a task can point at a social post ----------------
 // `linked_type`/`linked_id` (migration 202610271410) say which row a task is about. The ROUTES accept only `social_post`: the other kind,
 // `social_cycle`, is the content-month task, which the social pipeline creates and owns (`createPmTaskInTx`'s `link`, never a body).
-export type PmLinkType = "social_post" | "social_cycle";
-export interface PmTaskLink { type: PmLinkType; id: string }
+// SCP-5f (BFF §63.27): `social_cycle_step` is one STEP of the monthly cycle (`linked_id` the cycle, `linked_step` the step key of the
+// company's rules), also created and owned by the pipeline; like the content-month task, no route moves its link (409 `task_link_locked`).
+export type PmLinkType = "social_post" | "social_cycle" | "social_cycle_step";
+/** `step` is set for `social_cycle_step` only (migration 202610301310's pm_tasks_linked_step_ck holds it to that). */
+export interface PmTaskLink { type: PmLinkType; id: string; step?: string }
+/** The link kinds the social pipeline owns: no PM route changes the link of such a task. */
+const PIPELINE_OWNED_LINKS: ReadonlySet<string> = new Set(["social_cycle", "social_cycle_step"]);
 const ROUTE_LINK_TYPES: ReadonlySet<string> = new Set(["social_post"]);
 
 /** PURE. `linkedType`/`linkedId` as a body gave them. `undefined`: neither key was sent (no change). `null`: both were sent as null
@@ -720,7 +725,7 @@ const TASK_SELECT = `
          t.estimate_minutes AS "estimateMinutes", t.depends_on AS "dependsOn", t.tags, t.custom_fields AS "customFields", t.updated_at AS "updatedAt",
          t.block_reason AS "blockReason",
          t.recurrence, p.short_code AS "projectShortCode", t.seq,
-         t.linked_type AS "linkedType", t.linked_id AS "linkedId",
+         t.linked_type AS "linkedType", t.linked_id AS "linkedId", t.linked_step AS "linkedStep",
          CASE WHEN p.short_code IS NOT NULL AND t.seq IS NOT NULL THEN p.short_code || '-' || t.seq ELSE NULL END AS "displayCode",
          COALESCE((SELECT SUM(minutes) FROM time_entries te WHERE te.pm_task_id = t.id AND te.deleted_at IS NULL), 0)::int AS "loggedMinutes",
          COALESCE((
@@ -740,6 +745,7 @@ interface TaskRow {
   recurrence: TaskRecurrence | null;
   projectShortCode: string | null; seq: number | null; displayCode: string | null;
   linkedType: PmLinkType | null; linkedId: string | null; // SCP-1n (BFF §63.13): the row this task points at
+  linkedStep: string | null; // SCP-5f (BFF §63.27.3): the cycle step of a `social_cycle_step` task, else null
   contributors: Contributor[]; // TR-02 — additive; joined off pm_task_assignees, never the blob
 }
 
@@ -1324,12 +1330,13 @@ export async function createPmTaskInTx(
   const seq = await allocateTaskSeq(c, n.projectId);
   const id = newId();
   await c.query(
-    `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, seq, origin_site, linked_type, linked_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+    `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, seq, origin_site, linked_type, linked_id, linked_step)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
     [id, tenantId, n.projectId, n.title, n.description, status, n.priority, progress,
      n.assignee ? JSON.stringify(n.assignee) : null, n.milestoneId, n.startDate, n.dueDate,
      n.estimateMinutes, JSON.stringify(n.customFields), n.recurrence ? JSON.stringify(n.recurrence) : null,
-     JSON.stringify(n.subtasks), n.tags, seq, config.originSite, n.link?.type ?? null, n.link?.id ?? null],
+     JSON.stringify(n.subtasks), n.tags, seq, config.originSite, n.link?.type ?? null, n.link?.id ?? null,
+     n.link?.type === "social_cycle_step" ? n.link.step ?? null : null],
   );
   // TR-02 dual-write: same transaction as the INSERT above, so blob+rows commit or roll back
   // together — a malformed/unknown person ref fails loudly here and the whole task creation
@@ -1436,13 +1443,14 @@ export async function setLinkedTaskProgressInTx(
 
 /** SCP-1n (BFF §63.13) — a re-run of `PUT cycles` updates the content-month task: its due date and, when given, its title and its Ball and
  *  Responsible (the assignee dual-write and the assignment ledger run exactly as `patchTask` runs them); what is left out stays as it is.
- *  Never touches status or progress. MUST run inside `withTenants([tenantId], ...)`. */
+ *  Never touches status or progress. MUST run inside `withTenants([tenantId], ...)`. SCP-5f (BFF §63.27.3): a cycle's step tasks are
+ *  re-dated through it too, and a step may have no due date (`dueDate: null`, a report step for a client without a report day). */
 export async function updateLinkedTaskScheduleInTx(
   c: PoolClient,
   tenantId: string,
   actorUserId: string | null,
   taskId: string,
-  want: { title?: string; dueDate: string; assignee?: NonNullable<Assignee> },
+  want: { title?: string; dueDate: string | null; assignee?: NonNullable<Assignee> },
 ): Promise<{ changed: boolean }> {
   const cur = await c.query<{ title: string; dueDate: string | null; status: string; assignee: Assignee }>(
     `SELECT title, to_char(due_date, 'YYYY-MM-DD') AS "dueDate", status, assignee FROM pm_tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL FOR UPDATE`,
@@ -2357,7 +2365,7 @@ export class PmController {
                  t.estimate_minutes AS "estimateMinutes",
                  t.tags, t.depends_on AS "dependsOn", t.custom_fields AS "customFields",
                  t.recurrence, t.updated_at AS "updatedAt",
-                 t.linked_type AS "linkedType", t.linked_id AS "linkedId",
+                 t.linked_type AS "linkedType", t.linked_id AS "linkedId", t.linked_step AS "linkedStep",
                  -- PV3-07: the portal lists no tasks, so this is the NEVER_CLIENT_VISIBLE constant.
                  ${staffNeverClientVisible("task")} AS "clientVisible",
                  -- description/subtasks/estimateMinutes/customFields/recurrence and the two
@@ -2751,8 +2759,9 @@ export class PmController {
       const task = await fetchTask(c, taskId);
       if (!task) throw new NotFoundException("task not found");
       // SCP-1n: the content-month task belongs to its cycle (the pipeline created it and writes its progress); no route moves it.
+      // SCP-5f (BFF §63.27.3): nor a cycle's step task.
       if (linkChange !== undefined) {
-        if (task.linkedType === "social_cycle") throw new ConflictException({ message: "task_link_locked" });
+        if (task.linkedType !== null && PIPELINE_OWNED_LINKS.has(task.linkedType)) throw new ConflictException({ message: "task_link_locked" });
         await c.query(
           `UPDATE pm_tasks SET linked_type = $2, linked_id = $3, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
           [taskId, linkChange?.type ?? null, linkChange?.id ?? null],
