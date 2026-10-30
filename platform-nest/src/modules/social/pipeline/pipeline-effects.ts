@@ -25,6 +25,7 @@ import { SCP } from "./fixture";
 import { syncContentMonthProgress } from "./content-month-progress";
 import { captionWithHashtags } from "./handoff-checks";
 import { COLUMN_EFFECTS, splitEffect, type PipelinePostState, type StageApplied } from "./machine";
+import { releaseIdeaOfPost } from "./ideas-data";
 import {
   findDepartmentBySlug, loadClientAccounts, loadDesigns, loadVariants, resolveAssetGroup,
   type CycleRow, type EngagementRow, type PostRow,
@@ -651,6 +652,8 @@ export const EFFECT_RUNNERS: Record<string, (run: EffectRun) => Promise<void>> =
   withdraw_pending_client_reviews: (run) => withdrawReviews(run),
   // ── the content-month PM task (SCP-1n, BFF §63.13): its progress, done and reopen follow the cycle's posts, one direction only ──
   content_month_progress: async (run) => { if (run.row.cycle_id) await syncContentMonthProgress(run.c, run.tenantId, run.row.cycle_id, run.actorId || null); },
+  // ── ideas for next month (SCP-5c, BFF §63.25): a discarded post gives its idea back, in the action's own transaction ──
+  release_idea: async (run) => { await releaseIdeaOfPost(run.c, run.tenantId, run.postId); },
   // ── the month request and designs ──
   join_or_open_month_request: joinOrOpenMonthRequest,
   insert_design: insertDesign,

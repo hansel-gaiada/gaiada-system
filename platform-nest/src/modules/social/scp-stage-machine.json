@@ -592,7 +592,7 @@
       "to": "deleted",
       "params": {},
       "guards": [],
-      "effects": ["soft_delete", "content_month_progress"],
+      "effects": ["soft_delete", "release_idea", "content_month_progress"],
       "plan": "§4.3 delete: planned, drafting"
     },
     {
