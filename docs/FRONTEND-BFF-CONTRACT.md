@@ -13418,11 +13418,11 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 
 ### 63.24 Periodic reports, "Generate with AI" and report automation (SCP-5b, SCP-Q37 to SCP-Q40; plan §8 SCP-5) — on 63.18's rows, routes, states and gates — **STATUS: PLANNED (2026-10-30)**
 
-**What it is.** A client's report for a day, a week, a month, a quarter, a half year or a year: the period's numbers, the words that go with them, and what comes next. Each is a `social_reports` row of one kind, on 63.18's routes, its four states (Draft, HoD check, Ready, Sent) and its gates. The monthly report stays exactly as SCP-5a built it; the five other periodic kinds follow its pattern; `campaign` and `adhoc` keep SMM-23's rules. "Generate with AI" drafts them for one client or for every client the person may draft for (63.24.5), an agent drafts them by chat (63.24.6), as the owner ruled (SCP-Q37), and the four can set them to be drafted on a schedule (63.24.9, SCP-Q38).
+**What it is.** A client's report for a day, a week, a month, a quarter, a half year or a year: the period's numbers, the words that go with them, and what comes next. Each is a `social_reports` row of one kind, on 63.18's routes, its four states (Draft, HoD check, Ready, Sent) and its gates. The monthly report stays exactly as SCP-5a built it; the five other periodic kinds follow its pattern; `campaign` and `adhoc` keep SMM-23's rules. **Every rule below is a default** (SCP-Q41): each company sets its own in Settings (63.30), and a report, a run or a schedule's run keeps the rules it was made under (`rules_ref`). "Generate with AI" drafts them for one client or for every client the person may draft for (63.24.5), an agent drafts them by chat (63.24.6), as the owner ruled (SCP-Q37), and the four can set them to be drafted on a schedule (63.24.9, SCP-Q38).
 
 **Who** (SCP-Q25, for every kind). The officer drafts, edits and submits (`social_report` · `create`, `update`); only the four check, send back and send (`approve`, `deliver`, PERMISSION §53.7). Sending renders the PDF and publishes the report to the client's portal reports (PV7-04a), as the monthly does.
 
-**63.24.1 The kinds** (the fixture's `reports.kinds`, both twins; neither side hard-codes this table):
+**63.24.1 The kinds, as seeded** (the seed's `reports.kinds`, 63.30; each company may change every column but the period's format and range):
 
 | Kind | `period` | Range (company days) | Due | Numbers frozen | What the person writes | The HoD check needs |
 |---|---|---|---|---|---|---|
@@ -13434,7 +13434,7 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 | `yearly` | `YYYY` | the calendar year | as quarterly | at create | as the monthly | the notes |
 | `campaign`, `adhoc` | as built (SMM-23) | as built | none | at create | the narrative | nothing, as built |
 
-- **Calendar periods** (SCP-Q39). Quarters, halves and years are calendar ones; the social module has no fiscal year. Working days are the company's HR calendar, Monday to Friday without one.
+- **Calendar periods by default** (SCP-Q39). A company may set its fiscal year's first month (63.30); quarters, halves and years then follow it, and a fiscal year is named by the calendar year it starts in. Working days are the company's HR calendar, Monday to Friday without one.
 - **Due after the period.** Every kind falls due after its period has ended, so a scheduled run (63.24.9), which drafts the period that just ended, never starts late. A short kind is due on the first working day after it; the team may still write one during its period, because its numbers stay live until it is submitted.
 - **Live until submitted** (daily, weekly), because they are written during or just after their period. While `draft`, `GET reports/:id` answers the live numbers with `live: true`. Submitting writes the snapshot into `metrics` in the status change's transaction, frozen from then on; a send-back keeps it and the next submit takes it again. At submit the AI drafts' numbers guard (`findUngroundedNumbers`) runs on the summary against the new snapshot: a summary stating a number the snapshot no longer holds is 400 `summary_numbers_changed` with those numbers. What the four check is what the client receives.
 - **Frozen at create** (monthly, quarterly, semester, yearly), because they look back on a finished period. The monthly keeps SMM-23's create as built; the three longer kinds need their period to have ended (400 `period_not_over`).
@@ -13450,21 +13450,22 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 - `ux_social_reports_periodic UNIQUE (tenant_id, engagement_id, kind, period) WHERE kind IN ('daily','weekly','quarterly','semester','yearly') AND deleted_at IS NULL`: one report per client, kind and period. The monthly keeps SCP-5a's advisory lock instead: older monthly rows may repeat a period, and an index on them would fail the boot.
 - `social_engagements.report_kinds text[] NOT NULL DEFAULT '{}'`, `CHECK (report_kinds <@ ARRAY['daily','weekly','quarterly','semester','yearly']::text[])`: the periodic kinds the client is due besides the monthly (SCP-Q26, applied per kind since SCP-Q37). It drives Needs you, the dashboard and "all clients" (63.24.5); any kind can still be written for any client.
 - `social_report_schedules`, the report automation (63.24.9), created before the runs table, whose `schedule_id` points at it.
+- `rules_ref` (63.30.3): `social_reports` gains it in the rules file; `social_report_runs` declares it here.
 - `social_report_runs`, the bulk runs (63.24.5).
 
 **63.24.3 Routes** (63.18's; gates unchanged; additions only; the order is unchanged: 404, the gate's 403, 400, then the status refusals):
 
 | Route | What changes |
 |---|---|
-| `POST engagements/:engagementId/reports` | Takes every kind. A new kind needs its `period` in its format, a real date or week, not in the future (400 `invalid_field` `{field: 'period'}`); quarterly, semester and yearly need it ended (400 `period_not_over`). Every kind is drafted with AI at create, as the monthly is, with the plain template when the gateway fails (`draftedVia: 'ai'\|'fallback'`): a short kind's summary and next-period line from its live numbers, a long kind's narrative, notes and action plan from its frozen ones. One per client, kind and period: an existing report is answered as it is (`draftedVia: 'existing'`) before any gateway call, under the advisory lock `social_report:<engagementId>:<kind>:<period>`, with the unique index as the new kinds' backstop. The internal client is refused as today |
+| `POST engagements/:engagementId/reports` | Takes every kind the company has on (409 `report_kind_off` otherwise), and records the company's rules in `rules_ref`. With the kind's AI drafting off it writes an empty draft (`draftedVia: 'none'`). A new kind needs its `period` in its format, a real date or week, not in the future (400 `invalid_field` `{field: 'period'}`); a kind frozen at create needs it ended (400 `period_not_over`; by default quarterly, semester and yearly, the monthly keeping SCP-5a's create). Every kind is drafted with AI at create, as the monthly is, with the plain template when the gateway fails (`draftedVia: 'ai'\|'fallback'`): a short kind's summary and next-period line from its live numbers, a long kind's narrative, notes and action plan from its frozen ones. One per client, kind and period: an existing report is answered as it is (`draftedVia: 'existing'`) before any gateway call, under the advisory lock `social_report:<engagementId>:<kind>:<period>`, with the unique index as the new kinds' backstop. The internal client is refused as today |
 | `GET reports?kind=&engagementId=&status=&period=` | `kind` filters (400 `{field: 'kind'}` outside the eight); `period` takes every form. Rows gain `due`, `summaryPresent` and `live` |
 | `GET reports/:id` | The row gains `nextPeriod`, `due` and `live`; a short kind's document gains the summary, its KPIs and the `best_post` and `next_period` tables |
-| `PATCH reports/:id` | Gains `nextPeriod` (daily and weekly only, ≤ 1,000, else 400 `{field: 'nextPeriod'}`). On a short kind, `narrativeMd` ≤ 1,000 and `notes` or `actionPlan` are 400 `{field}`. Submitting a short kind needs a summary (400 `summary_missing`), takes the snapshot and runs the guard (400 `summary_numbers_changed`) |
+| `PATCH reports/:id` | Gains `nextPeriod`. The report's own rules decide which parts it takes and their limits (by default a short kind takes `narrativeMd` ≤ 1,000 and `nextPeriod` ≤ 1,000, and a long kind the narrative, `notes` in its areas and `actionPlan`); a part the rules leave out is 400 `{field}`. Submitting a kind frozen at submit takes the snapshot and runs the guard (400 `summary_numbers_changed`); submitting any kind needs what its `checkRequires` names |
 | `POST reports/:id/ai-draft` | A short kind answers `{narrativeMd, nextPeriod, draftedVia: 'ai'\|'template'}`; a long kind answers as the monthly (63.18). A proposal: nothing is saved |
-| `POST reports/:id/approve` | `summary_missing` on a short kind and `notes_incomplete` on a long one, each re-checked in the UPDATE, as 63.18's notes rule is |
+| `POST reports/:id/approve` | What the report's `checkRequires` names, each re-checked in the UPDATE as 63.18's notes rule is: `summary_missing` (the narrative), `notes_incomplete`, `action_plan_missing`, `next_period_missing`. By default a short kind needs its summary and a long kind its notes |
 | `POST reports/:id/deliver` | Unchanged: the PDF and the PV7-04a publication, titled per kind |
 
-New codes, all 400 through the module's `refuse()`: `summary_missing`, `summary_numbers_changed`, `period_not_over`; the fixture's `reports` block lists them.
+New codes: 400 through the module's `refuse()`, `summary_missing`, `summary_numbers_changed`, `period_not_over`, `action_plan_missing`, `next_period_missing`; 409 `report_kind_off` and `ai_drafting_off` (63.30.6). The fixture's `reports` block lists them.
 
 **63.24.4 Needs you, the allocation and the dashboard.**
 - The officer's Needs you (63.7) gains `periodic_report_due` for each client and each kind in its `report_kinds`, from the period's due day until the report is `delivered` (`due` the due day; `href` the report, or the create form when there is none). The monthly item stays as 63.18 built it. The four's "to check" and "ready to send" items already count every kind.
@@ -13476,7 +13477,7 @@ New codes, all 400 through the module's `refuse()`: `summary_missing`, `summary_
 - **All clients: `POST reports/generate`** `{id, kind, period}`.
   - **The gate:** `social_report` · `create`, a company-level decision as in 63.18 (the report kind carries no client); without it, 403. **The clients the caller may draft for:** one of the four (`social_engagement` · `plan`, asked as a plain check) gets every active engagement; anyone else holding `create` gets the engagements they are the officer of. Nobody else is listed. The set is decided once, at the route, and the run drafts exactly those clients.
   - **Left out or skipped:** an engagement that is not `active` is left out; for a kind other than the monthly, a client not due it is listed `skipped` with `kind_not_due`; the internal client `skipped` with `internal_client`.
-  - **Validation:** as the create route; the monthly also needs an ended month here (400 `period_not_over`), because it freezes at create and a run over a month still going would freeze half of it.
+  - **Validation:** as the create route, from the company's current rules: 409 `report_kind_off` for a kind turned off, 409 `ai_drafting_off` for a kind drafted by hand. Here every kind frozen at create needs its period ended, the monthly included (400 `period_not_over`): a run over a period still going would freeze half of it.
   - **Refusals:** 409 `generation_running` `{runId}` while a run for the same company, kind and period is queued or running. A replayed `id` answers 200 with the run as it stands; otherwise 202 `{runId, kind, period, total, clients: [{engagementId, clientName}]}`.
 - **A background run, not one request:** about twenty clients at the gateway's latency (seconds to tens of seconds a draft) take minutes even four at a time, longer than a browser, the proxy or an agent's tool call should hold a request open; a run outlives a closed tab or a restart and reports its progress.
 - **`social_report_runs`** (third wall, in 63.24.2's migration):
@@ -13487,6 +13488,7 @@ New codes, all 400 through the module's `refuse()`: `summary_missing`, `summary_
 | `kind`, `period` | as the reports': the kind's CHECK and format |
 | `requested_by` | `uuid NOT NULL → users`: the person, also when an agent asked for them; for a scheduled run, the schedule's owner |
 | `via` | `jsonb NULL`: the agent, as `metadata.via`; for a scheduled run `{automation: 'report_schedule', scheduleId}` |
+| `rules_ref` | `text NOT NULL`: the company's rules the run was made under (63.30.3); each of its reports records the same |
 | `trigger`, `schedule_id` | `text NOT NULL DEFAULT 'person'`: `person`, `schedule` (the job) or `run_now` (a schedule's "Run now"); `uuid NULL`, composite FK to `social_report_schedules` |
 | `status` | `text NOT NULL DEFAULT 'queued'`: `queued`, `running`, `done`, `failed` |
 | `total`, `done_count` | `smallint NOT NULL` |
@@ -13546,7 +13548,7 @@ These tools only draft. Approving, sending back and sending stay `social.approve
 | `kind` | `text NOT NULL`: `daily`, `weekly`, `monthly`, `quarterly`, `semester`, `yearly` |
 | `scope`, `engagement_ids` | `text NOT NULL`: `all` (every client the owner may draft for at run time) or `chosen`; `uuid[] NOT NULL DEFAULT '{}'`, 1 to 200 for `chosen` |
 | `timing` | `jsonb NOT NULL`: the kind's shape (below), validated by the route |
-| `enabled`, `paused_reason`, `paused_at`, `paused_by` | `boolean NOT NULL DEFAULT true`; `text NULL`: `manual`, `owner_not_allowed`, `owner_inactive`; when; who (NULL when the job paused it) |
+| `enabled`, `paused_reason`, `paused_at`, `paused_by` | `boolean NOT NULL DEFAULT true`; `text NULL`: `manual`, `owner_not_allowed`, `owner_inactive`, `kind_off` (the company turned the kind off, 63.30), `ai_drafting_off`; when; who (NULL when the job paused it) |
 | `next_run_at`, `next_period` | `timestamptz NULL`, `text NULL`: computed by the server; NULL while paused |
 | `last_run_at`, `last_period` | NULL until the first run. The last run itself is the newest `social_report_runs` row of the schedule, so there is no back-pointer and no circular FK |
 | `created_at`, `updated_by`, `updated_at`, `deleted_at`, `deleted_by`, `origin_site` | as usual |
