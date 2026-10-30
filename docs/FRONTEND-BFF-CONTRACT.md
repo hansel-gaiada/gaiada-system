@@ -13426,15 +13426,16 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 
 | Kind | `period` | Range (company days) | Due | Numbers frozen | What the person writes | The HoD check needs |
 |---|---|---|---|---|---|---|
-| `daily` | `YYYY-MM-DD` | the day | the next working day | at submit | a summary (≤ 1,000) and the next day's line (`next_period`, ≤ 1,000) | a summary (`summary_missing`) |
-| `weekly` | ISO `YYYY-Www` | Monday to Sunday | the week's last working day | at submit | a summary and next week's line | a summary |
+| `daily` | `YYYY-MM-DD` | the day | the first working day after it | at submit | a summary (≤ 1,000) and the next day's line (`next_period`, ≤ 1,000) | a summary (`summary_missing`) |
+| `weekly` | ISO `YYYY-Www` | Monday to Sunday | the first working day after the week | at submit | a summary and next week's line | a summary |
 | `monthly` | `YYYY-MM` | the month | `report_due_day` of the next month (63.18) | at create, as built | the narrative, the three notes, the action plan | the notes (`notes_incomplete`, as built) |
 | `quarterly` | `YYYY-Qn` | three calendar months | `report_due_day` of the month after; none without one | at create | as the monthly | the notes |
 | `semester` | `YYYY-Hn` | January to June, or July to December | as quarterly | at create | as the monthly | the notes |
 | `yearly` | `YYYY` | the calendar year | as quarterly | at create | as the monthly | the notes |
 | `campaign`, `adhoc` | as built (SMM-23) | as built | none | at create | the narrative | nothing, as built |
 
-- **Calendar periods.** Quarters, halves and years are calendar ones; the social module has no fiscal year. Working days are the company's HR calendar, Monday to Friday without one.
+- **Calendar periods** (SCP-Q39). Quarters, halves and years are calendar ones; the social module has no fiscal year. Working days are the company's HR calendar, Monday to Friday without one.
+- **Due after the period.** Every kind falls due after its period has ended, so a scheduled run (63.24.9), which drafts the period that just ended, never starts late. A short kind is due on the first working day after it; the team may still write one during its period, because its numbers stay live until it is submitted.
 - **Live until submitted** (daily, weekly), because they are written during or just after their period. While `draft`, `GET reports/:id` answers the live numbers with `live: true`. Submitting writes the snapshot into `metrics` in the status change's transaction, frozen from then on; a send-back keeps it and the next submit takes it again. At submit the AI drafts' numbers guard (`findUngroundedNumbers`) runs on the summary against the new snapshot: a summary stating a number the snapshot no longer holds is 400 `summary_numbers_changed` with those numbers. What the four check is what the client receives.
 - **Frozen at create** (monthly, quarterly, semester, yearly), because they look back on a finished period. The monthly keeps SMM-23's create as built; the three longer kinds need their period to have ended (400 `period_not_over`).
 - **Notes and the action plan** belong to the monthly, quarterly, semester and yearly kinds: the same three areas (followers, engagement, audience) and at most ten actions, validated as 63.18. On a daily or weekly report they are 400 `{field}`; the summary and the `next_period` line take their place. `notes_incomplete` binds those four kinds, `summary_missing` the two short ones, and `campaign` and `adhoc` neither.
@@ -13448,6 +13449,7 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 - `next_period text NULL`, `social_reports_next_period_ck CHECK (next_period IS NULL OR (kind IN ('daily','weekly') AND char_length(next_period) <= 1000))`. A short kind's summary is the existing `narrative_md` (≤ 1,000, the route's rule).
 - `ux_social_reports_periodic UNIQUE (tenant_id, engagement_id, kind, period) WHERE kind IN ('daily','weekly','quarterly','semester','yearly') AND deleted_at IS NULL`: one report per client, kind and period. The monthly keeps SCP-5a's advisory lock instead: older monthly rows may repeat a period, and an index on them would fail the boot.
 - `social_engagements.report_kinds text[] NOT NULL DEFAULT '{}'`, `CHECK (report_kinds <@ ARRAY['daily','weekly','quarterly','semester','yearly']::text[])`: the periodic kinds the client is due besides the monthly (SCP-Q26, applied per kind since SCP-Q37). It drives Needs you, the dashboard and "all clients" (63.24.5); any kind can still be written for any client.
+- `social_report_schedules`, the report automation (63.24.9), created before the runs table, whose `schedule_id` points at it.
 - `social_report_runs`, the bulk runs (63.24.5).
 
 **63.24.3 Routes** (63.18's; gates unchanged; additions only; the order is unchanged: 404, the gate's 403, 400, then the status refusals):
@@ -13483,22 +13485,24 @@ New codes, all 400 through the module's `refuse()`: `summary_missing`, `summary_
 |---|---|
 | `id`, `tenant_id` | uuid PK, the caller's run id |
 | `kind`, `period` | as the reports': the kind's CHECK and format |
-| `requested_by` | `uuid NOT NULL → users`: the person, also when an agent asked for them |
-| `via` | `jsonb NULL`: the agent, as `metadata.via` |
+| `requested_by` | `uuid NOT NULL → users`: the person, also when an agent asked for them; for a scheduled run, the schedule's owner |
+| `via` | `jsonb NULL`: the agent, as `metadata.via`; for a scheduled run `{automation: 'report_schedule', scheduleId}` |
+| `trigger`, `schedule_id` | `text NOT NULL DEFAULT 'person'`: `person`, `schedule` (the job) or `run_now` (a schedule's "Run now"); `uuid NULL`, composite FK to `social_report_schedules` |
 | `status` | `text NOT NULL DEFAULT 'queued'`: `queued`, `running`, `done`, `failed` |
 | `total`, `done_count` | `smallint NOT NULL` |
 | `results` | `jsonb NOT NULL DEFAULT '[]'`: `[{engagementId, clientName, reportId?, status: 'created'\|'existing'\|'skipped'\|'failed', draftedVia?, reason?, simulated?}]` |
 | `heartbeat_at`, `started_at`, `finished_at`, `created_at`, `origin_site` | |
 
-CHECKs: `(status IN ('done','failed')) = (finished_at IS NOT NULL)`; `status = 'queued' OR started_at IS NOT NULL`; `done_count BETWEEN 0 AND total`; `jsonb_typeof(results) = 'array'`. `ux_social_report_runs_active UNIQUE (tenant_id, kind, period) WHERE status IN ('queued','running')`.
+CHECKs: `(status IN ('done','failed')) = (finished_at IS NOT NULL)`; `status = 'queued' OR started_at IS NOT NULL`; `done_count BETWEEN 0 AND total`; `jsonb_typeof(results) = 'array'`; `trigger IN ('person','schedule','run_now')` and `(trigger = 'person') = (schedule_id IS NULL)`. `ux_social_report_runs_active UNIQUE (tenant_id, kind, period) WHERE status IN ('queued','running')`; `ux_social_report_runs_schedule UNIQUE (schedule_id, period) WHERE schedule_id IS NOT NULL`: one run per schedule and period.
 
 - **The worker.** After the commit the route starts the run in the process without waiting for it; the job `social-report-runs` (every minute) starts runs still `queued` and resumes `running` ones whose `heartbeat_at` is more than five minutes old (their instance died).
-  - Each client goes through the create route's own path, as the person who asked; usage is attributed to them (AIP).
+  - Each client goes through the create route's own path, as the person who asked.
+  - **AI spend is tracked, never capped** (SCP-Q40). Every generation call, whether for one client, a run, a schedule or a chat, is recorded in the AI usage record (§64, `ai_usage_events`) through `aiAttribution(<the person>, tenantId, 'other', {task: 'social.report_generate', runId})`. `runId` is the run's id for a run (so a schedule's spend is the sum over its runs) and NULL for a one-client create. Nothing is capped or refused on spend; a refusal by the gateway itself (its company budget, AIP) is a gateway failure like any other, and the template fills the draft.
   - At most four drafts in flight per run, and one running run per company (the job starts the next when the current one ends); the gateway's own limits apply on top.
   - **Idempotent per client, kind and period:** a client whose report already exists, in any state, is `existing` and never redrafted; a resumed run skips the clients already in `results`.
   - **One failure never stops the others:** a client whose draft throws is `failed` with its reason. A gateway that is down is not a failure: the template fills the draft (`created`, `draftedVia: 'fallback'`), as 63.18. A run ends `done` when every client has a result, and `failed` only when the run itself cannot go on, its results kept.
   - Each report's `created` activity carries `metadata.runId`. When the run ends the person gets `social.reports.generated` ("12 drafts ready, 6 already there, 1 failed"), linking to the list filtered to the kind and period.
-- **Progress: `GET reports/generate/:runId`** (`social_report` · `read`; the run's person or one of the four, else 404 `run_not_found`) answers `{runId, kind, period, status, total, done, results, startedAt, finishedAt}`. `GET reports/generate` lists the last 30 days' runs: the company's for the four, one's own for anyone else.
+- **Progress: `GET reports/generate/:runId`** (`social_report` · `read`; the run's person or one of the four, else 404 `run_not_found`) answers `{runId, kind, period, status, total, done, results, startedAt, finishedAt, trigger, scheduleId, usage: {calls, promptTokens, completionTokens, costUsd}}`, `usage` summed from `ai_usage_events` by `run_id` (`costUsd` null while no call has a cost; SCP-Q40). `GET reports/generate?scheduleId=` lists the last 30 days' runs, or one schedule's: the company's for the four, one's own for anyone else.
 
 **63.24.6 By chat** (SCP-Q37; 63.15's on-behalf-of model). The agent arrives as the person who asked, so the gate, the narrowing to their clients and every refusal are theirs; the run's `via` and each report's activity record the agent.
 
@@ -13518,7 +13522,7 @@ These tools only draft. Approving, sending back and sending stay `social.approve
 
 **63.24.8 Proofs** (63.21's rules):
 - the migration: one CHECK on `kind`, admitting the eight; the period CHECK refusing a NULL or malformed period for each new kind (`2026-W54`, `2026-Q5`, `2026-H3`, `26`) and admitting `2026-W53`; a monthly, campaign or adhoc row with any period still admitted; `next_period` refused on a long kind; the unique index; `report_kinds`; the runs' CHECKs and one active run per company, kind and period; no row changed;
-- each kind's range and due day on a golden table: a holiday after a daily, a holiday Friday, a quarter's and a year's turn, no `report_due_day`;
+- each kind's range and due day on a golden table: a holiday after a daily, a holiday Monday after a week, a quarter's and a year's turn, no `report_due_day`;
 - one report per client, kind and period under two concurrent creates;
 - the short kinds live while a draft, frozen at submit, taken again after a send-back, and `summary_numbers_changed` when a stated number moved; the long kinds frozen at create, and `period_not_over`;
 - `summary_missing` and `notes_incomplete` each on its own kinds only; notes refused on a short kind;
