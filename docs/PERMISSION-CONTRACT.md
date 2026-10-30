@@ -3333,6 +3333,8 @@ that §53, or the PM sections, already define:
 | Periodic reports, every kind: send back, approve, send | `social_report` · `approve`, `deliver` (§53.7) | the four (SCP-Q25) |
 | "Generate with AI" for all clients (63.24.5) | `social_report` · `create`, then a narrowing in the handler that never widens: one of the four (`social_engagement` · `plan`, asked as a plain check) gets every active client, anyone else only the clients they are the officer of | the four, and each officer for their own clients |
 | A run's progress | `social_report` · `read`, then the handler: the run's person or one of the four | as the row says |
+| Report automation: list, add, change, pause, resume, delete, Run now (63.24.9) | `social_engagement` · `plan` | the four (SCP-Q38) |
+| A scheduled run | no rule of its own: the owner's own decisions, asked again at run time (`social_engagement` · `plan`, then `social_report` · `create`, with the narrowing above), and on a refusal the run is skipped and the schedule paused | the schedule's owner, one of the four. Every run has its person, so SCP-Q17 holds; an automation principal can neither own nor run a schedule (the DENY of §53.3 on `plan`) |
 | The allocation's `reportKinds` | `social_engagement` · `plan` (§53.6) | the four |
 | Ideas: read (63.25) | `social_post` · `read` | the team's read tier |
 | Ideas: add, edit, share, plan, delete | `social_post` · `create`, then `author` or `approve` on the client's would-be post, in one `checkMany` (§53.2's create check) | the client's officer and the four |
