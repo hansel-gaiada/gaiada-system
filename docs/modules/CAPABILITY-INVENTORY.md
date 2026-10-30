@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **294** capabilities across **17** owners
-- **156** writes · 138 reads
-- Writes by impact: **high 28** · medium 44 · low 84
+- **296** capabilities across **17** owners
+- **157** writes · 139 reads
+- Writes by impact: **high 28** · medium 44 · low 85
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | pm | `pm` | 19 |
 | reports | `checkins` · `reports` | 24 |
 | search | `search` | 31 |
-| social | `social` | 39 |
+| social | `social` | 40 |
 | webdev | `webdev` | 41 |
 
 ## Capabilities
@@ -277,6 +277,8 @@ unfalsifiable after.
 | social | `social.requestClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | write | `medium` |
 | social | `social.resetRules` | `POST` | `/api/:tenantId/modules/social/rules/:section/reset` | write | `medium` |
 | social | `social.rules` | `GET` | `/api/:tenantId/modules/social/rules` | read | — |
+| social | `social.savedItems` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/saved` | read | — |
+| social | `social.saveItem` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/saved` | write | `low` |
 | social | `social.sendReply` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send` | write | `high` |
 | social | `social.setEngagementScope` | `PATCH` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | write | `medium` |
 | social | `social.setRules` | `PUT` | `/api/:tenantId/modules/social/rules/:section` | write | `medium` |
