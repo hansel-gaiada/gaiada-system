@@ -107,7 +107,7 @@ client's photos". Resolving it returns the post to the step it left.
 
 **Ruled by the owner on 2026-10-30** (relayed first-hand by the orchestrating session). SCP-Q25 to SCP-Q36 were raised by the
 contract for the rest of SCP-5 (BFF §63.24 to §63.29), each with a recommended default, and the owner took every default in two
-words: "accept default". SCP-Q37 is the owner's own.
+words: "accept default". SCP-Q37 to SCP-Q40 are the owner's own, ruled the same day.
 
 | # | Question | Ruling |
 |---|---|---|
@@ -124,6 +124,9 @@ words: "accept default". SCP-Q37 is the owner's own.
 | SCP-Q35 | The onboarding checklist? | **The team's fifteen steps in six phases, reworded,** seeded as a PM project template the four edit; the team sets the offsets. |
 | SCP-Q36 | Who starts a client's onboarding? | **The four,** because it hands tasks to people. |
 | SCP-Q37 | Reports on demand (the owner, 2026-10-30) | **AI generates the reports, for one client or for all, at any period, and by chat.** The owner's words: "the goal is to have a button to make ai generate the reports. it could be per client or all, daily, weekly, monthly, quarterly, semester, yearly. and by chat with ai." Periodic reports from daily to yearly on `social_reports`; "Generate with AI" for one client or for every client the person may draft for; an agent tool that drafts and never approves or sends (BFF §63.24). The four still check and send every kind (SCP-Q25). |
+| SCP-Q38 | Reports generated on a schedule, set in the UI | **Yes, owned by the approver who sets it.** The owner's words: "proceed. also ensure the UI is ready and HOD can set the automation however he need in the UI". The four set report schedules (kind, clients, timing, on or off) in a "Report automation" section of `{D}/settings`; each run drafts the period that just ended through "Generate with AI" and acts as the schedule's owner, re-authorized at run time; if the owner no longer may, the run is skipped and the schedule pauses with the reason (BFF §63.24.9). This is how SCP-Q17 is kept: every run has its person; unattended principals stay refused. Runs only draft. |
+| SCP-Q39 | Report periods: calendar or fiscal? | **Calendar** quarters, halves and years. |
+| SCP-Q40 | Cap the AI spend of report generation? | **Track it, never cap it.** The owner's words: "we track but not cap it". Every generation call is recorded in the AI usage record with its run, each run shows its tokens and cost, and each schedule its spend; nothing is refused on spend (BFF §63.24.5, §63.24.9). |
 
 **Open:** none.
 
