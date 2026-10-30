@@ -1,4 +1,4 @@
-// AIP-17b — migration 202610300400_ai_budgets.sql, the file's own text (no database needed; always runs). The live half is
+// AIP-17b — migration 202610301330_ai_budgets.sql, the file's own text (no database needed; always runs). The live half is
 // ai-budgets.db.test.ts.
 //
 // Proves: no data change (no INSERT, UPDATE, DELETE or TRUNCATE) and no row count of a FORCE-RLS table (the unset-GUC zero-row trap); LF only;
@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 
-const sql = readFileSync(join(__dirname, "..", "..", "..", "migrations", "202610300400_ai_budgets.sql"), "utf8");
+const sql = readFileSync(join(__dirname, "..", "..", "..", "migrations", "202610301330_ai_budgets.sql"), "utf8");
 const code = sql.split("\n").map((l) => (l.includes("--") ? l.slice(0, l.indexOf("--")) : l)).join("\n");
 
 describe("AIP-17b · the migration file", () => {

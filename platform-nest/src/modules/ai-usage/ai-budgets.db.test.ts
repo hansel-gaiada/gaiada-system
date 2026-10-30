@@ -1,4 +1,4 @@
-// AIP-17b — migration 202610300400_ai_budgets.sql against LIVE Postgres. Needs DATABASE_URL_TEST; it SKIPS without one, and a skip is not a
+// AIP-17b — migration 202610301330_ai_budgets.sql against LIVE Postgres. Needs DATABASE_URL_TEST; it SKIPS without one, and a skip is not a
 // pass. initTestDb() hands us a fully migrated database and repoints the app at a NOSUPERUSER NOBYPASSRLS role, so RLS is really exercised
 // through withTenants. Seeding and "what is really stored" go through the superuser pool, which bypasses RLS but never a CHECK or an index.
 //
@@ -15,9 +15,9 @@ import { withTenants } from "../../db";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../../testing/setup";
 import { createCompany, createUser } from "../../testing/fixtures";
 
-const MIGRATION = "202610300400_ai_budgets.sql";
+const MIGRATION = "202610301330_ai_budgets.sql";
 
-describe.skipIf(!TEST_URL)("AIP-17b · ai_budgets, ai_person_allowances, ai_usage_alerts (202610300400)", () => {
+describe.skipIf(!TEST_URL)("AIP-17b · ai_budgets, ai_person_allowances, ai_usage_alerts (202610301330)", () => {
   let A: string;
   let B: string;
   let u1: string;

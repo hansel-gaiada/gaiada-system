@@ -32,10 +32,10 @@
 DO $$
 BEGIN
   IF to_regprocedure('app_current_tenants()') IS NULL THEN
-    RAISE EXCEPTION '202610300400: app_current_tenants() is missing (0025)';
+    RAISE EXCEPTION '202610301330: app_current_tenants() is missing (0025)';
   END IF;
   IF to_regclass('users') IS NULL OR to_regclass('companies') IS NULL THEN
-    RAISE EXCEPTION '202610300400: companies and users must exist';
+    RAISE EXCEPTION '202610301330: companies and users must exist';
   END IF;
 END $$;
 
@@ -184,7 +184,7 @@ BEGIN
    WHERE NOT EXISTS (SELECT 1 FROM pg_constraint pc
                       WHERE pc.conrelid = to_regclass(want.tbl) AND pc.conname = want.c AND pc.contype = 'c' AND pc.convalidated);
   IF missing IS NOT NULL THEN
-    RAISE EXCEPTION '202610300400: missing or unvalidated CHECKs: %', missing;
+    RAISE EXCEPTION '202610301330: missing or unvalidated CHECKs: %', missing;
   END IF;
 
   SELECT count(*) INTO n FROM information_schema.columns
@@ -193,7 +193,7 @@ BEGIN
        OR (table_name = 'ai_person_allowances' AND column_name IN ('tenant_id', 'user_id', 'daily_replies'))
        OR (table_name = 'ai_usage_alerts' AND column_name IN ('tenant_id', 'kind', 'subject', 'period', 'threshold', 'sent_at')));
   IF n <> 13 THEN
-    RAISE EXCEPTION '202610300400: the required columns must be NOT NULL, found % of 13', n;
+    RAISE EXCEPTION '202610301330: the required columns must be NOT NULL, found % of 13', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_indexes
@@ -201,29 +201,29 @@ BEGIN
      AND ((indexname = 'ux_ai_budgets_company' AND indexdef LIKE 'CREATE UNIQUE INDEX%' AND indexdef LIKE '%(tenant_id)%' AND indexdef LIKE '%scope = ''company''%')
        OR (indexname = 'ux_ai_budgets_unit' AND indexdef LIKE 'CREATE UNIQUE INDEX%' AND indexdef LIKE '%(tenant_id, unit_node_id)%' AND indexdef LIKE '%scope = ''unit''%'));
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610300400: the two partial unique indexes on ai_budgets must exist, found % of 2', n;
+    RAISE EXCEPTION '202610301330: the two partial unique indexes on ai_budgets must exist, found % of 2', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_constraint
    WHERE contype = 'p' AND conrelid IN (to_regclass('ai_person_allowances'), to_regclass('ai_usage_alerts'));
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610300400: ai_person_allowances and ai_usage_alerts must each have a primary key, found % of 2', n;
+    RAISE EXCEPTION '202610301330: ai_person_allowances and ai_usage_alerts must each have a primary key, found % of 2', n;
   END IF;
 
   FOREACH t IN ARRAY ARRAY['ai_budgets', 'ai_person_allowances', 'ai_usage_alerts'] LOOP
     SELECT count(*) INTO n FROM pg_class WHERE oid = to_regclass(t) AND relrowsecurity AND relforcerowsecurity;
     IF n <> 1 THEN
-      RAISE EXCEPTION '202610300400: % must have RLS ENABLED and FORCED', t;
+      RAISE EXCEPTION '202610301330: % must have RLS ENABLED and FORCED', t;
     END IF;
     SELECT count(*) INTO n FROM pg_policies
      WHERE schemaname = current_schema() AND tablename = t AND policyname = 'tenant_isolation' AND cmd = 'ALL'
        AND qual LIKE '%app_current_tenants()%' AND with_check LIKE '%app_current_tenants()%';
     IF n <> 1 THEN
-      RAISE EXCEPTION '202610300400: % needs exactly the tenant_isolation policy over app_current_tenants()', t;
+      RAISE EXCEPTION '202610301330: % needs exactly the tenant_isolation policy over app_current_tenants()', t;
     END IF;
     SELECT count(*) INTO n FROM pg_policies WHERE schemaname = current_schema() AND tablename = t;
     IF n <> 1 THEN
-      RAISE EXCEPTION '202610300400: % must carry no policy other than tenant_isolation, found %', t, n;
+      RAISE EXCEPTION '202610301330: % must carry no policy other than tenant_isolation, found %', t, n;
     END IF;
   END LOOP;
 
@@ -232,12 +232,12 @@ BEGIN
         AND has_table_privilege('platform_app', 'ai_budgets', 'UPDATE') AND has_table_privilege('platform_app', 'ai_budgets', 'DELETE')
         AND has_table_privilege('platform_app', 'ai_person_allowances', 'SELECT') AND has_table_privilege('platform_app', 'ai_person_allowances', 'INSERT')
         AND has_table_privilege('platform_app', 'ai_person_allowances', 'UPDATE') AND has_table_privilege('platform_app', 'ai_person_allowances', 'DELETE')) THEN
-      RAISE EXCEPTION '202610300400: platform_app must hold SELECT, INSERT, UPDATE and DELETE on ai_budgets and ai_person_allowances';
+      RAISE EXCEPTION '202610301330: platform_app must hold SELECT, INSERT, UPDATE and DELETE on ai_budgets and ai_person_allowances';
     END IF;
     IF has_table_privilege('platform_app', 'ai_usage_alerts', 'UPDATE') OR has_table_privilege('platform_app', 'ai_usage_alerts', 'DELETE')
        OR has_table_privilege('platform_app', 'ai_usage_alerts', 'TRUNCATE')
        OR NOT has_table_privilege('platform_app', 'ai_usage_alerts', 'SELECT') OR NOT has_table_privilege('platform_app', 'ai_usage_alerts', 'INSERT') THEN
-      RAISE EXCEPTION '202610300400: platform_app must hold exactly SELECT and INSERT on ai_usage_alerts';
+      RAISE EXCEPTION '202610301330: platform_app must hold exactly SELECT and INSERT on ai_usage_alerts';
     END IF;
   END IF;
 END $$;

@@ -14397,7 +14397,7 @@ GET units/:id -> "budget": { ...the same unit line } | null     // that unit's O
 
 ### 66.9 Budget and allowance writes (AIP-17b, 2026-10-30, BUILT server only)
 
-`platform-nest/src/modules/ai-usage/{budgets.controller,budgets.service,budgets}.ts`; migration `202610300400_ai_budgets.sql` (`ai_budgets`, `ai_person_allowances`,
+`platform-nest/src/modules/ai-usage/{budgets.controller,budgets.service,budgets}.ts`; migration `202610301330_ai_budgets.sql` (`ai_budgets`, `ai_person_allowances`,
 `ai_usage_alerts`, all FORCE RLS). Every route needs `manage` on `ai_usage`: **the owner and the superadmin only** (company_admin, the GM, a head, a member, a bot and
 another company's people are 403).
 
