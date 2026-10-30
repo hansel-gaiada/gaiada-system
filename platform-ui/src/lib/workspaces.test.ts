@@ -479,7 +479,7 @@ describe("the Department calendar tab on the Overview row (DW-10c-3, BFF section
   it("follows Notices on every department workspace, ungated and built, at the unit's schedule page", () => {
     for (const ws of ALL.filter((w) => w.kind !== "office")) {
       const tabs = overviewRow(ws).tabs;
-      expect(tabs.map((t) => t.key), ws.key).toEqual(["overview", "notices", "schedule"]);
+      expect(tabs.map((t) => t.key), ws.key).toEqual(["overview", "notices", "schedule", "guidance"]);
       expect(tabs[2].label, ws.key).toBe("Department calendar");
       expect(tabs[2].href, ws.key).toBe("/departments/{dept}/schedule");
       expect(tabs[2].gate, ws.key).toBeUndefined();
@@ -490,7 +490,7 @@ describe("the Department calendar tab on the Overview row (DW-10c-3, BFF section
   it("is absent from the Office of the GM, whose Overview is the company's", () => {
     const gm = ALL.filter((w) => w.kind === "office");
     expect(gm.length).toBeGreaterThan(0);
-    for (const ws of gm) expect(overviewRow(ws).tabs.map((t) => t.key), ws.key).toEqual(["overview", "notices"]);
+    for (const ws of gm) expect(overviewRow(ws).tabs.map((t) => t.key), ws.key).toEqual(["overview", "notices", "guidance"]);
     expect(deptCalendarTab({ kind: "office" })).toBeNull();
     expect(deptCalendarTab({ kind: "department" })?.href).toBe("/departments/{dept}/schedule");
   });

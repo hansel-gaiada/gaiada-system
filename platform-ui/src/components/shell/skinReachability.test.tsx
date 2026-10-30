@@ -121,8 +121,10 @@ describe.each(SKIN_PERSONAS)("every page the Standard menu links to is still rea
       for (const extra of [...minus(D, S), ...minus(P, S)]) expect(own.has(extra), extra).toBe(true);
       // What it adds today: the Calendar tab and the Asset Library, which Standard reaches through the row's tab strip, and (SCP-Kj) the Overview row's Notices and
       // Department calendar, which the Social Home no longer has a strip for (More lists them first, "This workspace"), and (SCP-5a) Social reports, which the Reports pin now opens
-      // and which Standard reaches through the shared Reports row's tab strip.
-      expect(minus(D, S)).toEqual([`/departments/d-soc/assets`, `/departments/d-soc/calendar`, `/departments/d-soc/notices`, `/departments/d-soc/schedule`, `/departments/d-soc/social-reports`].filter((h) => !S.has(h)).sort());
+      // and which Standard reaches through the shared Reports row's tab strip, and (AIP-13b) the Overview row's Department guidance, which More lists with
+      // Notices for the people who may edit it (the unit's head, a company admin, the owner: `own` holds it only for them).
+      const guidance = `/departments/d-soc/assistant-guidance`;
+      expect(minus(D, S)).toEqual([`/departments/d-soc/assets`, `/departments/d-soc/calendar`, `/departments/d-soc/notices`, `/departments/d-soc/schedule`, `/departments/d-soc/social-reports`, ...(own.has(guidance) ? [guidance] : [])].filter((h) => !S.has(h)).sort());
     });
   });
 });

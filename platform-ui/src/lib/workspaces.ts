@@ -1073,13 +1073,9 @@ export const ASSISTANT_ROW: WorkspaceRow = {
   key: "assistant",
   label: "AI Assistant",
   icon: "assistant",
-  // AIP-13b (BFF §65): the second tab is the department's own assistant text, at `/departments/{dept}/assistant-guidance`. Offered to the
-  // department's head, a company admin and the owner (`unitCap`, the mirror of PERMISSION-CONTRACT §56); the shell drops it, as it drops any
-  // `{dept}` href with no id to fill, for a workspace with no org node. The row still LINKS to its first tab (the assistant drawer).
-  tabs: [
-    { key: "assistant", label: "AI Assistant", href: "/assistant", icon: "assistant" },
-    { key: "guidance", label: "Department guidance", href: deptPath("assistant-guidance"), icon: "assistant", gate: { kind: "unitCap", cap: "assistant.preamble.edit" } },
-  ],
+  // The row is the assistant drawer only. The department's own assistant text (AIP-13b) is `guidanceTab`, on the Overview strip: as a second
+  // tab here it showed only on its own page, because this row opens the drawer (found by the AIP-13d live walk, 2026-10-30).
+  tabs: [{ key: "assistant", label: "AI Assistant", href: "/assistant", icon: "assistant" }],
 };
 
 /** Tools & connections (§4.1): the Connections page, combined with the tools and their pinning (DW-6c). */
@@ -1348,13 +1344,23 @@ export function deptCalendarTab(ws: Pick<Workspace, "kind">): WorkspaceTab | nul
 }
 
 /** The rows of one workspace's sidebar, in order (plan §2.2), before gates and planned items are applied. */
+/** AIP-13b (BFF §65): the department's own assistant text, at `/departments/{dept}/assistant-guidance`, on the Overview strip beside
+ *  the unit's Notices and calendar: the other things a head looks after for the whole unit. Offered to the unit's head (or an enclosing
+ *  unit's), a company admin and the owner (`unitCap`, the mirror of PERMISSION-CONTRACT §56); the shell drops it, as it drops any `{dept}`
+ *  href with no id to fill, for a workspace with no org node. Every kind has it: the Office of the GM's own unit has its text too. */
+export function guidanceTab(): WorkspaceTab {
+  return {
+    key: "guidance", label: "Department guidance", href: deptPath("assistant-guidance"), icon: "assistant",
+    blurb: "What the AI Assistant should know about this department.", gate: { kind: "unitCap", cap: "assistant.preamble.edit" },
+  };
+}
 export function sidebarRows(ws: Workspace): SidebarModel {
   const calendarTab = deptCalendarTab(ws);
   const overview: WorkspaceRow = {
     key: "overview",
     label: "Overview",
     icon: "home",
-    tabs: [{ key: "overview", label: "Overview", href: ws.overviewHref, icon: "home" }, noticesTab(ws), ...(calendarTab ? [calendarTab] : [])],
+    tabs: [{ key: "overview", label: "Overview", href: ws.overviewHref, icon: "home" }, noticesTab(ws), ...(calendarTab ? [calendarTab] : []), guidanceTab()],
   };
   const performance = PERFORMANCE_ROWS.map((row) => {
     if (row.key === "reports") return { ...row, tabs: [...row.tabs, ...ws.reports] };

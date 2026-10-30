@@ -154,40 +154,44 @@ describe("resolveMyWorkspaces: the switcher list (DW-D2, GM-01)", () => {
   });
 });
 
-// AIP-13b (BFF section 65): the AI Assistant row's second tab, "Department guidance", at /departments/{dept}/assistant-guidance. Offered through
-// `unitCap` to the unit's head (or an enclosing unit's), the company admin and the owner; never to anyone else; dropped with no department id.
-describe("the AI Assistant row's Department guidance tab (AIP-13b)", () => {
-  const assistantTabs = (m: Me, unitPath: string[], deptId: string | null) => {
-    const row = concreteRows([ASSISTANT_ROW], { ...ctx(m, "co-a", unitPath), deptId })[0];
-    return row.tabs.map((t) => `${t.label} ${t.href}`);
+// AIP-13b (BFF section 65): "Department guidance", at /departments/{dept}/assistant-guidance, is the LAST tab of the Overview strip (after
+// Notices and the department calendar). It was the AI Assistant row's second tab until the AIP-13d live walk (2026-10-30) found that row
+// opens the drawer, so the tab showed only on its own page. Offered through `unitCap` to the unit's head (or an enclosing unit's), the
+// company admin and the owner; never to anyone else; dropped with no department id.
+describe("the Overview strip's Department guidance tab (AIP-13b)", () => {
+  const webDev = workspaceBySlug("web-dev")!;
+  const overviewTabs = (m: Me, unitPath: string[], deptId: string | null) => {
+    // With no department id every tab of the strip needs one, so the whole row drops: that reads as no tabs.
+    const row = concreteRows([sidebarRows(webDev).top[0]], { ...ctx(m, "co-a", unitPath), deptId })[0];
+    return (row?.tabs ?? []).map((t) => t.label);
   };
-  const AI = "AI Assistant /assistant";
-  const GUIDANCE = "Department guidance /departments/d-web/assistant-guidance";
+  const BASE = ["Overview", "Notices", "Department calendar"];
+  const WITH = [...BASE, "Department guidance"];
   const admin = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
   const owner = me([{ role: "owner", scopeType: "company", scopeId: "co-a" }]);
 
-  it("is the second tab, after AI Assistant, and the row still opens its first tab", () => {
-    expect(ASSISTANT_ROW.tabs.map((t) => t.key)).toEqual(["assistant", "guidance"]);
-    expect(ASSISTANT_ROW.tabs[1].icon).toBe(ASSISTANT_ROW.icon);
-    expect(ASSISTANT_ROW.tabs[1].gate).toEqual({ kind: "unitCap", cap: "assistant.preamble.edit" });
-    expect(assistantTabs(admin, ["d-web", "root"], "d-web")).toEqual([AI, GUIDANCE]);
+  it("is the Overview strip's last tab, gated by unitCap, and the AI Assistant row is the drawer alone", () => {
+    const tab = sidebarRows(webDev).top[0].tabs.at(-1)!;
+    expect(tab).toMatchObject({ key: "guidance", href: "/departments/{dept}/assistant-guidance", gate: { kind: "unitCap", cap: "assistant.preamble.edit" } });
+    expect(ASSISTANT_ROW.tabs.map((t) => t.key)).toEqual(["assistant"]);
+    expect(overviewTabs(admin, ["d-web", "root"], "d-web")).toEqual(WITH);
   });
   it("is offered to the company admin and the owner on any unit", () => {
-    expect(assistantTabs(admin, ["d-seo", "root"], "d-web")).toEqual([AI, GUIDANCE]);
-    expect(assistantTabs(owner, ["d-web", "root"], "d-web")).toEqual([AI, GUIDANCE]);
+    expect(overviewTabs(admin, ["d-seo", "root"], "d-web")).toEqual(WITH);
+    expect(overviewTabs(owner, ["d-web", "root"], "d-web")).toEqual(WITH);
   });
   it("is offered to the head of the unit and of an enclosing one", () => {
-    expect(assistantTabs(me([member(), lead("d-web")]), ["d-web", "root"], "d-web")).toEqual([AI, GUIDANCE]);
-    expect(assistantTabs(me([member(), lead("d-web")]), ["d-web-fe", "d-web", "root"], "d-web")).toEqual([AI, GUIDANCE]);
+    expect(overviewTabs(me([member(), lead("d-web")]), ["d-web", "root"], "d-web")).toEqual(WITH);
+    expect(overviewTabs(me([member(), lead("d-web")]), ["d-web-fe", "d-web", "root"], "d-web")).toEqual(WITH);
   });
   it("is not offered to a member, a head of a sibling or of a unit below, or a manager", () => {
-    expect(assistantTabs(me([member()]), ["d-web", "root"], "d-web")).toEqual([AI]);
-    expect(assistantTabs(me([member(), lead("d-seo")]), ["d-web", "root"], "d-web")).toEqual([AI]);
-    expect(assistantTabs(me([member(), lead("d-web-fe")]), ["d-web", "root"], "d-web")).toEqual([AI]);
-    expect(assistantTabs(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), ["d-web", "root"], "d-web")).toEqual([AI]);
+    expect(overviewTabs(me([member()]), ["d-web", "root"], "d-web")).toEqual(BASE);
+    expect(overviewTabs(me([member(), lead("d-seo")]), ["d-web", "root"], "d-web")).toEqual(BASE);
+    expect(overviewTabs(me([member(), lead("d-web-fe")]), ["d-web", "root"], "d-web")).toEqual(BASE);
+    expect(overviewTabs(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), ["d-web", "root"], "d-web")).toEqual(BASE);
   });
   it("is dropped for a workspace with no department id, even for the company admin", () => {
-    expect(assistantTabs(admin, [], null)).toEqual([AI]);
+    expect(overviewTabs(admin, [], null)).not.toContain("Department guidance");
   });
 });
 
