@@ -592,7 +592,9 @@ async function noticeOfPause(tenantId: string, o: Extract<Outcome, { kind: "paus
     const dept = await withTenants([tenantId], (c) => findDepartmentBySlug(c, tenantId, "social-media"));
     const words = JOB_PAUSE_WORDS[o.reason];
     const recipients = new Set(lower(o.approverIds));
+    // An inactive owner is never told, even while a seat row still names them.
     if (o.notifyOwner) recipients.add(o.ownerId.toLowerCase());
+    else recipients.delete(o.ownerId.toLowerCase());
     for (const to of recipients) {
       await notify(tenantId, to, null, "social.report_schedule.paused", {
         title: `The ${o.scheduleKind} report schedule is paused: ${words}`,
