@@ -48,6 +48,9 @@ export function AuditView({ deptId, audit, clients }: { deptId: string; audit: A
   const [confirm, setConfirm] = useState<"finalize" | "delete" | null>(null);
   const [attachTo, setAttachTo] = useState(clients[0]?.engagementId ?? "");
   const [pending, start] = useTransition();
+  /** Which write is in flight, so only its own button says so ("Saving…" is not said while a summary is being drafted). */
+  const [doing, setDoing] = useState<"save" | "ai" | "finalize" | "delete" | "attach" | null>(null);
+  const busy = (k: NonNullable<typeof doing>) => pending && doing === k;
 
   const dirty = !sameForm(form, initial);
   const b = buttonsFor(audit, { dirty });
@@ -59,10 +62,10 @@ export function AuditView({ deptId, audit, clients }: { deptId: string; audit: A
     setForm((f) => ({ ...f, scores: { ...f.scores, [key]: { ...(f.scores[key] ?? { score: "", note: "" }), ...patch } } }));
 
   function fail(r: { refusal: Refusal; message: string }) { setSay({ refusal: r.refusal, message: r.message }); }
-  const begin = () => { setSay(null); setNotice(null); setProblem(null); };
+  const begin = (k: NonNullable<typeof doing>) => { setSay(null); setNotice(null); setProblem(null); setDoing(k); };
 
   function save() {
-    begin();
+    begin("save");
     // A summary the person kept from a proposal says where it came from; one they typed says typed.
     const via = proposal && form.summary.trim() === proposal.summary.trim() ? proposal.draftedVia : "typed";
     const check = buildAuditPatch(audit, form, { summaryVia: via });
@@ -76,7 +79,7 @@ export function AuditView({ deptId, audit, clients }: { deptId: string; audit: A
   }
 
   function draftWithAi() {
-    begin();
+    begin("ai");
     start(async () => {
       const r = await proposeAuditSummary(audit.id);
       if (!r.ok) { fail(r); return; }
@@ -87,7 +90,7 @@ export function AuditView({ deptId, audit, clients }: { deptId: string; audit: A
   }
 
   function finalize() {
-    begin();
+    begin("finalize");
     start(async () => {
       const r = await finalizeAudit(audit.id);
       if (!r.ok) { fail(r); setConfirm(null); return; }
@@ -97,7 +100,7 @@ export function AuditView({ deptId, audit, clients }: { deptId: string; audit: A
   }
 
   function remove() {
-    begin();
+    begin("delete");
     start(async () => {
       const r = await deleteAudit(audit.id);
       if (!r.ok) { fail(r); setConfirm(null); return; }
@@ -106,7 +109,7 @@ export function AuditView({ deptId, audit, clients }: { deptId: string; audit: A
   }
 
   function attach() {
-    begin();
+    begin("attach");
     if (!attachTo) { setProblem("Pick the client this prospect became."); return; }
     start(async () => {
       const r = await attachAudit(audit.id, attachTo);
@@ -182,7 +185,7 @@ export function AuditView({ deptId, audit, clients }: { deptId: string; audit: A
                   {clients.map((c) => <option key={c.engagementId} value={c.engagementId}>{c.clientName}</option>)}
                 </select>
               </div>
-              <button type="button" className="lux-btn lux-btn--sm" disabled={!b.attach.allowed || pending || !attachTo} onClick={attach}>{pending ? "Attaching…" : "Attach to client"}</button>
+              <button type="button" className="lux-btn lux-btn--sm" disabled={!b.attach.allowed || pending || !attachTo} onClick={attach}>{busy("attach") ? "Attaching…" : "Attach to client"}</button>
               {b.attach.reason && <span className="scp-field__hint">{b.attach.reason}</span>}
             </div>
           ) : audit.engagementId ? (
@@ -266,7 +269,7 @@ export function AuditView({ deptId, audit, clients }: { deptId: string; audit: A
         {audit.summary && audit.summaryVia && !editable && <p className="scp-field__hint">{audit.summaryVia === "ai" ? "Drafted with AI." : audit.summaryVia === "template" ? "From the plain template." : "Typed by the team."}</p>}
         {editable && (
           <div className="scp-audit__buttons">
-            <button type="button" className="lux-btn lux-btn--sm" disabled={!b.aiSummary || pending} onClick={draftWithAi}>{pending ? "Working…" : "Draft with AI"}</button>
+            <button type="button" className="lux-btn lux-btn--sm" disabled={!b.aiSummary || pending} onClick={draftWithAi}>{busy("ai") ? "Drafting…" : "Draft with AI"}</button>
           </div>
         )}
       </section>
@@ -277,11 +280,11 @@ export function AuditView({ deptId, audit, clients }: { deptId: string; audit: A
 
       {b.finalize.shown && (
         <div className="scp-audit__buttons">
-          <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" disabled={!b.save || pending || !dirty} onClick={save}>{pending ? "Saving…" : "Save"}</button>
+          <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" disabled={!b.save || pending || !dirty} onClick={save}>{busy("save") ? "Saving…" : "Save"}</button>
           {confirm === "finalize" ? (
             <span role="group" aria-label="Confirm finalize" className="scp-audit__buttons">
               <span className="scp-note" style={{ margin: 0 }}>Finalizing freezes this scorecard as a dated record. Nobody can change or delete it afterwards.</span>
-              <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" disabled={pending} onClick={finalize}>{pending ? "Finalizing…" : "Yes, finalize"}</button>
+              <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" disabled={pending} onClick={finalize}>{busy("finalize") ? "Finalizing…" : "Yes, finalize"}</button>
               <button type="button" className="lux-btn lux-btn--sm" disabled={pending} onClick={() => setConfirm(null)}>Not yet</button>
             </span>
           ) : (
@@ -291,7 +294,7 @@ export function AuditView({ deptId, audit, clients }: { deptId: string; audit: A
           {b.remove.shown && (confirm === "delete" ? (
             <span role="group" aria-label="Confirm delete" className="scp-audit__buttons">
               <span className="scp-note" style={{ margin: 0 }}>Delete this draft?</span>
-              <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" disabled={pending} onClick={remove}>{pending ? "Deleting…" : "Yes, delete it"}</button>
+              <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" disabled={pending} onClick={remove}>{busy("delete") ? "Deleting…" : "Yes, delete it"}</button>
               <button type="button" className="lux-btn lux-btn--sm" disabled={pending} onClick={() => setConfirm(null)}>Keep it</button>
             </span>
           ) : (

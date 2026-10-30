@@ -144,6 +144,7 @@ describe("starting an audit from the list", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(REFUSAL_WORDS.not_officer_or_approver);
     expect(push).not.toHaveBeenCalled();
     vi.mocked(startClientAudit).mockResolvedValueOnce({ ok: true, created: true, alreadyApplied: false, audit: asAuditDetail({ id: "a9", subject: "client", status: "draft", dimensions: [] }) });
+    await waitFor(() => expect(btn).toBeEnabled());
     fireEvent.click(btn);
     await waitFor(() => expect(push).toHaveBeenCalledWith("/departments/d-soc/social-audit/a9"));
     const [eng, id] = vi.mocked(startClientAudit).mock.calls[1];

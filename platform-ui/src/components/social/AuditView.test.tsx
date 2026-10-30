@@ -95,7 +95,7 @@ describe("Draft with AI", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Drafted with AI from the scores and the evidence");
     expect(screen.getByRole("textbox", { name: "Summary" })).toHaveValue("Northwind scores 55 out of 100.");
     expect(saveAudit).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await press("Save");
     await waitFor(() => expect(saveAudit).toHaveBeenCalledWith("a1", { summary: "Northwind scores 55 out of 100.", summaryVia: "ai" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved."));
     fireEvent.change(screen.getByRole("textbox", { name: "Summary" }), { target: { value: "Northwind scores 55 out of 100. Reels first." } });
