@@ -242,8 +242,8 @@ describe.skipIf(!TEST_URL)("SCP-5g · the social audit (BFF §63.28)", () => {
   let prospect: Audit;
 
   describe("the gates (SCP-Q34)", () => {
-    it("a client's audit: its officer, the HoD, the GM and the superadmin create one; the owner, a company admin, a copywriter, staff and another client's officer are 403 `not_officer_or_approver`, an automation `automation_cannot_act`", async () => {
-      for (const who of ["officer", "hod", "gm", "platformAdmin"]) {
+    it("a client's audit: its officer, the HoD, the GM, the owner and the superadmin create one (SCP-Q43: the four too); a company admin, a copywriter, staff and another client's officer are 403 `not_officer_or_approver`, an automation `automation_cannot_act`", async () => {
+      for (const who of ["officer", "hod", "gm", "owner", "platformAdmin"]) {
         const e = await makeClient(`Gate ${who}`, { officer: U.officer });
         const r = ok<{ audit: Audit; created: boolean }>(await create(who, { subject: "client", engagementId: e.id }), 201, `${who} creates`);
         expect(r.created, who).toBe(true);
@@ -251,7 +251,7 @@ describe.skipIf(!TEST_URL)("SCP-5g · the social audit (BFF §63.28)", () => {
         expect(r.audit.createdBy?.id, who).toBe(U[who]);
       }
       const target = await makeClient("Gate refused", { officer: U.officer });
-      for (const who of ["owner", "companyAdmin", "copywriter", "staff", "otherOfficer"]) {
+      for (const who of ["companyAdmin", "copywriter", "staff", "otherOfficer"]) {
         refused(await create(who, { subject: "client", engagementId: target.id }), 403, "not_officer_or_approver", `${who} creates`);
         refused(await create(who, { subject: "client", engagementId: target.id, month: "nonsense" }), 403, "not_officer_or_approver", `${who} with a bad body is still 403`);
       }
@@ -313,7 +313,7 @@ describe.skipIf(!TEST_URL)("SCP-5g · the social audit (BFF §63.28)", () => {
         ["delete", await del("officer", mine.id)],
         ["proposal", await aiSummary("officer", mine.id)],
       ] as const) refused(r, 403, "not_officer_or_approver", `another client's officer: ${what}`);
-      for (const who of ["owner", "companyAdmin", "staff"]) refused(await patch(who, mine.id, { summary: "x" }), 403, "not_officer_or_approver", `${who} edits`);
+      for (const who of ["companyAdmin", "staff"]) refused(await patch(who, mine.id, { summary: "x" }), 403, "not_officer_or_approver", `${who} edits`);
       // The order: 403 before 400 and 409; 404 first.
       refused(await patch("officer", mine.id, { nope: 1 }), 403, "not_officer_or_approver", "403 before 400");
       refused(await patch("officer", newId(), { summary: "x" }), 404, "audit_not_found", "an unknown audit is 404 for anyone");

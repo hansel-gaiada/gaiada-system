@@ -3,7 +3,8 @@
 //
 //   1. 404 `audit_not_found`: the audit from the rows (another company's, a deleted and a malformed id are all absent).
 //   2. 403: the gate CHOSEN FROM THE AUDIT'S SUBJECT, read before the body (63.28.3):
-//        a client's audit   `social_post` · `manage` on the client's would-be post (its officer, the HoD and GM seats, the superadmin): 403 `not_officer_or_approver`;
+//        a client's audit   `social_post` · `manage` on the client's would-be post (its officer, the HoD and GM seats, the superadmin), OR `plan` (the four,
+//                           so the owner too: SCP-Q43, owner 2026-10-30): 403 `not_officer_or_approver` when neither passes;
 //        a prospect's       `social_engagement` · `plan` (the four): 403 `not_a_social_approver`;
 //        an unattended automation is refused either with 403 `automation_cannot_act`.
 //   3. 400: the body, against the audit's OWN scorecard (its `rules_ref`, never today's rules).
@@ -14,7 +15,7 @@
 // `frozen`, whatever the pipeline or the company's rules do. A final audit is a record: never edited, never deleted.
 //
 // THE MODULE WALL. Every query on a `social_*` table runs inside `withTenants(..., { modules: ["social"] })`.
-import { Logger } from "@nestjs/common";
+import { HttpException, Logger } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { config } from "../../../config";
 import { newId, withTenants } from "../../../db";
@@ -69,7 +70,20 @@ const approverIdsOf = (tenantId: string): Promise<string[]> => withTenants([tena
 
 /** A client's audit: `manage` on the client's would-be post. Answers the person. */
 async function authorizeClientWrite(principal: Principal, tenantId: string, ownerId: string): Promise<string> {
-  return authorizeCoded(principal, wouldBePost(tenantId, ownerId, await approverIdsOf(tenantId)), "manage", "not_officer_or_approver");
+  const approverIds = await approverIdsOf(tenantId);
+  try {
+    return await authorizeCoded(principal, wouldBePost(tenantId, ownerId, approverIds), "manage", "not_officer_or_approver");
+  } catch (e) {
+    // SCP-Q43 (owner, 2026-10-30): the four social approvers (the owner and the superadmin too) may also write a client's audit. Only a plain
+    // 403 falls through to `plan`; an automation's refusal and any other error stand, and a refusal of both keeps the first code.
+    if (!(e instanceof HttpException) || e.getStatus() !== 403 || isAutomationPrincipal(principal)) throw e;
+    try {
+      return await authorizeCoded(principal, socialEngagementResource(tenantId, approverIds), "plan", "not_a_social_approver");
+    } catch (e2) {
+      if (e2 instanceof HttpException && e2.getStatus() === 403) throw e;
+      throw e2;
+    }
+  }
 }
 
 /** A prospect's audit, and an attach: `plan` (the four). Answers the person. */
@@ -90,7 +104,9 @@ async function mayWrite(principal: Principal, tenantId: string, row: Pick<AuditR
   const approverIds = await approverIdsOf(tenantId);
   if (row.subject === "prospect") return (await check(principal, socialEngagementResource(tenantId, approverIds), "plan")).allow;
   const owner = row.engagement_id ? await ownerOf(tenantId, row.engagement_id) : "";
-  return (await check(principal, wouldBePost(tenantId, owner, approverIds), "manage")).allow;
+  if ((await check(principal, wouldBePost(tenantId, owner, approverIds), "manage")).allow) return true;
+  // SCP-Q43 (owner, 2026-10-30): the four may also write a client's audit.
+  return (await check(principal, socialEngagementResource(tenantId, approverIds), "plan")).allow;
 }
 
 /** Whether the caller may add a prospect's audit (the UI's `canAddProspect`): the four. */
