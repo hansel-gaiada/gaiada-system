@@ -3320,7 +3320,7 @@ the head of the unit, of an enclosing unit and of the root, a head of a sibling 
 member, viewer, HR, client, bot and automation, low assurance, an unfed resource, and the permission-native owner through `manage`);
 `dept-assistant-preamble.test.ts` (the routes); `assistant-dept-preambles-migration.db.test.ts` (the table and the seed).
 
-## 57. SCP-5 rest (5b, 5c, 5e to 5h): no new kind, no new action, no policy change (2026-10-30, PLANNED)
+## 57. SCP-5 rest (5b with SCP-Q37, 5c, 5e to 5h): no new kind, no new action, no policy change (2026-10-30, PLANNED)
 
 Design: `docs/FRONTEND-BFF-CONTRACT.md` §63.24 to §63.29, on the owner's rulings SCP-Q25 to SCP-Q37 of 2026-10-30 (plan
 `docs/plans/2026-10-15-social-content-pipeline.md` §2). Nothing in §53 changes: no kind, action, attribute, role, mirror, catalogue key, group
@@ -3329,9 +3329,11 @@ that §53, or the PM sections, already define:
 
 | Work (BFF) | Authorizes as | Who that is |
 |---|---|---|
-| The weekly report: draft, edit, submit (63.24) | `social_report` · `create`, `update` | the officer and the team, as the monthly |
-| The weekly report: send back, approve, send | `social_report` · `approve`, `deliver` (§53.7) | the four (SCP-Q25) |
-| The allocation's `weeklyReport` | `social_engagement` · `plan` (§53.6) | the four |
+| Periodic reports, every kind: draft (also "Generate with AI" for one client), edit, submit (63.24) | `social_report` · `create`, `update` | the officer and the team, as the monthly |
+| Periodic reports, every kind: send back, approve, send | `social_report` · `approve`, `deliver` (§53.7) | the four (SCP-Q25) |
+| "Generate with AI" for all clients (63.24.5) | `social_report` · `create`, then a narrowing in the handler that never widens: one of the four (`social_engagement` · `plan`, asked as a plain check) gets every active client, anyone else only the clients they are the officer of | the four, and each officer for their own clients |
+| A run's progress | `social_report` · `read`, then the handler: the run's person or one of the four | as the row says |
+| The allocation's `reportKinds` | `social_engagement` · `plan` (§53.6) | the four |
 | Ideas: read (63.25) | `social_post` · `read` | the team's read tier |
 | Ideas: add, edit, share, plan, delete | `social_post` · `create`, then `author` or `approve` on the client's would-be post, in one `checkMany` (§53.2's create check) | the client's officer and the four |
 | The content bank: read, add (63.26) | `social_post` · `read`; `create` on the client's would-be post | the team (its seats carry `social_staff`) |
