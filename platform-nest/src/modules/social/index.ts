@@ -1419,6 +1419,124 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "runId"],
       },
     },
+    // ── SCP-5 W5-A5 (BFF §63.24.9): report automation by chat. The routes are the four's (`plan`); the agent arrives as the person (63.15),
+    // so a schedule is owned by the person, never by the agent, and an unattended automation is refused (automation_cannot_act). The
+    // writes are impact 'medium': they set what the ERP does by itself every period, so the person confirms in the thread. None approves
+    // or sends: a schedule's runs only draft. The contract lists `social.saveReportSchedule` for POST and PATCH; a tool maps to one route,
+    // so create is `social.saveReportSchedule` and edit, pause and resume are `social.editReportSchedule`.
+    {
+      name: "social.reportSchedules",
+      description:
+        "List the company's report automation schedules (the four social approvers only): each one's kind, clients, timing in words, on or "
+        + "paused with the reason, owner, next run and the period it will draft, the last run with its counts and missed periods, and its AI "
+        + "spend over the last 30 days and this month.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/report-schedules",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string", description: "Company id (route scope)." } },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "social.saveReportSchedule",
+      description:
+        "Create a report automation schedule (the four social approvers only): the ERP drafts the period that just ended for the chosen "
+        + "clients (or all clients) at the set time, acting as the person who set it, re-checked at every run. Runs only draft; approving "
+        + "and sending stay the four's own acts. 409 schedule_exists {scheduleId} for a second all-clients schedule of a kind (edit that one "
+        + "with social.editReportSchedule). Pass a stable `id` so a retry answers created: false.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/report-schedules",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          id: { type: "string", description: "Optional caller-supplied uuid: the idempotency key for a retry." },
+          kind: { type: "string", enum: ["daily", "weekly", "monthly", "quarterly", "semester", "yearly"], description: "The report kind." },
+          scope: { type: "string", enum: ["all", "chosen"], description: "'all': every client the owner may draft for at run time; 'chosen': engagementIds." },
+          engagementIds: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 200, description: "For scope 'chosen': the clients' engagements." },
+          timing: {
+            type: "object",
+            description: "When it runs, in the company's time zone. daily {at:'HH:MM'}; weekly {weekday:1-7 (Monday 1), at}; monthly, "
+              + "quarterly, semester, yearly {on:'day', day:1-28, at} or {on:'working_day', n:1-20, at} (the month after the period ends "
+              + "for the long kinds). A bad part is 400 invalid_field {field: 'timing.at'|'timing.weekday'|'timing.on'|'timing.day'|'timing.n'}.",
+          },
+          enabled: { type: "boolean", description: "Defaults to true; false creates it paused." },
+        },
+        required: ["tenantId", "kind", "scope", "timing"],
+      },
+    },
+    {
+      name: "social.editReportSchedule",
+      description:
+        "Edit, pause or resume a report automation schedule (the four social approvers only): change its clients or timing, pause it "
+        + "(enabled: false) or resume it (enabled: true, which computes the next run). The person who edits it becomes its owner: its runs "
+        + "act as them from then on.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "PATCH",
+      pathTemplate: "/api/:tenantId/modules/social/report-schedules/:id",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          id: { type: "string", description: "The schedule." },
+          scope: { type: "string", enum: ["all", "chosen"], description: "Optional." },
+          engagementIds: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 200, description: "Optional; for scope 'chosen'." },
+          timing: {
+            type: "object",
+            description: "When it runs, in the company's time zone. daily {at:'HH:MM'}; weekly {weekday:1-7 (Monday 1), at}; monthly, "
+              + "quarterly, semester, yearly {on:'day', day:1-28, at} or {on:'working_day', n:1-20, at} (the month after the period ends "
+              + "for the long kinds). A bad part is 400 invalid_field {field: 'timing.at'|'timing.weekday'|'timing.on'|'timing.day'|'timing.n'}.",
+          },
+          enabled: { type: "boolean", description: "false pauses it; true resumes it." },
+        },
+        required: ["tenantId", "id"],
+      },
+    },
+    {
+      name: "social.deleteReportSchedule",
+      description: "Delete a report automation schedule (the four social approvers only). A run it already started finishes.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "DELETE",
+      pathTemplate: "/api/:tenantId/modules/social/report-schedules/:id",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          id: { type: "string", description: "The schedule." },
+        },
+        required: ["tenantId", "id"],
+      },
+    },
+    {
+      name: "social.runReportSchedule",
+      description:
+        "Run a report automation schedule now (the four social approvers only): drafts its kind's period that has just ended for its "
+        + "clients, as the person asking, whether the schedule is on or paused; its next run does not move. 200 {alreadyApplied: true, runId} "
+        + "when that period already has a run of this schedule; otherwise 202 {runId, total, clients} (read it with social.reportRun). "
+        + "409 generation_running {runId} while a run of the same kind and period is going. Only drafts.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/report-schedules/:id/run",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          id: { type: "string", description: "The schedule." },
+        },
+        required: ["tenantId", "id"],
+      },
+    },
     {
       name: "social.getBestTimeToPost",
       description:
