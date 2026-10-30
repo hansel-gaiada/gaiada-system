@@ -170,11 +170,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610291600_social_reports_monthly.sql`
+- Head: `202610300310_iam_ai_usage_permissions.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 350 (121 legacy `NNNN_`, 229 timestamped)
+- Applied files on disk: 352 (121 legacy `NNNN_`, 231 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -272,6 +272,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/payments/simulator-portal.controller.ts` |
 | `/api` | `platform-nest/src/signatures/certified-signing.controller.ts` |
 | `/api` | `platform-nest/src/signatures/simulated-psre.controller.ts` |
+| `/api/:tenantId/ai-usage` | `platform-nest/src/modules/ai-usage/reads.controller.ts` |
 | `/api/:tenantId/appraisals` | `platform-nest/src/modules/reports/appraisals.controller.ts` |
 | `/api/:tenantId/checkins` | `platform-nest/src/modules/reports/checkins.controller.ts` |
 | `/api/:tenantId/departments/:unitNodeId/assistant-preamble` | `platform-nest/src/core/dept-assistant-preamble.controller.ts` |
