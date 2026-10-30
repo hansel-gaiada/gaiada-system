@@ -173,6 +173,11 @@ export const socialModule: ModuleContract = {
     // wall) and `rules_ref` on `social_reports` and `social_cycles` (existing rows read 'default:scp-5a'). Lands before the other
     // wave-5 files.
     "202610301210_social_rules.sql",
+    // SCP-5b (BFF §63.24.2) — periodic reports: the eight kinds on social_reports with a period format per new kind, next_period
+    // and one live report per client, kind and period (the five new kinds); social_engagements.report_kinds; and the tables
+    // social_report_schedules (report automation, §63.24.9) and social_report_runs ("Generate with AI" runs, §63.24.5), both on
+    // the third wall.
+    "202610301300_social_reports_periodic.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
