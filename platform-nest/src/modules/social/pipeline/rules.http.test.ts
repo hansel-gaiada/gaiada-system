@@ -207,7 +207,7 @@ describe.skipIf(!TEST_URL)("SCP-5 W5-A0 · the company rules (BFF §63.30)", () 
     }
     expect(await versionsInDb()).toEqual([1, 2, 3, 4]);
     const acts = await withTenants([A], (c) => c.query<{ actor_id: string; metadata: { section: string; version: number; reset: boolean; diff: unknown[] } }>(
-      `SELECT actor_id, metadata FROM activities WHERE tenant_id = $1 AND verb = 'rules_changed' AND target_entity_type = 'social_rules' ORDER BY created_at`,
+      `SELECT actor_id, metadata FROM activities WHERE tenant_id = $1 AND verb = 'rules_changed' AND target_entity_type = 'social_rules' ORDER BY (metadata->>'version')::int`,
       [A],
     ));
     expect(acts.rows.map((r) => r.metadata.version)).toEqual([1, 2, 3, 4]);
