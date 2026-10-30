@@ -9,6 +9,7 @@ import {
   barPct, fmtCount, fmtDuration, fmtPct, fmtReach, maxCount,
   type AnalyticsData, type AnalyticsKind, type AnalyticsRead, type Count, type MetricRow,
 } from "@/lib/websiteAnalyticsModel";
+import { TrackingTagsCard, type TrackingTagsRead } from "./TrackingTagsCard";
 import "../content/content.css";
 import "./analytics.css";
 
@@ -52,6 +53,8 @@ export interface AnalyticsViewProps {
   bots?: Read<VisitorStatus>;
   /** The day the bot filter went live (`YYYY-MM-DD`), once known. */
   botFilterLiveDate?: string | null;
+  /** M5-P4: the Tracking tags card. Absent = not drawn. `canEdit` is the viewer's `search.tags.manage`; the server's `canManage` must agree. */
+  tags?: { propertyId: string; webdeskTenant: string; site: string; read: TrackingTagsRead; canEdit: boolean };
 }
 
 /** "Bot hits filtered": hits the collector dropped as bots (never forwarded to Umami), last 30 days. Words for anything that is not a count. */
@@ -74,7 +77,7 @@ function BotFigure({ bots, liveDate }: { bots: Read<VisitorStatus>; liveDate?: s
   );
 }
 
-export function AnalyticsView({ siteName, action, range, reads, bots, botFilterLiveDate }: AnalyticsViewProps) {
+export function AnalyticsView({ siteName, action, range, reads, bots, botFilterLiveDate, tags }: AnalyticsViewProps) {
   const sum = reads.summary;
   return (
     <div className="wa-page" data-testid="website-analytics">
@@ -93,6 +96,8 @@ export function AnalyticsView({ siteName, action, range, reads, bots, botFilterL
       </form>
 
       {bots ? <BotFigure bots={bots} liveDate={botFilterLiveDate} /> : null}
+
+      {tags ? <TrackingTagsCard {...tags} /> : null}
 
       {sum.state !== "ok" ? (
         // Summary failed, so every read would say the same: one notice, no tables, no zeros.
