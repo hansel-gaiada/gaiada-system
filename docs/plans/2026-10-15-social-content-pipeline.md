@@ -585,31 +585,34 @@ Then **Kg** switches the skin on for Social Media once 1d, 1e and 1k are live, a
 **Wave 4 · Proof and the first release.** 7a to 7d (QA, Sonnet; the orchestrator drives 7b live and runs 7d with the
 team), covering 5a and 5d too. The first release is complete when SCP-7 is ticked (SCP-Q5).
 
-**Wave 5 · The rest of SCP-5** (contract BFF §63.24 to §63.29 and PERMISSION §57, 2026-10-30; the owner's rulings SCP-Q25 to
-SCP-Q37 of the same day, §2). Three lanes in parallel, one implementer each, so never more than three at once. Each
-lane has ONE migration owner, its first ticket, who writes all of that lane's migration files; prefixes are taken at landing, in
-landing order (BFF §63.1's rule). No Cerbos change, so no restart at the deploy.
+**Wave 5 · The rest of SCP-5** (contract BFF §63.24 to §63.30 and PERMISSION §57, 2026-10-30; the owner's rulings SCP-Q25 to
+SCP-Q41 of the same day, §2). Three lanes in parallel, one implementer each, so never more than three at once. Within a lane only
+its Opus tickets write migrations, one at a time in the lane's order (A0 then A1; B1; C1 then C3); prefixes are taken at landing,
+in landing order (BFF §63.1's rule). **W5-A0, the company rules, lands first:** every server ticket reads its rules through A0's
+reader and the seed, so no lane builds on a hard-coded rule (SCP-Q41). No Cerbos change, so no restart at the deploy.
 
 | Ticket | Builds | Model | Lane | Order | Depends on |
 |---|---|---|---|---|---|
-| W5-A1 | Migration `social_reports_periodic`: the eight kinds, the period formats, `next_period`, the one-per-period index, `report_kinds`, `social_report_schedules` and `social_report_runs`, with their assertions and migration suite | Opus · medium | A, reports | 1 | this contract |
-| W5-A2 | The periodic kinds on the report routes (BFF §63.24.1 to 63.24.4): each kind's period, due, freeze and check rules, AI drafting at create for every kind, `summary_numbers_changed`, Needs you, `reportKinds`, the dashboard's `reportKind`, the fixture's `reports.kinds` (both twins) | Sonnet | A | 2 | A1 |
-| W5-A3 | "Generate with AI" (§63.24.5, 63.24.6): `POST reports/generate`, the background run with four drafts in flight and one run per company, resume after a crash with no client drafted twice, the progress read, the end notice, the tracked usage per run (SCP-Q40), and the tools `social.generateReports` and `social.reportRun` | Opus · medium: a concurrency core (bounded parallelism, resume, idempotency per client) | A | 3 | A2 |
-| W5-A4 | Report pages and demo answers: the kind switch and period picker, Generate with AI with its progress panel, a short kind's report page, the monthly page's ideas section, "From an idea" | Sonnet | A | 4 | A2, A3, B2 |
-| W5-A5 | Report automation's core (§63.24.9): the schedule routes and Run now, the timing maths on the company's zone and working days, the job (`SKIP LOCKED`, one run per schedule and period, latest-period catch-up), each run re-authorized as its owner with the pause and its notices, the spend reads, and the four schedule tools | Opus · high: run-as-owner authorization and a job on several instances; a mistake runs work as someone who may no longer do it. Start it on Opus | A | 5 | A3 |
-| W5-A6 | The "Report automation" section of `{D}/settings`: cards, the add and edit dialog with the timing preview, pause, resume, delete and Run now, spend, phone width and keyboard, and its DEMO_MODE answers | Sonnet | A | 6 | A5, C4 (both change `{D}/settings`) |
+| W5-A0 | The company rules core (BFF §63.30): migration `social_rules` (`social_rule_versions`, append-only; `rules_ref` on `social_reports` and `social_cycles`), the seed `social-rules-defaults.json` and its twin (the report kinds, cycle steps and scorecard moved out of the fixtures), the read-through reader `socialRules`, each section's validation with typed refusals, versions under one lock with `expectedVersion`, the routes (read, set, reset, history, preview), and `social.rules` and `social.setRules` | Opus · medium: every lane builds on it, and its versions must never be rewritten | A, reports | 1 | this contract |
+| W5-A1 | Migration `social_reports_periodic`: the eight kinds, the period formats, `next_period`, the one-per-period index, `report_kinds`, `social_report_schedules` and `social_report_runs`, with their assertions and migration suite | Opus · medium | A | 2 | A0 |
+| W5-A2 | The periodic kinds on the report routes (BFF §63.24.1 to 63.24.4): each kind's period, due, freeze and check rules, AI drafting at create for every kind, `summary_numbers_changed`, Needs you, `reportKinds`, the dashboard's `reportKind`, every kind's rules read from the company's rules (A0's reader) | Sonnet | A | 3 | A1 |
+| W5-A3 | "Generate with AI" (§63.24.5, 63.24.6): `POST reports/generate`, the background run with four drafts in flight and one run per company, resume after a crash with no client drafted twice, the progress read, the end notice, the tracked usage per run (SCP-Q40), and the tools `social.generateReports` and `social.reportRun` | Opus · medium: a concurrency core (bounded parallelism, resume, idempotency per client) | A | 4 | A2 |
+| W5-A4 | Report pages and demo answers: the kind switch and period picker, Generate with AI with its progress panel, a short kind's report page, the monthly page's ideas section, "From an idea" | Sonnet | A | 5 | A2, A3, B2 |
+| W5-A5 | Report automation's core (§63.24.9): the schedule routes and Run now, the timing maths on the company's zone and working days, the job (`SKIP LOCKED`, one run per schedule and period, latest-period catch-up), each run re-authorized as its owner with the pause and its notices, the spend reads, and the four schedule tools | Opus · high: run-as-owner authorization and a job on several instances; a mistake runs work as someone who may no longer do it. Start it on Opus | A | 6 | A3 |
+| W5-A6 | The "Report automation" section of `{D}/settings`: cards, the add and edit dialog with the timing preview, pause, resume, delete and Run now, spend, phone width and keyboard, and its DEMO_MODE answers | Sonnet | A | 7 | A5, C4 (both change `{D}/settings`) |
 | W5-B1 | Migrations `social_ideas`, `social_saved_items` (with `ux_creative_assets_id_tenant`) and `social_audits` | Opus · medium | B, ideas, bank and audit | 1 | this contract |
-| W5-B2 | 5c's server half: the ideas routes, "Add to next plan" through `createPostInTx` in one transaction, `release_idea` on discard, the post read's `idea` | Sonnet, with an Opus review of the transaction and the discard effect | B | 2 | B1 |
-| W5-B3 | 5e's server half: the bank's routes and collections, `savedItemIds` on the post edit | Sonnet | B | 3 | B1 |
-| W5-B4 | 5g's server half: the dimension fixture and twin, the pure scoring with its golden table, the routes, Draft with AI | Sonnet, with an Opus review of the golden table | B | 4 | B1 |
+| W5-B2 | 5c's server half: the ideas routes, "Add to next plan" through `createPostInTx` in one transaction, `release_idea` on discard, the post read's `idea` | Sonnet, with an Opus review of the transaction and the discard effect | B | 2 | B1, A0 |
+| W5-B3 | 5e's server half: the bank's routes and collections, `savedItemIds` on the post edit | Sonnet | B | 3 | B1, A0 |
+| W5-B4 | 5g's server half: the scorecard from the company's rules (A0), the pure scoring with its golden table, the routes, Draft with AI | Sonnet, with an Opus review of the golden table | B | 4 | B1, A0 |
 | W5-B5 | Pages and demo answers: `{D}/saved` and `{D}/social-audit` | Sonnet | B | 5 | B3, B4 |
-| W5-C1 | Migration `pm_task_cycle_steps` and 5f's core: the six step tasks made, re-dated, closed and reopened inside the stage action's transaction, the lock order, the report step on delivery | Opus · high: it runs inside every stage action's transaction, so a wrong lock order deadlocks the whole pipeline; start it on Opus, not cheap then escalate | C, cycle and onboarding | 1 | this contract |
+| W5-C1 | Migration `pm_task_cycle_steps` and 5f's core: the cycle's step tasks, from the company's rules (A0), made, re-dated, closed and reopened inside the stage action's transaction, the lock order, the report step on delivery | Opus · high: it runs inside every stage action's transaction, so a wrong lock order deadlocks the whole pipeline; start it on Opus, not cheap then escalate | C, cycle and onboarding | 1 | A0 |
 | W5-C2 | 5f's reads: the health `steps`, the dashboard's `cycle_step_late`, PM's `linkedStep`, the Plan tab's strip | Sonnet | C | 2 | C1 |
-| W5-C3 | Migrations `pm_project_templates` and `social_settings_onboarding`; PM's project template, apply-template (one transaction, idempotent), the applications read and the kickoff move | Opus · medium | C | 3 | C1 (one migration owner per lane) |
+| W5-C3 | Migrations `pm_project_templates` and `social_settings_onboarding`; PM's project template, apply-template (one transaction, idempotent), the applications read and the kickoff move | Opus · medium | C | 3 | C1 |
 | W5-C4 | 5h's Social half: the template setting, starting onboarding, `GET onboarding`, `{D}/onboarding` | Sonnet | C | 4 | C3, B4 (the baseline audit link) |
-| W5-H1 | Registry and skin: `publish` › `saved` and the Saved pin's move, the rows `social-audit` and `onboarding` ("Client onboarding"), their `AREA_RULES`, the registry and one-area tests | Haiku | the first free lane | 7 | A4, A6, B5, C4 |
-| W5-H2 | DEMO_MODE data for the periodic reports, a settled run and two schedules, and for 5c, 5e, 5f, 5g and 5h, and the mock seed's onboarding template (mock wording only) | Haiku | the first free lane | 7 | the lane's server half |
-| W5-Q | Proof: the six proof lists on the Linux CI gate, then a live drive on the mock seed as an officer, the HoD and the GM | QA, Sonnet | — | 8 | all of the above |
+| W5-C5 | The rules sections of `{D}/settings` (BFF §63.30.5): Reports with the ideas settings, Monthly cycle, Audit scorecard, Saved, and Onboarding with the template's steps through PM's routes; current values beside the defaults, Reset to default, the previews, refusals named in words, phone width, keyboard, DEMO_MODE | Sonnet | C | 5 | A0, A6, C4 (the same page) |
+| W5-H1 | Registry and skin: `publish` › `saved` and the Saved pin's move, the rows `social-audit` and `onboarding` ("Client onboarding"), their `AREA_RULES`, the registry and one-area tests | Haiku | the first free lane | 8 | A4, A6, B5, C5 |
+| W5-H2 | DEMO_MODE data for the rules store (from the seed), the periodic reports, a settled run and two schedules, and for 5c, 5e, 5f, 5g and 5h, and the mock seed's onboarding template (mock wording only) | Haiku | the first free lane | 8 | the lane's server half |
+| W5-Q | Proof: the proof lists of 63.24 to 63.30 on the Linux CI gate, then a live drive on the mock seed as an officer, the HoD and the GM | QA, Sonnet | — | 9 | all of the above |
 
 The orchestrator keeps the changelog, `docs/MAP.md` (regenerated from a clean worktree), the board and the landing. Then SCP-6
 when real data is allowed.
@@ -728,7 +731,7 @@ once deployed, checked on the live ERP's mock seed.
 | 4b Monthly boost budget | The client agrees a boost budget per cycle in the portal's approvals, or staff record it (SCP-Q11). The remaining budget shows on the client page and the Boosting list. A boost over what remains waits for the client's approval. |
 | 4c Run and results | Start, stop, or complete with spend, paid reach and clicks. The Boosting list shows candidates, running boosts and totals. |
 
-### SCP-5 · Reports and management (5a and 5d in the first release, the rest after it; SCP-Q5; the rest contracted in BFF §63.24 to §63.29 and ruled as SCP-Q25 to SCP-Q37 in §2, 2026-10-30)
+### SCP-5 · Reports and management (5a and 5d in the first release, the rest after it; SCP-Q5; the rest contracted in BFF §63.24 to §63.30 and ruled as SCP-Q25 to SCP-Q41 in §2, 2026-10-30. Since SCP-Q41 every rule of work in the rows below is a default that each company sets for itself in Settings, BFF §63.30)
 
 | Ticket | Acceptance |
 |---|---|
