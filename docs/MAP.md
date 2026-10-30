@@ -170,11 +170,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610300310_iam_ai_usage_permissions.sql`
+- Head: `202610301000_iam_m5_p4_manage_tags.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 352 (121 legacy `NNNN_`, 231 timestamped)
+- Applied files on disk: 353 (121 legacy `NNNN_`, 232 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -299,6 +299,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-google-ads.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-reports.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search.controller.ts` |
+| `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/tracking-tags.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/visitors.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/linkedin-oauth.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/accounts-summary.controller.ts` |
