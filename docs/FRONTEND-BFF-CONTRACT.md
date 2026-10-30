@@ -13416,9 +13416,9 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 - **Cerbos** is asked once per distinct officer before the transaction, in apply only; a stale answer (the officer changed in between) is 409 `status_changed`. A denial of the machine's `create` is its own 403, which rolls the import back.
 - **The activity rows** are written after the commit, one per changed engagement (`updated`, `{allocation, via: "sheet_import", importId}`) and one per new post (`create`, the create's metadata with `via` and `importId`); a failed write is logged and never undoes the import.
 
-### 63.24 Periodic reports and "Generate with AI" (SCP-5b, SCP-Q37; plan §8 SCP-5) — on 63.18's rows, routes, states and gates — **STATUS: PLANNED (2026-10-30)**
+### 63.24 Periodic reports, "Generate with AI" and report automation (SCP-5b, SCP-Q37 to SCP-Q40; plan §8 SCP-5) — on 63.18's rows, routes, states and gates — **STATUS: PLANNED (2026-10-30)**
 
-**What it is.** A client's report for a day, a week, a month, a quarter, a half year or a year: the period's numbers, the words that go with them, and what comes next. Each is a `social_reports` row of one kind, on 63.18's routes, its four states (Draft, HoD check, Ready, Sent) and its gates. The monthly report stays exactly as SCP-5a built it; the five other periodic kinds follow its pattern; `campaign` and `adhoc` keep SMM-23's rules. "Generate with AI" drafts them for one client or for every client the person may draft for (63.24.5), and an agent drafts them by chat (63.24.6), as the owner ruled (SCP-Q37).
+**What it is.** A client's report for a day, a week, a month, a quarter, a half year or a year: the period's numbers, the words that go with them, and what comes next. Each is a `social_reports` row of one kind, on 63.18's routes, its four states (Draft, HoD check, Ready, Sent) and its gates. The monthly report stays exactly as SCP-5a built it; the five other periodic kinds follow its pattern; `campaign` and `adhoc` keep SMM-23's rules. "Generate with AI" drafts them for one client or for every client the person may draft for (63.24.5), an agent drafts them by chat (63.24.6), as the owner ruled (SCP-Q37), and the four can set them to be drafted on a schedule (63.24.9, SCP-Q38).
 
 **Who** (SCP-Q25, for every kind). The officer drafts, edits and submits (`social_report` · `create`, `update`); only the four check, send back and send (`approve`, `deliver`, PERMISSION §53.7). Sending renders the PDF and publishes the report to the client's portal reports (PV7-04a), as the monthly does.
 
@@ -13530,6 +13530,85 @@ These tools only draft. Approving, sending back and sending stay `social.approve
 - the run: the four get every active client, an officer only their own, a member without `create` 403; skipped (`kind_not_due`, `internal_client`) and existing clients reported and never redrafted; a client whose draft throws `failed` while the rest finish; the gateway down gives `fallback` drafts; never more than four drafts in flight; a killed worker's run resumed with no client drafted twice; `generation_running`; the progress read only for the run's person and the four;
 - by chat: `social.generateReports` through the OBO envelope narrows to the person's clients, asks the confirm, records `via`; no tool approves or sends; an automation principal is refused;
 - sending publishes through PV7-04a with each kind's title, and the PDF carries the SIMULATED watermark when a number was simulated.
+
+**63.24.9 Report automation: scheduled generation** (SCP-Q38; its spend SCP-Q40).
+
+**What it is.** One of the four sets, on the Settings page, which reports the ERP drafts by itself: a kind, the clients, when, and on or off. Each run drafts the period that has just ended through 63.24.5's machinery, so everything there holds: one report per client, kind and period, four drafts in flight, the template when the gateway fails, the per-client results and the usage record. A run only drafts; approving, sending back and sending stay the four's own acts.
+
+**How it keeps SCP-Q17.** A schedule is owned by the one of the four who set it or last changed it (`owner_id`), and every run acts as that person. The job loads the owner's principal afresh at run time, asks the gate the routes ask (`social_engagement` · `plan`, then `social_report` · `create`) and applies the same narrowing, and the run, every activity row and every usage row carry the owner's id with `via: {automation: 'report_schedule', scheduleId}`. If the owner no longer passes (they left the seat, were deactivated or lost a grant), that run is skipped and the schedule pauses with the reason shown; the owner and the HoD and GM seats are told, and whichever of the four resumes it owns it from then on. No session is involved: the owner must be an active user, and the decision is the live one. An unattended principal (`users.kind` `automation` or `bot`) still cannot own, change or run a schedule. So SCP-Q17 holds: every run has its person.
+
+**Data** (in 63.24.2's migration; third wall). `social_report_schedules`:
+
+| Column | Type and rule |
+|---|---|
+| `id`, `tenant_id` | uuid PK, the caller's id; `ux_social_report_schedules_id_tenant UNIQUE (id, tenant_id)` |
+| `owner_id` | `uuid NOT NULL → users`: the one of the four who set or last changed it; the runs act as them |
+| `kind` | `text NOT NULL`: `daily`, `weekly`, `monthly`, `quarterly`, `semester`, `yearly` |
+| `scope`, `engagement_ids` | `text NOT NULL`: `all` (every client the owner may draft for at run time) or `chosen`; `uuid[] NOT NULL DEFAULT '{}'`, 1 to 200 for `chosen` |
+| `timing` | `jsonb NOT NULL`: the kind's shape (below), validated by the route |
+| `enabled`, `paused_reason`, `paused_at`, `paused_by` | `boolean NOT NULL DEFAULT true`; `text NULL`: `manual`, `owner_not_allowed`, `owner_inactive`; when; who (NULL when the job paused it) |
+| `next_run_at`, `next_period` | `timestamptz NULL`, `text NULL`: computed by the server; NULL while paused |
+| `last_run_at`, `last_period` | NULL until the first run. The last run itself is the newest `social_report_runs` row of the schedule, so there is no back-pointer and no circular FK |
+| `created_at`, `updated_by`, `updated_at`, `deleted_at`, `deleted_by`, `origin_site` | as usual |
+
+CHECKs, NULL-safe: the kind and scope lists; `(scope = 'chosen') = (cardinality(engagement_ids) > 0)` and `cardinality(engagement_ids) <= 200`; `jsonb_typeof(timing) = 'object'`; `enabled = (paused_reason IS NULL)` and `enabled = (paused_at IS NULL)`; `paused_by IS NULL OR paused_reason = 'manual'`; `enabled = (next_run_at IS NOT NULL)`; `(next_run_at IS NULL) = (next_period IS NULL)`; `(last_run_at IS NULL) = (last_period IS NULL)`; `(deleted_at IS NULL) = (deleted_by IS NULL)`. `ux_social_report_schedules_all UNIQUE (tenant_id, kind) WHERE scope = 'all' AND deleted_at IS NULL` (one company-wide schedule per kind); `ix_social_report_schedules_due (next_run_at) WHERE enabled AND deleted_at IS NULL`.
+
+**Timing.** In the company's time zone (`REPORTS_TZ`; UTC while it is unset, as on live), with working days from the HR holiday calendar, as schedule-health counts them:
+
+| Kind | `timing` | Runs | Drafts |
+|---|---|---|---|
+| `daily` | `{at: 'HH:MM'}` | every day at `at` | the day before |
+| `weekly` | `{weekday: 1 to 7 (Monday is 1), at}` | that weekday at `at` | the ISO week that ended before the run's day |
+| `monthly` | `{on: 'day', day: 1 to 28, at}` or `{on: 'working_day', n: 1 to 20, at}` | day N of each month, or its N-th working day | the month before |
+| `quarterly`, `semester`, `yearly` | the monthly's two forms | day N, or the N-th working day, of the month after the period ends | the period that ended |
+
+For example, a monthly `{on: 'working_day', n: 3, at: '08:00'}` runs on the third working day of each month at 08:00 and drafts the month before. `next_run_at` and `next_period` are computed when the schedule is written and after each run. When a schedule falls due, the job computes its moment again with the current calendar, so a newly added holiday moves a working-day schedule to the right day instead of running on the old one.
+
+**The job `social-report-schedules`** (every minute, on every instance):
+- **Claiming.** It picks due schedules (`enabled`, not deleted, `next_run_at <= now()`) company by company under the tenant wall, `FOR UPDATE SKIP LOCKED`, so two instances never take the same one. In that row's transaction it re-authorizes the owner, creates the run (`trigger: 'schedule'`, `schedule_id`, `requested_by` the owner, `period` the schedule's `next_period`, the clients narrowed for the owner; for `chosen`, a client the owner may no longer draft for is listed `skipped` with `not_allowed`), sets `last_run_at` and `last_period` and the next `next_run_at` and `next_period`, and commits. Then it starts the run as 63.24.5 does.
+- **Idempotent per schedule and period:** `ux_social_report_runs_schedule` makes a second run of one period impossible; a period already run is passed over and the next one computed.
+- **Catch-up after downtime:** when the schedule is behind by more than one period, only the latest period that has ended is drafted, once, and the missed ones before it are not: no backlog flood. The run's `via` says how many were missed (`missed`), and the page shows it.
+- **Waiting:** a schedule whose run would meet another run of the same company, kind and period (`generation_running`) keeps its `next_run_at` and tries again at the next tick.
+- **The owner check fails:** no run is made. The schedule pauses (`enabled` false, `paused_reason` `owner_not_allowed` or `owner_inactive`, `paused_at`), and `social.report_schedule.paused` goes to the owner, when still active, and to the HoD and GM seats, naming the reason in words.
+- **A restart** mid-run is 63.24.5's resume: the schedule row was already advanced, so nothing is made twice.
+
+**Routes** (base 63.0). Every one asks `social_engagement` · `plan` first (403 `not_a_social_approver`; an automation principal 403 `automation_cannot_act`); 404 `schedule_not_found`; then 400, then 409:
+
+| Route | What it does |
+|---|---|
+| `GET report-schedules` | `{items: [Schedule]}`. `Schedule {id, kind, scope, clients: [{engagementId, clientName}], timing, timingText, enabled, pausedReason, owner: {id, name}, nextRunAt, nextPeriod, lastRunAt, lastPeriod, lastRun: {runId, status, created, existing, skipped, failed, missed} \| null, spend: {last30Days: Spend, monthToDate: Spend}}`, with `Spend {runs, calls, promptTokens, completionTokens, costUsd}` summed over the schedule's runs from `ai_usage_events` by `run_id` (SCP-Q40). `timingText` reads like "Every Monday at 08:00, for the week before" |
+| `POST report-schedules` | `{id?, kind, scope, engagementIds?, timing, enabled?}` → 201 `{schedule, created}`; the caller is the owner. 400 `{field}` for a timing field (`timing.at`, `timing.weekday`, `timing.on`, `timing.day`, `timing.n`) or a client that is not an open engagement of the company; 409 `schedule_exists` `{scheduleId}` for a second company-wide schedule of a kind. A replayed `id` answers `created: false` |
+| `PATCH report-schedules/:id` | `{scope?, engagementIds?, timing?, enabled?}`; the caller becomes the owner. Resuming (`enabled: true`) clears the pause and computes the next run; pausing sets `manual` |
+| `DELETE report-schedules/:id` | A soft delete. A run already started finishes |
+| `POST report-schedules/:id/run` | "Run now": a run of the schedule's kind for the period that has just ended, as the caller (`trigger: 'run_now'`, the caller's narrowing within the schedule's scope), whether the schedule is on or off; `next_run_at` does not move. When the schedule already has a run for that period, 200 `{alreadyApplied: true, runId}`; otherwise 202 as `POST reports/generate`, and 409 `generation_running` as there |
+
+Activity on entity `social_report_schedule`: `created`, `updated`, `paused`, `resumed`, `deleted`, `run`. The job's own rows carry the owner as the actor and `via`.
+
+**The page: "Report automation"** on `{D}/settings` (the `settings` row, gated by `canLeadSocial`; the routes are `plan`), below the deadline table. No new row, key or URL.
+- One card per schedule: the kind, the clients ("All clients" or a count), the timing in words, the owner, on or off with the paused reason in words ("Paused: its owner may no longer run it"), the next run, the last run with its counts and missed periods, linking to that run's results, and the spend over the last 30 days and this month.
+- **Add** and **Edit** open a dialog: the kind; "All clients" or a client picker; the kind's timing fields (time; weekday; a day of the month or the N-th working day); and a preview line, such as "Next: Monday 16 November at 08:00, for 9 to 15 November".
+- **Pause** and **Resume**, **Delete** (with a confirm), and **Run now** (naming the period it will draft).
+- At phone width the cards stack and every action stays reachable. By keyboard, every control is in order and the dialog keeps focus until it closes, then returns it to its opener. A paused state is said in text, never by colour alone.
+- DEMO_MODE: a weekly schedule on all clients with a settled last run and its spend, and a monthly one paused because its owner may no longer run it. The demo answers each route in the server's order.
+
+**Agents** (63.15). An agent's schedule is owned by its person, never by the agent.
+
+| Tool | Route | Class |
+|---|---|---|
+| `social.reportSchedules` | `GET report-schedules` | read |
+| `social.saveReportSchedule` | `POST` and `PATCH report-schedules` (create, edit, pause, resume) | `write`, impact `medium`: it sets what the ERP does by itself every period, so the person confirms in the thread |
+| `social.deleteReportSchedule` | `DELETE report-schedules/:id` | `write`, impact `medium` |
+| `social.runReportSchedule` | `POST report-schedules/:id/run` | `write`, impact `medium` |
+
+**Proofs** (63.21's rules):
+- the timing golden table: each kind and form across a month end, a holiday on the N-th working day, the year turn, February, the company's zone, and UTC while `REPORTS_TZ` is unset;
+- the job: two instances take a due schedule once (`SKIP LOCKED`); one run per schedule and period; a restart mid-run resumes with no second run; an outage of three periods drafts only the latest, once, with `missed: 2`;
+- acting as the owner: the run's `requested_by`, the activity and the usage rows carry the owner and `via`; an owner who left the seat makes the run skip and the schedule pause with `owner_not_allowed`, with the notices sent; another of the four resumes it and becomes the owner; a deactivated owner gives `owner_inactive`;
+- a `chosen` schedule keeps to the clients the owner may draft for; `schedule_exists`;
+- the routes refuse an officer, a `company_admin` and an automation principal; Run now runs as the caller and answers `alreadyApplied` for a period already run;
+- nothing in a schedule approves or sends: its drafts wait for the four like any draft;
+- the spend: a run's usage sums its calls, a schedule's 30-day and month-to-date spend sums its runs, and nothing is refused on spend;
+- the page: phone width and keyboard, axe in light and dark, DEMO_MODE.
 
 ### 63.25 Ideas for next month (SCP-5c) — **STATUS: PLANNED (2026-10-30)**
 
