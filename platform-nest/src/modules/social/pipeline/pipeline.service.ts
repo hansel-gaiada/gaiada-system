@@ -29,6 +29,8 @@ import { assemblePrincipal, auditDecision, sessionVersionCurrent, type Principal
 import { isModuleEnabled } from "../../registry";
 import { loadSocialApproverIds, loadSocialPostAuthz, socialPostResource, type SocialPostAuthz } from "../pipeline-authz";
 import { scpAction } from "./fixture";
+import { parseSavedItemIds } from "./saved";
+import { countSavedUse, lockSavedItemsForUse } from "./saved-data";
 import {
   cerbosActionsToAsk, cerbosChecksFor, changeCaseOf, decide, holderOf, primaryCerbosAction,
   type CerbosDecisions, type PipelinePostState, type StageApplied, type StageContext, type StageRefusal,
@@ -128,6 +130,9 @@ export interface StageRequest {
   expectedStatus?: string;
   actionId?: string;
   requireExpectedStatus?: boolean;
+  /** SCP-5e (BFF §63.26.3): the raw `savedItemIds` of the post edit, judged after the gate (400 `{field: 'savedItemIds'}`) and counted in the
+   *  edit's own transaction when it applies. Only `edit` passes it; undefined means the body sent none. */
+  savedItemIds?: unknown;
 }
 
 export interface StageOutcome {
@@ -224,6 +229,7 @@ export interface StageTxContext { c: PoolClient; row: PostRow; state: PipelinePo
 export async function applyStageInTx(
   c: PoolClient, prepared: Prepared, req: StageRequest, cancelled: Set<string>,
   hook?: (x: StageTxContext) => Promise<StageTxResult | null>,
+  savedIds?: string[] | null,
 ): Promise<StageTxResult> {
   const { tenantId, postId, action } = req;
   const { pre, cerbos, principalFacts, base, callerId } = prepared;
@@ -240,6 +246,11 @@ export async function applyStageInTx(
   if (hook) {
     const early = await hook({ c, row, state: locked, engagement });
     if (early) return early;
+  }
+  // SCP-5e (BFF §63.26.3): the saved items an edit uses must be this client's live ones; their rows are locked (in id order) until the commit,
+  // so the count below cannot interleave with another edit's. Nothing is written yet: a refusal here, or from the machine, counts nothing.
+  if (savedIds && !(await lockSavedItemsForUse(c, { tenantId, engagementId: engagement.id, ids: savedIds }))) {
+    return { refusal: { ok: false, http: 400, code: "invalid_field", field: "savedItemIds", guard: "params_valid" } };
   }
   const cycle = row.cycle_id ? await loadCycle(c, tenantId, row.cycle_id) : null;
   const who = {
@@ -262,6 +273,8 @@ export async function applyStageInTx(
     if (isNotification(name)) continue;
     await EFFECT_RUNNERS[name](run);
   }
+  // The edit applied: the same transaction adds one use to each saved item it used (a replay returned above and never gets here).
+  if (savedIds) await countSavedUse(c, { tenantId, postId, ids: savedIds });
   return { applied: r, out, engagement, cycle, before: locked };
 }
 
@@ -271,6 +284,8 @@ export async function runStageAction(principal: Principal, req: StageRequest): P
   const prepared = await prepareStage(principal, req);
   const { pre, state, resource, replay } = prepared;
   if (replay) return { postId, applied: replay, out: emptyOutput() };
+  // SCP-5e: `savedItemIds` is judged here, after the gate (403, the status and the body of the action are already judged) and before the lock.
+  const savedIds = req.savedItemIds === undefined ? null : parseSavedItemIds(req.savedItemIds);
 
   // BFF §63.3.5: approving a `creatives` client's post for design may open the cycle's month request, which also needs
   // `work_request` · `create` for the acting approver (any member holds it). Judged with the other authorization, before
@@ -295,11 +310,13 @@ export async function runStageAction(principal: Principal, req: StageRequest): P
     : new Set<string>();
 
   // 4. The transaction.
-  const result = await withTenants([tenantId], (c) => applyStageInTx(c, prepared, req, cancelled), SOCIAL);
+  const result = await withTenants([tenantId], (c) => applyStageInTx(c, prepared, req, cancelled, undefined, savedIds), SOCIAL);
 
   if ("refusal" in result && result.refusal) return authorizeStage(principal, resource, action, result.refusal);
   const ok = result as { applied: StageApplied; out: EffectOutput; engagement: EngagementRow; cycle: CycleRow | null; before: PipelinePostState };
   if (!ok.applied.alreadyApplied) {
+    // The activity row names the saved items the edit used (their ids only, never their text).
+    if (savedIds) ok.applied.activity = { ...ok.applied.activity, metadata: { ...ok.applied.activity.metadata, savedItemIds: savedIds } };
     await afterCommit(principal, tenantId, postId, ok.applied, ok.out, ok.engagement, ok.cycle, ok.before, pre.authz);
   }
   return { postId, applied: ok.applied, out: ok.out };

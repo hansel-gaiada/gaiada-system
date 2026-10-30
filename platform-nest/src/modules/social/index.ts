@@ -1467,6 +1467,69 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "section", "expectedVersion"],
       },
     },
+    // ── SCP-5e: Saved, each client's content bank (BFF §63.26, §63.15) ──────────────────────────────────────────────────────
+    {
+      name: "social.savedItems",
+      description:
+        "Read one client's Saved (BFF §63.26), the content bank the Social Media team keeps. Without `collection` it answers the company's "
+        + "collections in their order (`photos`, `posts`, `captions`, `hashtags`, `templates`, `references` by default; the company renames, "
+        + "reorders, hides and adds them) with a count and a few previews each, and `canAdd`. With `collection` it answers that collection's "
+        + "items, newest first, paged by `cursor`: the photos (the client's design photos and the assets and Drive links kept for it, each marked "
+        + "used or unused, with its source), the approved posts, the brand book's hashtag sets, or the saved captions, templates and references "
+        + "(each with its use count). Filter by `pillar`, `used` (true or false) and `source` (own, client, stock, ai, unknown). Team only: "
+        + "anyone outside the Social Media read tier gets 403.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/saved",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The client's engagement." },
+          collection: { type: "string", description: "A collection key from the unfiltered answer, or `other`. Omit for the collections." },
+          pillar: { type: "string", description: "Only items of this content pillar." },
+          used: { type: "string", enum: ["true", "false"], description: "Only used, or only unused, items." },
+          source: { type: "string", enum: ["own", "client", "stock", "ai", "unknown"], description: "Only items from this source." },
+          cursor: { type: "string", description: "The `nextCursor` of the previous page." },
+          limit: { type: "integer", minimum: 1, maximum: 100, description: "Page size (default 30)." },
+        },
+        required: ["tenantId", "engagementId"],
+      },
+    },
+    {
+      name: "social.saveItem",
+      description:
+        "Keep one item in a client's Saved: a caption or template as `holds: \"text\"` (with `body`), a Drive or web link as `holds: \"link\"` "
+        + "(with `url` and `source`; a video is always a link, `media: \"video\"`), or an Asset Library photo as `holds: \"asset\"` (with "
+        + "`assetGroupId`). `category` must be one of the company's enabled categories that takes that shape (see `social.savedItems`). A link from "
+        + "`ai` needs `aiNote`. Keeping an asset the client already has, or replaying an `id`, answers the existing item with `created: false`. "
+        + "Team material that is removed in one step, so the impact is low; the agent acts with the asking person's rights, and an unattended "
+        + "automation is refused. To use an item in a post, send its id as `savedItemIds` when editing the post.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/saved",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The client's engagement." },
+          id: { type: "string", description: "Optional client-chosen id (idempotency)." },
+          category: { type: "string", description: "An enabled category key of the company that takes `holds`." },
+          holds: { type: "string", enum: ["asset", "link", "text"], description: "What the item is." },
+          title: { type: "string", description: "1 to 120 characters." },
+          body: { type: "string", description: "The caption's or template's text (1 to 5,000); `text` only." },
+          url: { type: "string", description: "An http(s) link (up to 500); `link` only." },
+          media: { type: "string", enum: ["photo", "video"], description: "What a link points at; `link` only." },
+          assetGroupId: { type: "string", description: "The Asset Library asset (any version's id); `asset` only." },
+          pillar: { type: "string", description: "The content pillar (up to 60)." },
+          source: { type: "string", enum: ["own", "client", "stock", "ai", "unknown"], description: "Where a link came from; required for `link`." },
+          aiNote: { type: "string", description: "How AI made it (up to 1,000); required when `source` is `ai`." },
+        },
+        required: ["tenantId", "engagementId", "category", "holds", "title"],
+      },
+    },
     // ── SCP-5 W5-B2: ideas for next month (BFF §63.25.3, tools of 63.25.4) ───────────────────────────────────────────────
     // The same routes, the same gates and the same order of checks as the person's: the client's officer and the four write (403
     // `not_officer_or_approver`, 403 `automation_cannot_act`). Ideas stay internal (SCP-Q27). The writes are `low`: internal notes a person sees
