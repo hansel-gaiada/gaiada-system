@@ -1,0 +1,49 @@
+/* SCP-5e (BFF §63.26) — Saved, each client's content bank: the client picker, the collection mosaics, the filters, the grids and lists, an item's card and the add form. Tokens only: no colour, radius or
+   shadow literal and no uppercase transform (the tokens guard), so the Social skin restyles it by changing tokens and nothing here. It builds on the `.scp-*` classes of cycles.css. Every state is also
+   written in words beside its colour or shape, so colour is never the only signal; a link or button is at least 32px tall on a phone. */
+.scp-saved { display: grid; gap: 18px; }
+.scp-saved__clients { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font: 600 11px var(--font-body); color: var(--erp-ink-60); }
+.scp-saved__chip { display: inline-flex; align-items: center; min-height: 32px; padding: 2px 12px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); font: 600 12px var(--font-body); color: var(--text-primary); text-decoration: none; }
+.scp-saved__chip:hover { background: var(--tint-hover); }
+.scp-saved__chip[aria-current="true"], .scp-saved__chip[aria-current="page"] { background: var(--status-ok-bg); color: var(--status-ok-fg); }
+.scp-saved__head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+.scp-saved__name { font: 700 18px var(--font-body); color: var(--text-primary); margin: 0; }
+
+.scp-saved__mosaic { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; list-style: none; margin: 0; padding: 0; }
+.scp-saved__tile { display: grid; gap: 8px; align-content: start; min-height: 120px; padding: 10px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); text-decoration: none; color: var(--text-primary); }
+.scp-saved__tile:hover { background: var(--tint-hover); }
+.scp-saved__tile[aria-current="true"] { border-color: var(--accent-fg); border-width: 1.5px; }
+.scp-saved__tile-title { font: 700 13px var(--font-body); margin: 0; }
+.scp-saved__tile-count { font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.scp-saved__previews { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.scp-saved__preview { position: relative; aspect-ratio: 1 / 1; overflow: hidden; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); }
+.scp-saved__preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.scp-saved__titles { margin: 0; padding-left: 16px; font: 400 12px/1.4 var(--font-body); color: var(--erp-ink-60); }
+
+.scp-saved__filters { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.scp-saved__filter { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font: 600 11px var(--font-body); color: var(--erp-ink-60); }
+
+.scp-saved__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; list-style: none; margin: 0; padding: 0; }
+.scp-saved__list { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.scp-saved__card { display: grid; gap: 8px; align-content: start; padding: 10px 12px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); min-width: 0; }
+.scp-saved__media { position: relative; aspect-ratio: 4 / 3; overflow: hidden; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); display: grid; place-items: center; padding: 8px; }
+.scp-saved__media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.scp-saved__ph { font: 400 12px var(--font-body); color: var(--erp-ink-60); text-align: center; overflow-wrap: anywhere; }
+.scp-saved__title { font: 700 13px var(--font-body); color: var(--text-primary); margin: 0; overflow-wrap: anywhere; }
+.scp-saved__meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font: 400 12px var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.scp-saved__badge { display: inline-flex; padding: 1px 8px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); font: 700 11px var(--font-body); color: var(--text-primary); }
+.scp-saved__badge--used { background: var(--status-ok-bg); color: var(--status-ok-fg); }
+.scp-saved__body { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.scp-saved__tags { display: flex; flex-wrap: wrap; gap: 4px; list-style: none; margin: 0; padding: 0; }
+.scp-saved__tag { padding: 1px 8px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); font: 400 12px var(--font-body); }
+.scp-saved__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.scp-saved__form { display: grid; gap: 12px; padding: 12px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); }
+.scp-saved__row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.scp-saved__row > .scp-field { flex: 1 1 200px; min-width: 0; }
+.scp-saved__text { min-height: 96px; resize: vertical; width: 100%; box-sizing: border-box; }
+.scp-saved__more { display: flex; gap: 12px; align-items: center; }
+.scp-saved__add > summary { cursor: pointer; font: 600 13px var(--font-body); color: var(--text-primary); min-height: 32px; display: flex; align-items: center; }
+@media (max-width: 720px) {
+  .scp-saved__previews { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .scp-saved__grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+}

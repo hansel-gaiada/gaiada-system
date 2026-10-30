@@ -1,0 +1,37 @@
+/* SCP-5g (BFF §63.28) — the social audit: the list and one scorecard. Tokens only: no colour, radius or shadow literal and no uppercase transform (the tokens guard), so the Social skin restyles it by
+   changing tokens and nothing here. It builds on the `.scp-*` classes of cycles.css and the filter chips of reports.css. A score is always written as "3.5 out of 5" beside its bar, and the band as a
+   word beside the overall, so colour is never the only signal. */
+.scp-audit { display: grid; gap: 18px; }
+.scp-audit__list { width: 100%; border-collapse: collapse; font: 400 13px var(--font-body); }
+.scp-audit__list th { text-align: left; font: 600 11px var(--font-body); color: var(--erp-ink-60); padding: 6px 8px; border-bottom: 0.5px solid var(--erp-hairline); }
+.scp-audit__list td { padding: 8px; border-bottom: 0.5px solid var(--erp-hairline); vertical-align: top; }
+.scp-audit__band { display: inline-flex; padding: 2px 8px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); font: 700 11px var(--font-body); }
+.scp-audit__band--strong { background: var(--status-ok-bg); color: var(--status-ok-fg); }
+.scp-audit__band--fair { background: var(--status-warning-bg); color: var(--status-warning-fg); }
+.scp-audit__band--needs_work { border-style: dashed; color: var(--status-critical-fg); }
+
+.scp-audit__head { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: baseline; }
+.scp-audit__title { font: 700 18px var(--font-body); color: var(--text-primary); margin: 0; }
+.scp-audit__overall { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+.scp-audit__big { font: 700 28px var(--font-body); font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.scp-audit__dims { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.scp-audit__dim { display: grid; gap: 8px; padding: 10px 12px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); }
+.scp-audit__dim-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; justify-content: space-between; }
+.scp-audit__dim-name { font: 700 13px var(--font-body); color: var(--text-primary); margin: 0; }
+.scp-audit__bar { display: block; height: 6px; border-radius: var(--radius-md); background: var(--tint-hover); overflow: hidden; }
+.scp-audit__bar > span { display: block; height: 100%; background: var(--accent-fg); }
+.scp-audit__line { font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.scp-audit__inputs { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+.scp-audit__inputs > .scp-field { min-width: 0; }
+.scp-audit__note { flex: 1 1 260px; }
+.scp-audit__note textarea { width: 100%; box-sizing: border-box; min-height: 56px; resize: vertical; }
+.scp-audit__fixes { margin: 0; padding-left: 20px; display: grid; gap: 4px; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.scp-audit__summary textarea { width: 100%; box-sizing: border-box; min-height: 120px; resize: vertical; }
+.scp-audit__buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.scp-audit__panel { display: grid; gap: 12px; padding: 12px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); }
+.scp-audit__frozen { border-left: 3px solid var(--status-idle); padding: 6px 10px; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.scp-audit__facts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; font: 400 13px var(--font-body); }
+.scp-audit__facts dt { color: var(--erp-ink-60); font: 600 11px var(--font-body); }
+.scp-audit__facts dd { margin: 0; }
+.scp-audit__fact { display: grid; gap: 2px; }
+@media (max-width: 720px) { .scp-audit__big { font-size: 22px; } }
