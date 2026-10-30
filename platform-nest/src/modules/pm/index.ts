@@ -11,6 +11,8 @@ export const pmModule: ModuleContract = {
     "0039_pm_task_recurrence.sql", "0040_pm_progress_snapshots.sql",
     // SCP-1n (BFF §63.1 item 5, §63.13) — a task can point at a social post, and the content-month task at its cycle.
     "202610271410_pm_task_links.sql",
+    // SCP-5h (BFF §63.29.1) — the `project` template kind and pm_template_applications (apply-template, the kickoff move).
+    "202610301200_pm_project_templates.sql",
   ],
   // IAM-01d migration: all 3 CLEAN — pure colon-to-dot renames onto the catalog's pm.task.* keys.
   permissions: [
@@ -40,6 +42,33 @@ export const pmModule: ModuleContract = {
         type: "object",
         properties: { tenantId: { type: "string" }, taskId: { type: "string" } },
         required: ["tenantId", "taskId"],
+      },
+    },
+    // SCP-5h (BFF §63.29.5): apply a project template. It hands a project's worth of tasks to people, so it is a medium-impact
+    // write: an agent's call is confirmed by the person in the thread (63.15) before it runs.
+    {
+      name: "pm.applyTemplate",
+      description:
+        "Apply a PM project template to a project: one milestone per phase and one task per template step, each due a number of "
+        + "working days after the kickoff (the company's holiday calendar), its Ball and Responsible the person named for the "
+        + "step's role. One transaction; a replayed id answers the same application, and a template already applied to the "
+        + "project is refused (409 template_already_applied).",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/pm/projects/:projectId/apply-template",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          projectId: { type: "string", description: "The project the tasks are made in." },
+          id: { type: "string", description: "A new uuid for the application (a replay with the same id answers the same application)." },
+          templateId: { type: "string", description: "A project template of the company (kind 'project')." },
+          kickoff: { type: "string", description: "The kickoff day, YYYY-MM-DD." },
+          people: { type: "object", description: "The person per role of the template: {<roleKey>: userId}. A role left out gets no assignee." },
+        },
+        required: ["tenantId", "projectId", "id", "templateId", "kickoff"],
       },
     },
   ],

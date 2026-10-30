@@ -30,6 +30,11 @@ import { staffNeverClientVisible } from "../../core/portal-visibility";
 import { todayIsoInTz } from "../reports/person-scope";
 import { assertPersonAxisReadAllowed } from "../../core/person-axis-gate";
 import type { Principal } from "../../rbac/principal";
+import { loadWorkingCalendar } from "../reports/dept-kpi-readers/functional/working-calendar";
+import {
+  PROJECT_TEMPLATE_LIMITS, isKickoffDate, planApplication, planKickoffMove, templateCalendarWindow, validateProjectTemplatePayload,
+  type AppliedTaskState, type ProjectTemplatePayload,
+} from "./project-templates";
 
 type Assignee = {
   kind: "person" | "department" | "division";
@@ -634,8 +639,10 @@ function uniqueStatusId(base: string, taken: Set<string>): string {
 // payload kinds. Payload shape is validated app-side (never trusted from the client past this
 // gate); `kind` is immutable once created (PATCH only ever validates against the EXISTING row's
 // kind, read from the DB, never from the request body).
-type TemplateKind = "task" | "doc";
-const TEMPLATE_KINDS = new Set<TemplateKind>(["task", "doc"]);
+// SCP-5h (BFF §63.29.1): a third kind, `project` (phases, roles and tasks due in working days from a kickoff), validated by
+// `validateProjectTemplatePayload` (project-templates.ts) and applied by `POST projects/:projectId/apply-template` below.
+type TemplateKind = "task" | "doc" | "project";
+const TEMPLATE_KINDS = new Set<TemplateKind>(["task", "doc", "project"]);
 
 interface TaskTemplatePayload {
   title: string; description?: string; priority?: string; estimateMinutes?: number;
@@ -643,7 +650,9 @@ interface TaskTemplatePayload {
 }
 interface DocTemplatePayload { title: string; body: string }
 
-function validateTemplatePayload(kind: string, payload: unknown): TaskTemplatePayload | DocTemplatePayload {
+function validateTemplatePayload(kind: string, payload: unknown): TaskTemplatePayload | DocTemplatePayload | ProjectTemplatePayload {
+  // A project payload names its own refusals (400 `invalid_field` `{field: "payload.<path>"}`), so it is checked whole, first.
+  if (kind === "project") return validateProjectTemplatePayload(payload);
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     throw new BadRequestException("payload must be an object");
   }
@@ -1458,6 +1467,396 @@ export async function updateLinkedTaskScheduleInTx(
     status: task.status, statusChanged: false, wasDone: false, isDoneNow: false, actorId: actorUserId,
   });
   return { changed: true };
+}
+
+// ---------------- SCP-5h (BFF §63.29.1) — apply a project template; its applications; the kickoff move ----------------
+// The DB half of PM's project template. The date maths is pure (project-templates.ts); these functions read the template, the
+// company's calendar and the tasks' state, and write in ONE transaction. Authorization is the CALLER's: the PM routes below ask
+// `pm_project` · `manage` (apply, move) or `read` (the list); Social's "Start onboarding" (W5-C4, §63.29.4) asks its own gates and
+// then calls `applyProjectTemplate` with the same input, so PM's refusals pass through unchanged. Nothing here knows about Social.
+
+export interface ApplyTemplateInput {
+  /** The caller's application id: a replay answers the same row. */
+  id: string;
+  templateId: string;
+  kickoff: string;
+  /** {<roleKey>: userId}; a role left out (or null) gets no Ball and no Responsible. */
+  people: Record<string, string | null>;
+}
+
+export interface ApplyTemplateAnswer {
+  applicationId: string;
+  tasks: Array<{ key: string; taskId: string; dueDate: string | null }>;
+  milestones: Array<{ phase: string; milestoneId: string; dueDate: string | null }>;
+}
+
+const badField = (field: string): BadRequestException => new BadRequestException({ message: "invalid_field", field });
+
+/** PURE. The apply body (§63.29.1): `{id, templateId, kickoff: 'YYYY-MM-DD', people: {<roleKey>: userId}}`. 400 `invalid_field` `{field}`.
+ *  Whether each role key is the template's, and each person an active member, is checked against the template in the transaction. */
+export function parseApplyTemplateBody(b: unknown): ApplyTemplateInput {
+  const o = (b && typeof b === "object" && !Array.isArray(b) ? b : {}) as Record<string, unknown>;
+  if (typeof o.id !== "string" || !UUID_RE.test(o.id)) throw badField("id");
+  if (typeof o.templateId !== "string" || !UUID_RE.test(o.templateId)) throw badField("templateId");
+  if (!isKickoffDate(o.kickoff)) throw badField("kickoff");
+  const people: Record<string, string | null> = {};
+  if (o.people !== undefined && o.people !== null) {
+    if (typeof o.people !== "object" || Array.isArray(o.people)) throw badField("people");
+    const entries = Object.entries(o.people as Record<string, unknown>);
+    if (entries.length > PROJECT_TEMPLATE_LIMITS.roles.max) throw badField("people");
+    for (const [role, userId] of entries) {
+      if (userId === null) { people[role] = null; continue; }
+      if (typeof userId !== "string" || !UUID_RE.test(userId)) throw badField(`people.${role}`);
+      people[role] = userId.toLowerCase();
+    }
+  }
+  return { id: o.id.toLowerCase(), templateId: o.templateId.toLowerCase(), kickoff: o.kickoff, people };
+}
+
+interface ApplicationRow {
+  id: string;
+  projectId: string;
+  templateId: string;
+  templateName: string;
+  kickoff: string;
+  people: Record<string, string>;
+  tasks: Array<{ key: string; taskId: string; phase: string }>;
+  milestones: Array<{ phase: string; milestoneId: string }>;
+  templatePayload: ProjectTemplatePayload;
+  deleted: boolean;
+}
+
+const APPLICATION_SELECT = `SELECT id, project_id AS "projectId", template_id AS "templateId", template_name AS "templateName",
+  to_char(kickoff, 'YYYY-MM-DD') AS kickoff, people, tasks, milestones, template_payload AS "templatePayload", (deleted_at IS NOT NULL) AS deleted
+  FROM pm_template_applications`;
+
+/** The calendar a template's dates are counted on: the company's default HR holiday calendar from the kickoff over the longest
+ *  offset any template may hold (so a template edited between this read and the transaction is still covered). */
+async function templateCalendar(tenantId: string, kickoff: string) {
+  const w = templateCalendarWindow(kickoff, PROJECT_TEMPLATE_LIMITS.offset.max);
+  return loadWorkingCalendar(tenantId, w.from, w.to);
+}
+
+/** The answer for an application as it stands (a replay): its ids, with the tasks' and milestones' CURRENT due dates. */
+async function applicationAnswerInTx(c: PoolClient, app: ApplicationRow): Promise<ApplyTemplateAnswer> {
+  const taskIds = app.tasks.map((t) => t.taskId);
+  const msIds = app.milestones.map((m) => m.milestoneId);
+  const tasks = await c.query<{ id: string; dueDate: string | null }>(
+    `SELECT id, to_char(due_date, 'YYYY-MM-DD') AS "dueDate" FROM pm_tasks WHERE id = ANY($1::uuid[])`, [taskIds]);
+  const ms = await c.query<{ id: string; dueDate: string | null }>(
+    `SELECT id, to_char(due_date, 'YYYY-MM-DD') AS "dueDate" FROM pm_milestones WHERE id = ANY($1::uuid[])`, [msIds]);
+  const taskDue = new Map(tasks.rows.map((r) => [r.id, r.dueDate]));
+  const msDue = new Map(ms.rows.map((r) => [r.id, r.dueDate]));
+  return {
+    applicationId: app.id,
+    tasks: app.tasks.map((t) => ({ key: t.key, taskId: t.taskId, dueDate: taskDue.get(t.taskId) ?? null })),
+    milestones: app.milestones.map((m) => ({ phase: m.phase, milestoneId: m.milestoneId, dueDate: msDue.get(m.milestoneId) ?? null })),
+  };
+}
+
+const pgError = (e: unknown): { code?: string; constraint?: string } => (e && typeof e === "object" ? (e as { code?: string; constraint?: string }) : {});
+
+/**
+ * Apply a `project` template to a project (BFF §63.29.1), in ONE transaction: a milestone per phase (due on its last task's day),
+ * a task per template task (due `dueOffsetWorkingDays` working days after the kickoff on the company's calendar, starting on the
+ * kickoff, its Ball and Responsible the role's person, in the project's ready status, with the template's subtasks), then the
+ * application row with a copy of the template. A failure anywhere rolls back every task and milestone.
+ *
+ * Refusals, in order: 404 `project_not_found`; a replayed `id` answers `{created: false}` with the same ids (a 200), and an id
+ * already used for another project or template is 400 `{field: 'id'}`; 409 `template_already_applied` `{detail: {applicationId}}`;
+ * 400 `{field: 'templateId'}` for a template that is missing, deleted or not `project`; 400 `{field: 'people.<role>'}` for a role the
+ * template does not have, or a person who is not an active member of the company.
+ *
+ * The caller has AUTHORIZED already (`pm_project` · `manage` on the project, or W5-C4's gates). After the commit: the activity
+ * `template_applied` on the project and one notification per person given tasks.
+ */
+export async function applyProjectTemplate(
+  tenantId: string,
+  actorUserId: string,
+  projectId: string,
+  input: ApplyTemplateInput,
+): Promise<{ created: boolean; answer: ApplyTemplateAnswer }> {
+  if (!UUID_RE.test(projectId)) throw new NotFoundException({ message: "project_not_found" });
+  const calendar = await templateCalendar(tenantId, input.kickoff);
+
+  const replayOr = async (c: PoolClient): Promise<ApplyTemplateAnswer | null> => {
+    const prior = (await c.query<ApplicationRow>(`${APPLICATION_SELECT} WHERE id = $1`, [input.id])).rows[0];
+    if (!prior) return null;
+    if (prior.projectId !== projectId || prior.templateId !== input.templateId || prior.deleted) throw badField("id");
+    return applicationAnswerInTx(c, prior);
+  };
+
+  let made: { answer: ApplyTemplateAnswer; templateName: string; given: Map<string, number> } | { replay: ApplyTemplateAnswer };
+  try {
+    made = await withTenants([tenantId], async (c) => {
+      // The project row lock serializes two applies to one project (and the seq allocation takes the same lock anyway).
+      const project = await c.query<{ name: string }>(`SELECT name FROM projects WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [projectId]);
+      if (!project.rows[0]) throw new NotFoundException({ message: "project_not_found" });
+
+      const replay = await replayOr(c);
+      if (replay) return { replay };
+
+      const already = await c.query<{ id: string }>(
+        `SELECT id FROM pm_template_applications WHERE project_id = $1 AND template_id = $2 AND deleted_at IS NULL`, [projectId, input.templateId]);
+      if (already.rows[0]) throw new ConflictException({ message: "template_already_applied", detail: { applicationId: already.rows[0].id } });
+
+      const tpl = await c.query<{ kind: string; name: string; payload: unknown }>(
+        `SELECT kind, name, payload FROM pm_templates WHERE id = $1 AND deleted_at IS NULL FOR SHARE`, [input.templateId]);
+      if (!tpl.rows[0] || tpl.rows[0].kind !== "project") throw badField("templateId");
+      // Stored payloads were validated on write; read through the validator again so the copy kept is always the normalized shape.
+      const payload = validateProjectTemplatePayload(tpl.rows[0].payload);
+
+      // People: each key a role of this template, each person an active member of the company.
+      const roleKeys = new Set(payload.roles.map((r) => r.key));
+      const people: Record<string, string> = {};
+      for (const [role, userId] of Object.entries(input.people)) {
+        if (!roleKeys.has(role)) throw badField(`people.${role}`);
+        if (userId !== null) people[role] = userId;
+      }
+      const names = new Map<string, string>();
+      const ids = Array.from(new Set(Object.values(people)));
+      if (ids.length > 0) {
+        const members = await c.query<{ id: string; name: string }>(
+          `SELECT u.id, u.name FROM users u
+             JOIN company_memberships m ON m.user_id = u.id AND m.tenant_id = $1 AND m.status = 'active' AND m.deleted_at IS NULL
+            WHERE u.id = ANY($2::uuid[]) AND u.status = 'active' AND u.deleted_at IS NULL`,
+          [tenantId, ids],
+        );
+        for (const m of members.rows) names.set(m.id, m.name);
+      }
+      for (const role of payload.roles.map((r) => r.key)) {
+        if (people[role] !== undefined && !names.has(people[role])) throw badField(`people.${role}`);
+      }
+
+      const plan = planApplication(payload, input.kickoff, calendar);
+
+      const milestones: ApplyTemplateAnswer["milestones"] = [];
+      const msByPhase = new Map<string, string>();
+      for (const m of plan.milestones) {
+        const msId = newId();
+        await c.query(
+          `INSERT INTO pm_milestones (id, tenant_id, project_id, name, due_date, origin_site) VALUES ($1, $2, $3, $4, $5::date, $6)`,
+          [msId, tenantId, projectId, m.title, m.dueDate, config.originSite],
+        );
+        msByPhase.set(m.phase, msId);
+        milestones.push({ phase: m.phase, milestoneId: msId, dueDate: m.dueDate });
+      }
+
+      const tasks: ApplyTemplateAnswer["tasks"] = [];
+      const stored: Array<{ key: string; taskId: string; phase: string }> = [];
+      const given = new Map<string, number>();
+      for (const t of plan.tasks) {
+        const userId = people[t.role];
+        const assignee: Assignee = userId
+          ? { kind: "person", refId: userId, refName: names.get(userId) ?? userId, responsibleId: userId, responsibleName: names.get(userId) ?? userId }
+          : null;
+        const { id: taskId } = await createPmTaskInTx(c, tenantId, actorUserId, {
+          projectId,
+          title: t.title,
+          description: t.description,
+          priority: "normal",
+          dueDate: t.dueDate,
+          startDate: t.startDate,
+          milestoneId: msByPhase.get(t.phase) ?? null,
+          estimateMinutes: null,
+          assignee,
+          customFields: {},
+          recurrence: null,
+          subtasks: t.subtasks.map((title) => ({ id: newId(), title, done: false })),
+          tags: [],
+          link: null,
+        });
+        if (userId) given.set(userId, (given.get(userId) ?? 0) + 1);
+        tasks.push({ key: t.key, taskId, dueDate: t.dueDate });
+        stored.push({ key: t.key, taskId, phase: t.phase });
+      }
+
+      await c.query(
+        `INSERT INTO pm_template_applications
+           (id, tenant_id, project_id, template_id, template_name, kickoff, people, tasks, milestones, template_payload, created_by, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8, $9, $10, $11, $12)`,
+        [input.id, tenantId, projectId, input.templateId, tpl.rows[0].name, input.kickoff, JSON.stringify(people), JSON.stringify(stored),
+          JSON.stringify(milestones.map((m) => ({ phase: m.phase, milestoneId: m.milestoneId }))), JSON.stringify(payload), actorUserId,
+          config.originSite],
+      );
+      await emitEvent(c, tenantId, "pm_project", projectId, "pm.template.applied", {
+        applicationId: input.id, templateId: input.templateId, kickoff: input.kickoff, taskCount: tasks.length, actorId: actorUserId,
+      });
+      return { answer: { applicationId: input.id, tasks, milestones }, templateName: tpl.rows[0].name, given };
+    });
+  } catch (e) {
+    // Two applies raced past the reads above (another instance): the unique index and the primary key settle it.
+    const pg = pgError(e);
+    if (pg.code === "23505" && pg.constraint === "pm_template_applications_pkey") {
+      const replay = await withTenants([tenantId], (c) => replayOr(c));
+      if (replay) return { created: false, answer: replay };
+    }
+    if (pg.code === "23505" && pg.constraint === "ux_pm_template_applications_once") {
+      const other = await withTenants([tenantId], (c) => c.query<{ id: string }>(
+        `SELECT id FROM pm_template_applications WHERE project_id = $1 AND template_id = $2 AND deleted_at IS NULL`, [projectId, input.templateId]));
+      throw new ConflictException({ message: "template_already_applied", detail: { applicationId: other.rows[0]?.id ?? null } });
+    }
+    throw e;
+  }
+  if ("replay" in made) return { created: false, answer: made.replay };
+
+  await writeActivity(tenantId, actorUserId, "template_applied", "pm_project", projectId, {
+    applicationId: input.id, templateId: input.templateId, templateName: made.templateName, kickoff: input.kickoff, taskCount: made.answer.tasks.length,
+  });
+  for (const [userId, n] of made.given) {
+    await notify(tenantId, userId, actorUserId, "assignment", {
+      title: n === 1 ? `You were given a task from "${made.templateName}"` : `You were given ${n} tasks from "${made.templateName}"`,
+      severity: "info", entityType: "project", entityId: projectId, href: `/projects/${projectId}`,
+    });
+  }
+  return { created: true, answer: made.answer };
+}
+
+export interface TemplateApplicationItem {
+  id: string;
+  projectId: string;
+  templateId: string;
+  templateName: string;
+  kickoff: string;
+  people: Record<string, string>;
+  progress: { done: number; total: number };
+  next: { taskId: string; title: string; dueDate: string | null; late: boolean } | null;
+}
+
+/**
+ * The live applications of a project, or of a template across the company (Social's onboarding read, W5-C4), newest kickoff
+ * first, each with its progress (done ÷ total over the application's tasks not deleted since; done by the project's own status
+ * flags) and its next step (the open task due first, in template order on a tie; `late` when due before `today`). MUST run inside
+ * `withTenants([tenantId], ...)`. A fixed number of statements, whatever the number of applications.
+ */
+export async function readTemplateApplicationsInTx(
+  c: PoolClient,
+  where: { projectId: string } | { templateId: string },
+  today: string,
+): Promise<TemplateApplicationItem[]> {
+  const apps = (await c.query<ApplicationRow>(
+    `${APPLICATION_SELECT} WHERE deleted_at IS NULL AND ${"projectId" in where ? "project_id" : "template_id"} = $1 ORDER BY kickoff DESC, created_at DESC`,
+    ["projectId" in where ? where.projectId : where.templateId],
+  )).rows;
+  if (apps.length === 0) return [];
+  const taskIds = apps.flatMap((a) => a.tasks.map((t) => t.taskId));
+  const rows = await c.query<{ id: string; projectId: string; title: string; status: string; dueDate: string | null }>(
+    `SELECT id, project_id AS "projectId", title, status, to_char(due_date, 'YYYY-MM-DD') AS "dueDate"
+       FROM pm_tasks WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+    [taskIds],
+  );
+  const byId = new Map(rows.rows.map((r) => [r.id, r]));
+  // Each project's done statuses, read once per project (the synthesized defaults when none is materialized).
+  const projectIds = Array.from(new Set(apps.map((a) => a.projectId)));
+  const materialized = await c.query<{ projectId: string; id: string; isDone: boolean }>(
+    `SELECT project_id AS "projectId", id, is_done AS "isDone" FROM pm_project_statuses WHERE project_id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+    [projectIds],
+  );
+  // The same rule as `effectiveStatuses`: the project's live status rows when it has any, else the synthesized defaults.
+  const doneIds = new Map<string, Set<string>>();
+  for (const p of projectIds) {
+    const own = materialized.rows.filter((r) => r.projectId === p);
+    doneIds.set(p, new Set(own.length > 0 ? own.filter((r) => r.isDone).map((r) => r.id) : DEFAULT_STATUSES.filter((s) => s.isDone).map((s) => s.id)));
+  }
+  return apps.map((a) => {
+    const done = doneIds.get(a.projectId)!;
+    let total = 0;
+    let doneCount = 0;
+    let next: TemplateApplicationItem["next"] = null;
+    for (const t of a.tasks) {
+      const row = byId.get(t.taskId);
+      if (!row) continue;
+      total += 1;
+      if (done.has(row.status)) { doneCount += 1; continue; }
+      // Earliest due first; a task with no due date (only through an edit) comes after every dated one; template order breaks ties.
+      if (!next || (row.dueDate !== null && (next.dueDate === null || row.dueDate < next.dueDate))) {
+        next = { taskId: row.id, title: row.title, dueDate: row.dueDate, late: row.dueDate !== null && row.dueDate < today };
+      }
+    }
+    return {
+      id: a.id, projectId: a.projectId, templateId: a.templateId, templateName: a.templateName, kickoff: a.kickoff, people: a.people,
+      progress: { done: doneCount, total }, next,
+    };
+  });
+}
+
+/** The application's project, for the route's authorization before the move (404 `application_not_found` when missing or deleted). */
+export async function templateApplicationProject(tenantId: string, applicationId: string): Promise<string> {
+  if (!UUID_RE.test(applicationId)) throw new NotFoundException({ message: "application_not_found" });
+  const row = await withTenants([tenantId], (c) => c.query<{ projectId: string }>(
+    `SELECT project_id AS "projectId" FROM pm_template_applications WHERE id = $1 AND deleted_at IS NULL`, [applicationId]));
+  if (!row.rows[0]) throw new NotFoundException({ message: "application_not_found" });
+  return row.rows[0].projectId;
+}
+
+/**
+ * The kickoff move (§63.29.1 `PATCH template-applications/:applicationId`), in one transaction: the application's kickoff becomes
+ * `kickoff`, each of its tasks NOT YET DONE (by the project's status flags) and not deleted re-dates from the applied copy of the
+ * template (start = the kickoff, due = its offset in working days on the company's calendar), and each phase's milestone is due on
+ * its last live task's day. A done task never moves. The caller has authorized (`pm_project` · `manage` on the project).
+ */
+export async function moveApplicationKickoff(
+  tenantId: string,
+  actorUserId: string,
+  applicationId: string,
+  kickoff: string,
+  today: string,
+): Promise<TemplateApplicationItem & { moved: Array<{ taskId: string; dueDate: string }> }> {
+  const calendar = await templateCalendar(tenantId, kickoff);
+  const out = await withTenants([tenantId], async (c) => {
+    const app = (await c.query<ApplicationRow>(`${APPLICATION_SELECT} WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [applicationId])).rows[0];
+    if (!app) throw new NotFoundException({ message: "application_not_found" });
+    const from = app.kickoff;
+    const statuses = await effectiveStatuses(c, app.projectId);
+    const doneSet = new Set(statuses.filter((s) => s.isDone).map((s) => s.id));
+    const taskIds = app.tasks.map((t) => t.taskId);
+    // Lock the tasks in id order (a stable order, so two moves never deadlock), then read their state.
+    const rows = await c.query<{ id: string; status: string; dueDate: string | null; deleted: boolean }>(
+      `SELECT id, status, to_char(due_date, 'YYYY-MM-DD') AS "dueDate", (deleted_at IS NOT NULL) AS deleted
+         FROM pm_tasks WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+      [taskIds],
+    );
+    const state = new Map(rows.rows.map((r) => [r.id, r]));
+    const applied: AppliedTaskState[] = app.tasks.map((t) => {
+      const r = state.get(t.taskId);
+      return { key: t.key, taskId: t.taskId, phase: t.phase, dueDate: r?.dueDate ?? null, done: r ? doneSet.has(r.status) : false, live: !!r && !r.deleted };
+    });
+    const plan = planKickoffMove(app.templatePayload, kickoff, calendar, applied, app.milestones);
+    const moved: Array<{ taskId: string; dueDate: string }> = [];
+    for (const m of plan.moves) {
+      const before = state.get(m.taskId)!;
+      const res = await c.query(
+        `UPDATE pm_tasks SET start_date = $2::date, due_date = $3::date, updated_at = now()
+          WHERE id = $1 AND deleted_at IS NULL AND (start_date IS DISTINCT FROM $2::date OR due_date IS DISTINCT FROM $3::date)`,
+        [m.taskId, m.startDate, m.dueDate],
+      );
+      if ((res.rowCount ?? 0) === 0) continue;
+      moved.push({ taskId: m.taskId, dueDate: m.dueDate });
+      await emitEvent(c, tenantId, "pm_task", m.taskId, "pm.task.updated", {
+        status: before.status, statusChanged: false, wasDone: false, isDoneNow: false, actorId: actorUserId,
+      });
+    }
+    for (const m of plan.milestones) {
+      await c.query(
+        `UPDATE pm_milestones SET due_date = $2::date, updated_at = now() WHERE id = $1 AND deleted_at IS NULL AND due_date IS DISTINCT FROM $2::date`,
+        [m.milestoneId, m.dueDate],
+      );
+    }
+    await c.query(`UPDATE pm_template_applications SET kickoff = $2::date, updated_at = now() WHERE id = $1`, [applicationId, kickoff]);
+    if (from !== kickoff) {
+      await emitEvent(c, tenantId, "pm_project", app.projectId, "pm.template.kickoff_moved", {
+        applicationId, from, to: kickoff, moved: moved.length, actorId: actorUserId,
+      });
+    }
+    const item = (await readTemplateApplicationsInTx(c, { projectId: app.projectId }, today)).find((a) => a.id === applicationId)!;
+    return { item, from, moved, projectId: app.projectId };
+  });
+  if (out.from !== kickoff) {
+    await writeActivity(tenantId, actorUserId, "kickoff_moved", "pm_project", out.projectId, {
+      applicationId, from: out.from, to: kickoff, moved: out.moved.length,
+    });
+  }
+  return { ...out.item, moved: out.moved };
 }
 
 // ---------------- P4-E2 helpers ----------------
@@ -3043,6 +3442,53 @@ export class PmController {
     });
     await writeActivity(tenantId, req.principal.userId, "created", "pm_project", newProjectId, { duplicatedFrom: projectId, name });
     return { id: newProjectId };
+  }
+
+  // ---------------- Project templates: apply, the applications, the kickoff move (SCP-5h, BFF §63.29.1) ----------------
+  // Gates per PERMISSION §57: applying and moving the kickoff hand work to people, so they ask `pm_project` · `manage` on the
+  // project, as P3-02's duplicate does; the list asks `read`. The body is checked first (pure), then the gate, then the work.
+  @Post(":tenantId/pm/projects/:projectId/apply-template")
+  async applyTemplate(
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param("tenantId") tenantId: string,
+    @Param("projectId") projectId: string,
+    @Body() b: unknown,
+  ) {
+    const input = parseApplyTemplateBody(b);
+    await authorize(req.principal, { kind: "pm_project", tenantId, id: projectId }, "manage");
+    // The application row names its maker (`created_by NOT NULL`): a principal with no user cannot apply.
+    if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
+    const { created, answer } = await applyProjectTemplate(tenantId, req.principal.userId, projectId, input);
+    reply.status(created ? 201 : 200);
+    return answer;
+  }
+
+  @Get(":tenantId/pm/projects/:projectId/template-applications")
+  async listTemplateApplications(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("projectId") projectId: string) {
+    await authorize(req.principal, { kind: "pm_project", tenantId, id: projectId }, "read");
+    if (!UUID_RE.test(projectId)) throw new NotFoundException({ message: "project_not_found" });
+    const today = todayIsoInTz(config.reportsTz);
+    return withTenants([tenantId], async (c) => {
+      if (!(await projectExists(c, projectId))) throw new NotFoundException({ message: "project_not_found" });
+      return readTemplateApplicationsInTx(c, { projectId }, today);
+    });
+  }
+
+  @Patch(":tenantId/pm/template-applications/:applicationId")
+  @HttpCode(200)
+  async moveTemplateKickoff(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("applicationId") applicationId: string,
+    @Body() b: { kickoff?: unknown } | null,
+  ) {
+    if (!isKickoffDate(b?.kickoff)) throw badField("kickoff");
+    const kickoff = b!.kickoff as string;
+    const projectId = await templateApplicationProject(tenantId, applicationId);
+    await authorize(req.principal, { kind: "pm_project", tenantId, id: projectId }, "manage");
+    if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
+    return moveApplicationKickoff(tenantId, req.principal.userId, applicationId, kickoff, todayIsoInTz(config.reportsTz));
   }
 
   // ---------------- Time logs (reuse time_entries via pm_task_id) ----------------

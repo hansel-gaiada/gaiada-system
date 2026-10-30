@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **285** capabilities across **17** owners
-- **149** writes · 136 reads
-- Writes by impact: **high 28** · medium 41 · low 80
+- **286** capabilities across **17** owners
+- **150** writes · 136 reads
+- Writes by impact: **high 28** · medium 42 · low 80
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -51,7 +51,7 @@ unfalsifiable after.
 | knowledge | `knowledge` | 3 |
 | lms | `lms` | 1 |
 | monitoring | `monitoring` | 3 |
-| pm | `pm` | 17 |
+| pm | `pm` | 18 |
 | reports | `checkins` · `reports` | 24 |
 | search | `search` | 30 |
 | social | `social` | 36 |
@@ -162,6 +162,7 @@ unfalsifiable after.
 | monitoring | `monitoring.listMonitors` | `GET` | `/api/:tenantId/monitoring/monitors` | read | — |
 | monitoring | `monitoring.monitorDetail` | `GET` | `/api/:tenantId/monitoring/monitors/:id` | read | — |
 | monitoring | `monitoring.openIncidents` | `GET` | `/api/:tenantId/monitoring/incidents` | read | — |
+| pm | `pm.applyTemplate` | `POST` | `/api/:tenantId/pm/projects/:projectId/apply-template` | write | `medium` |
 | pm | `pm.listTasks` | `GET` | `/api/:tenantId/pm/tasks` | read | — |
 | pm | `pm.runTracker` | `POST` | `/api/:tenantId/pm/tasks/:taskId/tracker/run` | write | `low` |
 | reports | `checkin.getToday` | `GET` | `/api/:tenantId/checkins/today` | read | — |

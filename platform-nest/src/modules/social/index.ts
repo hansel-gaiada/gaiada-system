@@ -159,6 +159,8 @@ export const socialModule: ModuleContract = {
     // SCP-5a (BFF §63.1 file 9, §63.18) — the monthly report's notes (an insight and a suggestion per area), its action plan
     // and its SIMULATED mark, on the existing social_reports (third wall unchanged).
     "202610291600_social_reports_monthly.sql",
+    // SCP-5h (BFF §63.29.2) — social_settings.onboarding_template_id, the company's client-onboarding PM project template.
+    "202610301201_social_settings_onboarding.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
