@@ -224,6 +224,8 @@ describe.skipIf(!TEST_URL)("AIP-18 lifting a department's soft stop (HTTP, real 
     });
 
     it("a report-mode unit is 404 no_soft_stop for the owner and for its own head; a unit with no budget too", async () => {
+      // Earlier tests in this file lift for real and leave their activity rows, so prove THIS test's refusals add none.
+      const before = await liftActivities();
       for (const who of [owner, headOps]) {
         const r = await lift("d-ops", who);
         expect(r.statusCode, r.body).toBe(404);
@@ -233,7 +235,7 @@ describe.skipIf(!TEST_URL)("AIP-18 lifting a department's soft stop (HTTP, real 
       expect(seo.statusCode, seo.body).toBe(404);
       expect(seo.body).toContain("no_soft_stop"); // the house error filter wraps the body
       expect(await liftedMonth("d-ops")).toBeNull();
-      expect(await liftActivities()).toEqual([]);
+      expect(await liftActivities()).toEqual(before);
     });
 
     it("lifting twice in a month changes nothing the second time and writes one activity row", async () => {
