@@ -1710,6 +1710,16 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "search.property.view_replay" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # M5-P4 (WSK-D92): perm_resource_search_property_manage_tags — set a site's tracking tags (the LinkedIn partner id)
+    # through the ERP. Sensitive (it writes a repository variable the site's next build reads). Own key; no sibling bleed.
+    - name: perm_resource_search_property_manage_tags
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.property.manage_tags" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # SM-76: perm_resource_search_finding_* — the new resource_search_finding kind
     # (search_finding_states). triage = baseline; accept_risk = sensitive/elevated.
     - name: perm_resource_search_finding_triage

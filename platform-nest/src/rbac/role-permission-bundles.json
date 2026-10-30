@@ -15,10 +15,10 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 30,
-      "totalPairs": 2209,
+      "totalPairs": 2213,
       "perRole": {
-        "platform_admin": 493,
-        "company_admin": 438,
+        "platform_admin": 494,
+        "company_admin": 439,
         "manager": 223,
         "member": 127,
         "viewer": 42,
@@ -31,7 +31,7 @@
         "hr_staff": 22,
         "hr_manager": 63,
         "search_staff": 25,
-        "search_manager": 42,
+        "search_manager": 43,
         "reports_staff": 4,
         "reports_manager": 3,
         "webdev_staff": 22,
@@ -46,7 +46,7 @@
         "lms_manager": 11,
         "social_copywriter": 3,
         "social_designer": 3,
-        "owner": 446
+        "owner": 447
       },
       "selfScopedPairs": 58
     }
@@ -452,6 +452,7 @@
       "search.property.attest",
       "search.property.create",
       "search.property.delete",
+      "search.property.manage_tags",
       "search.property.read",
       "search.property.read_visitors",
       "search.property.update",
@@ -906,6 +907,7 @@
       "search.property.attest",
       "search.property.create",
       "search.property.delete",
+      "search.property.manage_tags",
       "search.property.read",
       "search.property.read_visitors",
       "search.property.update",
@@ -1605,6 +1607,7 @@
       "search.property.attest",
       "search.property.create",
       "search.property.delete",
+      "search.property.manage_tags",
       "search.property.read",
       "search.property.read_visitors",
       "search.property.update",
@@ -2235,6 +2238,7 @@
       "search.property.attest",
       "search.property.create",
       "search.property.delete",
+      "search.property.manage_tags",
       "search.property.read",
       "search.property.read_visitors",
       "search.property.update",

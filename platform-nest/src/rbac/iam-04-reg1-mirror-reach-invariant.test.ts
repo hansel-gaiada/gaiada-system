@@ -544,6 +544,8 @@ const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> =
   // that authorizes this kind passes module "search" (SearchController; the V3-g visitors controller must too), so the
   // gap is unreachable today. Recorded, not fixed: the mirror IS the requested "a granted permission grants exactly its
   // action" and is the only way a grant outside the search_manager role (e.g. via a position) can reach it.
+  // M5-P4 (2026-10-30, WSK-D92): `manage_tags` is the same module-mediated shape as read_visitors/view_replay below it.
+  "resource_search_property.manage_tags": ["search_manager"],
   "resource_search_property.read_visitors": ["search_manager"],
   "resource_search_property.view_replay": ["search_manager"],
   "resource_search_campaign.read": ["search_manager", "search_staff"],
