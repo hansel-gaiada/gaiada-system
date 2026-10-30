@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.205.1` + platform-ui `0.225.1` - AIP Phase 3 follow-ups: the knowledge DB suites run on pgvector in CI (AIP-03d), the sweep logs where its time went (AIP-03e), and "Department guidance" can be found (AIP-13d) - PROTOTYPED
+
+- **AIP-03d (ai-agents tests, CI).** CI's ai-agents step had no database, so the knowledge, graph and episodic suites self-skipped (31 of 34 store tests) and 5 `service.test.ts` tests that failed on pgvector went unseen. Cause: the service tests built 768-dim stores for 32-wide vectors, which plain Postgres accepts and pgvector refuses. Fix: one `DIMS` for the embedder and both stores, a fresh table, the zero-vector guard. `ci.yml`'s ai-agents step now starts `pgvector/pgvector:0.8.1-pg15` (live is Postgres 15.18 + pgvector 0.8.5) with `DATABASE_URL_TEST`: CI run 40988568751 ran store 34, service 17, graph 8, episodic-pg 5, all 55 files green.
+- **AIP-03e (platform-nest).** The sweep's summary line now ends `public 135s (crawl 70s), companies 88s, slowest 019fb652… 87s` (`sweepTimings`, `crawlMs` on the public result). The 35-minute sweep of 2026-10-29 left nothing to explain it, because the per-tier timings lived in memory and the next deploy restarted the platform. Measured since: a forced sweep 3 min 42 s and a scheduled one 3 min 37 s; gda-aicenter was saturated only during the 463 and 464 deploys.
+- **AIP-13d (platform-ui).** The live walk found "Department guidance" unreachable by navigation: as the AI Assistant row's second tab it showed only on its own page, because that row opens the drawer. It is now `guidanceTab()`, the Overview strip's last tab beside Notices and the department calendar, with the same `unitCap` gate; the AI Assistant row is the drawer alone; the Social skin's More panel lists it with Notices for the people who may edit it.
+- **Deploy.** No migration, no Cerbos change, no compose change.
+
 ### platform-nest `0.205.0` + platform-ui `0.225.0` - SCP-6 dress rehearsal fixes: the sheet import reads a sheet the way people write one (plan §8 SCP-6; FRONTEND-BFF-CONTRACT §63.23.4, §63.23.6) - PROTOTYPED
 
 - **Why.** The owner asked for a rehearsal on the mock seed before the team sends its real sheet. A mock team sheet shaped like an agency's was previewed live on 464, with nothing written. It had title rows above the header, Indonesian headers, a tab per officer, spacer rows, columns the ERP does not use and a hidden tab. The preview found:
