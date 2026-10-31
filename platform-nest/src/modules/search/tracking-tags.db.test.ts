@@ -23,7 +23,7 @@ import { resetCoreRollupProviders, syncMetricDefinitions } from "../../rollups/e
 import { FakeGithub } from "../../core/github/git-data.testkit";
 import { GOOGLE_ADS_CONVERSIONS_VARIABLE, GOOGLE_ADS_IDS_VARIABLE, LINKEDIN_PARTNER_ID_VARIABLE } from "../../core/github/repo-variables";
 import { searchModule } from "./index";
-import { setTrackingTagsDeps } from "./tracking-tags.service";
+import { TRACKING_WORDS, setTrackingTagsDeps, type CompanySite } from "./tracking-tags.service";
 
 const calls: Array<{ kind: string; action: string; id?: string; tenantId?: string }> = [];
 /** "<kind>:<action>" pairs the double denies. */
@@ -60,6 +60,7 @@ describe.skipIf(!TEST_URL)("M5-P4 · tracking tags routes", () => {
   let propB: string;
   let gh: FakeGithub;
   let siteDomains: string[] | null;
+  let zoneSites: CompanySite[] | Error;
   let target: { ok: true; repo: string } | { ok: false; detail: string };
 
   const q = <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => adminPool().query(sql, params).then((r) => r.rows as T[]);
@@ -112,10 +113,12 @@ describe.skipIf(!TEST_URL)("M5-P4 · tracking tags routes", () => {
     denied.clear();
     gh = new FakeGithub("acme-org", "acme-site");
     siteDomains = ["stg.tags-a.example.com", "www.tags-a.example.com"];
+    zoneSites = [{ webdeskTenant: SLUG, site: SITE, name: "Tags A site", domains: ["stg.tags-a.example.com", "www.tags-a.example.com"] }];
     target = { ok: true, repo: REPO };
     // Only the outside world is faked: the property read, the audit write and the Cerbos double are the real wiring.
     setTrackingTagsDeps({
       siteDomains: async () => siteDomains,
+      companySites: async () => { if (zoneSites instanceof Error) throw zoneSites; return zoneSites; },
       stagingRepo: async () => target,
       resolveOrg: async () => ({ ok: true, tenantId: ORG }),
       git: () => gh.caller(),
@@ -320,6 +323,58 @@ describe.skipIf(!TEST_URL)("M5-P4 · tracking tags routes", () => {
       expect((await get()).json()).toMatchObject({ googleAds: { ids: ["AW-123456789"], conversions: { lead: "AW-123456789/abc", phone: "AW-123456789/p" } } });
       expect((await putAds(adsBody({ ids: null, conversions: {} }))).json().result).toBe("cleared");
       expect((await get()).json().googleAds).toEqual({ ids: [], conversions: {} });
+    });
+  });
+  describe("which site is this property's (GET tracking-tags/site, M5-P4g)", () => {
+    const siteUrl = (prop = propA) => `/api/${A}/modules/search/properties/${prop}/tracking-tags/site`;
+    const getSite = (prop = propA) => app.inject({ method: "GET", url: siteUrl(prop), headers: asUser(u) });
+
+    it("asks read on the property (not manage_tags, and no WebDesk or webdev permission) and answers the matching site", async () => {
+      const res = await getSite();
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.json()).toEqual({ site: { webdeskTenant: SLUG, site: SITE, name: "Tags A site" } });
+      expect(calls).toEqual([expect.objectContaining({ kind: "resource_search_property", action: "read", id: propA, tenantId: A })]);
+      expect(res.headers["cache-control"]).toBe("no-store");
+    });
+
+    it("a plain search STAFF member (read yes, manage_tags no, no webdev role) gets 200 with the site: the point of the route", async () => {
+      denied.add("resource_search_property:manage_tags");
+      denied.add("webdesk_collection:read");
+      denied.add("webdesk_content_item:read");
+      const res = await getSite();
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.json().site).toMatchObject({ webdeskTenant: SLUG, site: SITE });
+      expect(calls.every((c) => c.kind === "resource_search_property" && c.action === "read")).toBe(true);
+    });
+
+    it("a caller without read on the property is 403", async () => {
+      denied.add("resource_search_property:read");
+      expect((await getSite()).statusCode).toBe(403);
+    });
+
+    it("another company's property is 404 from this company's URL", async () => {
+      const res = await getSite(propB);
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({ reason: "property_not_found" });
+    });
+
+    it("no site with the property's domain is 200 { site: null }", async () => {
+      const res = await getSite(propOther);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ site: null });
+    });
+
+    it("Zone B unreadable is 503 tracking_sites_unavailable in words, not site null", async () => {
+      const { BadGatewayException } = await import("@nestjs/common");
+      zoneSites = new BadGatewayException({ message: "webdesk_error" });
+      const res = await getSite();
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ reason: "tracking_sites_unavailable" });
+      expect(res.json().error).toBe(TRACKING_WORDS.tracking_sites_unavailable);
+    });
+
+    it("the existing GET tracking-tags (no /site) still resolves", async () => {
+      expect((await get()).statusCode).toBe(200);
     });
   });
 });

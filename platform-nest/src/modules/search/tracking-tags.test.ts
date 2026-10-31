@@ -1,7 +1,7 @@
 // M5-P4 (WSK-D92) — the tracking-tags service against the in-memory GitHub and fake seams (no database, no Cerbos, no network).
 // The HTTP layer (403 before the body, the wire shape) is tracking-tags.db.test.ts, which needs the Linux gate.
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { ForbiddenException } from "@nestjs/common";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { BadGatewayException, ForbiddenException } from "@nestjs/common";
 import { FakeGithub } from "../../core/github/git-data.testkit";
 import { GithubApiError } from "../../core/github/errors";
 import { GOOGLE_ADS_CONVERSIONS_VARIABLE, GOOGLE_ADS_IDS_VARIABLE, LINKEDIN_PARTNER_ID_VARIABLE } from "../../core/github/repo-variables";
@@ -9,7 +9,7 @@ import type { Principal } from "../../rbac/principal";
 import {
   TRACKING_WORDS, TrackingTagsError, environmentDomains, formatAdsConversions, formatAdsIds, hostOf, parseAdsConversionsValue, parseAdsIdsValue,
   parseAdsPutBody, parsePutBody, parseSiteQuery, partnerIdOfValue, propertyMatchesSite,
-  putGoogleAds, putLinkedinPartnerId, readTrackingTags, setTrackingTagsDeps,
+  findTrackingSite, putGoogleAds, putLinkedinPartnerId, readTrackingTags, setTrackingTagsDeps, type CompanySite,
 } from "./tracking-tags.service";
 import { asHttp } from "./tracking-tags.controller";
 
@@ -558,5 +558,83 @@ describe("tracking tags service (fake GitHub + fake seams)", () => {
       }
       expect([...gh.variables.keys()]).toEqual([]);
     });
+  });
+});
+
+describe("findTrackingSite (M5-P4g)", () => {
+  let property: { id: string; domain: string } | null;
+  let sites: CompanySite[] | Error;
+  const site = (webdeskTenant: string, id: string, domains: string[], name = id): CompanySite => ({ webdeskTenant, site: id, name, domains });
+  beforeEach(() => {
+    property = { id: PROP, domain: "Gaiada.com" };
+    sites = [site("gaiada", SITE, ["cms-proof.gaiada.com", "https://WWW.gaiada.com/en"], "gaiada.com")];
+    setTrackingTagsDeps({
+      loadProperty: async () => property,
+      companySites: async () => { if (sites instanceof Error) throw sites; return sites; },
+    });
+  });
+  afterEach(() => setTrackingTagsDeps(null));
+
+  it("a match: the site's tenant slug, id and name (case, scheme, path and www. ignored)", async () => {
+    expect(await findTrackingSite(TENANT, PROP)).toEqual({ site: { webdeskTenant: "gaiada", site: SITE, name: "gaiada.com" } });
+  });
+
+  it("no match is an answer: site null", async () => {
+    sites = [site("gaiada", SITE, ["other.example"]), site("gaiada", "s2", [])];
+    expect(await findTrackingSite(TENANT, PROP)).toEqual({ site: null });
+    sites = [];
+    expect(await findTrackingSite(TENANT, PROP)).toEqual({ site: null });
+  });
+
+  it("the first match in Zone B's order wins", async () => {
+    sites = [site("a", "s1", ["nope.example"]), site("b", "s2", ["www.gaiada.com"], "second"), site("c", "s3", ["gaiada.com"], "third")];
+    expect(await findTrackingSite(TENANT, PROP)).toEqual({ site: { webdeskTenant: "b", site: "s2", name: "second" } });
+  });
+
+  it("an unknown property is 404 property_not_found and Zone B is not asked", async () => {
+    property = null;
+    let asked = false;
+    setTrackingTagsDeps({ loadProperty: async () => null, companySites: async () => { asked = true; return []; } });
+    await expect(findTrackingSite(TENANT, PROP)).rejects.toMatchObject({ reason: "property_not_found", status: 404 });
+    expect(asked).toBe(false);
+  });
+
+  it("Zone B failing (a typed HTTP error) is 503 tracking_sites_unavailable in words, never site null", async () => {
+    sites = new BadGatewayException({ message: "webdesk_error", reason: "tenant_list_shape" });
+    await expect(findTrackingSite(TENANT, PROP)).rejects.toMatchObject({ reason: "tracking_sites_unavailable", status: 503 });
+    expect(TRACKING_WORDS.tracking_sites_unavailable).toMatch(/could not list this company's websites/);
+  });
+
+  it("any other error is rethrown (a bug stays loud)", async () => {
+    const boom = new Error("boom");
+    sites = boom;
+    await expect(findTrackingSite(TENANT, PROP)).rejects.toBe(boom);
+  });
+});
+
+describe("the real companySites seam (Zone B stubbed)", () => {
+  afterEach(() => { vi.restoreAllMocks(); setTrackingTagsDeps(null); });
+  it("skips an inactive tenant and an archived site, keeps a tenant or site with no status, and reads env domains", async () => {
+    const { webdeskZoneB } = await import("../webdev/webdesk-content.service");
+    vi.spyOn(webdeskZoneB, "tenantsOf").mockResolvedValue([
+      { slug: "old", status: "archived", defaultLocale: "en", locales: ["en"], sites: [{ siteId: "x1", name: "x1", kind: "static", environments: [{ domain: "gaiada.com" }] }] },
+      { slug: "gaiada", status: "active", defaultLocale: "en", locales: ["en"], sites: [
+        { siteId: "x2", name: "dead", kind: "static", status: "archived", environments: [{ domain: "gaiada.com" }] },
+        { siteId: "x3", name: "live", kind: "static", status: "active", environments: [{ domain: "gaiada.com" }, { domain: null }, { name: "no-domain" }] },
+        { siteId: "x4", name: "legacy", kind: "static", environments: [{ domain: "legacy.example" }] },
+      ] },
+      { slug: "nostatus", defaultLocale: "en", locales: ["en"], sites: [{ siteId: "x5", name: "older zone b", kind: "static", environments: [{ domain: "older.example" }] }] },
+    ] as never);
+    const ask = async (domain: string) => { setTrackingTagsDeps({ loadProperty: async () => ({ id: PROP, domain }) }); return findTrackingSite(TENANT, PROP); };
+    expect(await ask("gaiada.com")).toEqual({ site: { webdeskTenant: "gaiada", site: "x3", name: "live" } });
+    expect(await ask("legacy.example")).toEqual({ site: { webdeskTenant: "gaiada", site: "x4", name: "legacy" } });
+    expect(await ask("older.example")).toEqual({ site: { webdeskTenant: "nostatus", site: "x5", name: "older zone b" } });
+  });
+
+  it("a Zone B read that throws a typed HTTP error is tracking_sites_unavailable", async () => {
+    const { webdeskZoneB } = await import("../webdev/webdesk-content.service");
+    vi.spyOn(webdeskZoneB, "tenantsOf").mockRejectedValue(new BadGatewayException({ message: "webdesk_error" }));
+    setTrackingTagsDeps({ loadProperty: async () => ({ id: PROP, domain: "gaiada.com" }) });
+    await expect(findTrackingSite(TENANT, PROP)).rejects.toMatchObject({ reason: "tracking_sites_unavailable" });
   });
 });

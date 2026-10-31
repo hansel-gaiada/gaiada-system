@@ -1,6 +1,7 @@
 // M5-P4 (WSK-D92) — the tracking-tags routes: staff set a website's LinkedIn partner id from the ERP. Under
 // api/:tenantId/modules/search/properties/:id/ . Contract: docs/FRONTEND-BFF-CONTRACT.md section 28h. Rules and guarantees: tracking-tags.service.ts.
 //   GET  tracking-tags?webdeskTenant=<slug>&site=<siteId>   Cerbos resource_search_property · read         (the value is public: it ends up in the site's HTML)
+//   GET  tracking-tags/site   Cerbos resource_search_property · read   (M5-P4g: which WebDesk site is this property's, resolved on the server)
 //   PUT  tracking-tags/linkedin  {webdeskTenant, site, partnerId}   Cerbos resource_search_property · manage_tags   (search manager, company admin)
 //   PUT  tracking-tags/google-ads  {webdeskTenant, site, ids, conversions}   Cerbos resource_search_property · manage_tags   (M5-P4g)
 //
@@ -13,8 +14,8 @@ import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import {
-  TrackingTagsError, parseSiteQuery, putGoogleAds, putLinkedinPartnerId, readTrackingTags,
-  type GoogleAdsPutResponse, type TrackingTagsPutResponse, type TrackingTagsView,
+  TrackingTagsError, findTrackingSite, parseSiteQuery, putGoogleAds, putLinkedinPartnerId, readTrackingTags,
+  type FoundTrackingSite, type GoogleAdsPutResponse, type TrackingTagsPutResponse, type TrackingTagsView,
 } from "./tracking-tags.service";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -34,6 +35,17 @@ export class SearchTrackingTagsController {
   private async gate(req: FastifyRequest, tenantId: string, propertyId: string, action: "read" | "manage_tags"): Promise<void> {
     if (!UUID_RE.test(propertyId)) throw new BadRequestException("propertyId must be a valid id");
     await authorize(req.principal, { kind: "resource_search_property", id: propertyId, tenantId, module: "search" }, action);
+  }
+
+  @Get("properties/:id/tracking-tags/site")
+  @Header("Cache-Control", "no-store")
+  async site(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string): Promise<FoundTrackingSite> {
+    await this.gate(req, tenantId, id, "read");
+    try {
+      return await findTrackingSite(tenantId, id.toLowerCase());
+    } catch (e) {
+      throw asHttp(e);
+    }
   }
 
   @Get("properties/:id/tracking-tags")
