@@ -196,8 +196,15 @@ function fileHref(r: RecordRow): string {
 
 // ── the I/O half ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export interface AllowedHit {
-  candidate: Candidate;
+/** The least a record check needs: the family and the record id. A `Candidate` is one; AIP-23b's department notes pass their linked record
+ *  as one (core/dept-assistant-notes.controller.ts), so a linked note is filtered by the SAME per-record read check a search hit is. */
+export interface RecordRef {
+  family: Family;
+  id: string;
+}
+
+export interface AllowedHit<C extends RecordRef = Candidate> {
+  candidate: C;
   title: string;
   href: string;
 }
@@ -210,7 +217,11 @@ export interface AllowedHit {
  *      principal acts for someone, the acting user must allow too, as `authorize()` does: the intersection can only narrow.
  * A refusal is not reported anywhere. A Cerbos error throws, so the route answers 503 and never an empty "nothing matches".
  */
-export async function filterReadableHits(principal: Principal, tenantId: string, candidates: readonly Candidate[]): Promise<AllowedHit[]> {
+export async function filterReadableHits<C extends RecordRef = Candidate>(
+  principal: Principal,
+  tenantId: string,
+  candidates: readonly C[],
+): Promise<Array<AllowedHit<C>>> {
   if (candidates.length === 0) return [];
 
   // 1. existence + title.
@@ -231,7 +242,7 @@ export async function filterReadableHits(principal: Principal, tenantId: string,
     if (m && !moduleOn.has(m)) moduleOn.set(m, await isModuleEnabled(tenantId, m));
   }
 
-  const staged: Array<{ candidate: Candidate; row: RecordRow; resources: Resource[] }> = [];
+  const staged: Array<{ candidate: C; row: RecordRow; resources: Resource[] }> = [];
   for (const candidate of candidates) {
     const spec = FAMILY_SPECS[candidate.family];
     if (spec.module && !moduleOn.get(spec.module)) continue;
@@ -246,7 +257,7 @@ export async function filterReadableHits(principal: Principal, tenantId: string,
   // 2. the read checks. Flatten (a file has two), batch, then require every resource of a hit to allow.
   const flat = staged.flatMap((s) => s.resources);
   const allowed = await readAllowed(principal, flat);
-  const out: AllowedHit[] = [];
+  const out: Array<AllowedHit<C>> = [];
   let at = 0;
   for (const s of staged) {
     const mine = allowed.slice(at, at + s.resources.length);
