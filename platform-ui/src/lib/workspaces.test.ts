@@ -596,6 +596,38 @@ describe("nothing loses its home in the Social skin (plan §8)", () => {
     expect(existsSync(pageFile(assets.href))).toBe(true);
   });
 
+  // SCP-5e (BFF §63.26.4): the content bank is a new tab, "Saved", on Publish, beside the Asset Library; it is built, ungated and on a page that exists.
+  it("adds the content bank as the publish row's 'saved' tab, after the Asset Library, built and ungated", () => {
+    const publish = reg.work.find((r) => r.key === "publish")!;
+    const saved = publish.tabs.find((t) => t.key === "saved")!;
+    expect(saved).toMatchObject({ label: "Saved", href: "/departments/{dept}/saved", icon: "bookmark" });
+    expect(publish.tabs.map((t) => t.key)).toEqual(["calendar", "composer", "inbox", "assets", "saved"]);
+    expect(saved.gate).toBeUndefined();
+    expect(isPlanned(saved)).toBe(false);
+    expect(existsSync(pageFile(saved.href))).toBe(true);
+  });
+
+  // SCP-5g, SCP-5h (BFF §63.28.5, §63.29.5): the audit list and Client onboarding are two More rows of Social Media, ungated and not pinned (the server decides each write).
+  // Their keys are free in the workspace, and each row's one tab is built on a page that exists.
+  it("adds the audit list and Client onboarding as ungated More rows, after Settings, each on its own built page", () => {
+    const work = reg.work.map((r) => r.key);
+    expect(work.indexOf("social-audit")).toBe(work.indexOf("settings") + 1);
+    expect(work.indexOf("onboarding")).toBe(work.indexOf("social-audit") + 1);
+    const audit = reg.work.find((r) => r.key === "social-audit")!;
+    expect(audit).toMatchObject({ label: "Audit", icon: "check" });
+    expect(audit.gate).toBeUndefined();
+    expect(audit.tabs.map((t) => [t.key, t.href, t.label])).toEqual([["social-audit", "/departments/{dept}/social-audit", "Audit"]]);
+    const onboarding = reg.work.find((r) => r.key === "onboarding")!;
+    expect(onboarding).toMatchObject({ label: "Client onboarding", icon: "projects" });
+    expect(onboarding.gate).toBeUndefined();
+    expect(onboarding.tabs.map((t) => [t.key, t.href, t.label])).toEqual([["onboarding", "/departments/{dept}/onboarding", "Client onboarding"]]);
+    for (const row of [audit, onboarding]) {
+      expect(isPlanned(row.tabs[0]), row.key).toBe(false);
+      expect(existsSync(pageFile(row.tabs[0].href)), row.key).toBe(true);
+    }
+    expect(SKINS.social.pinned!.some((p) => p.key === "social-audit" || p.key === "onboarding")).toBe(false);
+  });
+
   it.each(SKIN_PERSONAS)("offers a person every row the registry gives them, in both skins: $name", (persona) => {
     const std = modelFor(persona, undefined);
     const soc = modelFor(persona, { on: ["standard", "social"] });

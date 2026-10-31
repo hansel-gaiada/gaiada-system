@@ -58,8 +58,8 @@ const SOCIAL_PINNED: readonly PinnedItem[] = [
   { kind: "row", key: "calendar", row: "publish", tab: "calendar", label: "Calendar", icon: "calendar" },
   // The Social reports tab (`{D}/social-reports`) is SCP-5a's; until it is in the model this opens the shared Reports row's first tab.
   { kind: "row", key: "reports", row: "reports", tab: "social", tabFallback: true, label: "Reports", icon: "chart" },
-  // The asset library (`{D}/assets`, the `assets` tab of the Social Media toolkit).
-  { kind: "row", key: "saved", row: "publish", tab: "assets", label: "Saved", icon: "bookmark" },
+  // The content bank (`{D}/saved`, the `saved` tab of Publish, SCP-5e); the Asset Library (`{D}/assets`) stays under Publish.
+  { kind: "row", key: "saved", row: "publish", tab: "saved", label: "Saved", icon: "bookmark" },
   { kind: "row", key: "profile", row: "profile", label: "Profile", icon: "user" },
   { kind: "row", key: "assistant", row: "assistant", label: "AI Assistant" },
   // The Team dashboard ({D}/dashboard, SCP-5d), for the four Social approvers: the registry row gates on `canLeadSocial`.
