@@ -40,7 +40,7 @@ unfalsifiable after.
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
 | agency | `agency` | 22 |
-| assistant | `assistant` | 19 |
+| assistant | `assistant` | 20 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 27 |
 | core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` · `positions` · `role-grants` | 81 |
