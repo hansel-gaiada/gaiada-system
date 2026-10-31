@@ -3482,3 +3482,84 @@ OWNER_EXTENSION, DIRECT and the seed's pairs; the live matrix, every action agai
 bundle, platform_admin, the head of the unit, of an enclosing unit, of a sibling and below, the same node id in another company, the GM seat, a GM
 of another company, bot and automation, low assurance, unfed resources, and each mirrored key alone); `reads.http.test.ts` (the routes);
 `ai-usage-unit-node.db.test.ts` (the column, AIP-15a).
+
+## 59. SCP-6 — the company's Google Drive: `connect_shared` on `integration_connection`, held by the owner and the superadmin; no other new action (2026-10-31, PLANNED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §63.32 (the company's one Google account, plan SCP-D11) and §63.31 (the real sheet's fields, SCP-Q44 to SCP-Q46). Who may connect that account is the owner's open question SCP-6 OQ-1 in plan §10; this section is the contract for the recommended default (the owner and the superadmin), and the change to `manage` that the owner may choose instead is named in 59.4. Status: **PLANNED** (2026-10-31). Nothing here is in the repo yet.
+
+**What does not change.** Everything in §53 and §57: no `social_*` kind, action, attribute, role, mirror, catalogue key, group or bundle moves for 6b2 or 6b5. `integration_connection`'s five existing actions (`read`, `create`, `update`, `delete`, `manage`) keep their holders: a person still connects their own `drive.file` Drive through the self-service rows (BFF §42), and `manage` stays the company tier for every other vault record.
+
+### 59.1 One new action, on an existing kind
+
+| Action | Key | Reach | What it is |
+|---|---|---|---|
+| `connect_shared` | `core.integration_connection.connect_shared` | the owner, through the mirror `perm_integration_connection_connect_shared`; `platform_admin`, by the house wildcard | connect, reconnect and disconnect the one credential a whole company shares: the company's Google Drive account (BFF §63.32.1) |
+
+- **The resource** is the company tier's own shape, `{kind: "integration_connection", tenantId, ownerId: ""}` (IAM-14c: an empty `ownerId` means "any row of the company", so `owns` can never match). No new attribute and no `cerbos.ts` change.
+- **Why a new action and not `manage`.** `manage` is held by `company_admin` and by `manager`, and every department head's lead position carries `manager` company-wide (the `dept_kpi_target` reasoning, §38). Connecting an account with the whole company's Drive in reach must not be a head's or a company admin's call: SCP-D11 gives the ERP one Google account, as it has one GitHub App, and the owner's recommended rule is that only the owner and the superadmin put it in place or take it away. A key of its own says that, and the owner who prefers a wider rule changes one line (59.4).
+- **Rules** (`resource_integration_connection.yaml`; each stands alone, the HIER-2 rule):
+  - ALLOW `connect_shared` for the derived role `perm_integration_connection_connect_shared`, with `variables.inTenant && variables.notLow && variables.inRoot` (the shape of §53.10's and §58's mirrors).
+  - The `platform_admin` wildcard rule already present covers the superadmin.
+  - **EFFECT_DENY** `connect_shared` on `roles: ["user"]` when `has(request.principal.attr.kind) && request.principal.attr.kind in ["automation","bot"]` (the `resource_dept_notice.yaml` shape; it beats the wildcard and the mirror). A person's agent arrives as that person (SCP-Q17) and decides on the person.
+- **The derived role** (`derived_roles.yaml`) is the plain global-or-company mirror of exactly its own key, in the IAM-14c shape: `request.principal.attr.perms.exists(g, g.key == "core.integration_connection.connect_shared" && (g.scopeType == "global" || (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))`. It is safe to mirror with no `owns`, because no real role's rule names this action: no member or viewer holds the key through a self-scoped rule, so there is no Pattern B holder to over-grant, and the mirror reaches only the owner. A custom role cannot carry the key (`uiGrantable: false`).
+- **Not held by:** `company_admin`, `manager`, `module_manager`, `social_manager`, the Social Media and GM seats, `member`, `viewer` or any other role. The four social approvers of §53.4 are not the rule here: the HoD and the GM do not connect the company's Google account (OQ-1).
+
+### 59.2 The catalogue, the bundles and the owner's extension
+
+| Role | Holds | Loses |
+|---|---|---|
+| `platform_admin` | the new key (wildcard) | none |
+| `owner` | the new key, through `OWNER_EXTENSION` | none |
+| every other role | none | none |
+
+- **`OWNER_EXTENSION`** (`scripts/generate-role-bundles.mjs`) gains `core.integration_connection.connect_shared`. The generator's own guard holds: the key is a catalogue key and is not in `company_admin`'s envelope, so `owner` becomes `company_admin` plus the extension and the extension is no silent no-op.
+- **The catalogue entry** (`permission-catalog.json`): `domain core`, `resource integration_connection`, `action connect_shared`, `cerbosKind integration_connection`, `cerbosAction connect_shared`, `class grantable`, `sensitive true`, **`uiGrantable false`** (no role edit, position or request can hand it out). Its description: "Connect, reconnect or disconnect the account the whole company shares (the company's Google Drive)". It joins the group that already holds `core.integration_connection.manage` (`permission-groups.json`).
+- **Counts move** by one catalogue pair, one sensitive key and one not-UI-grantable key; the bundles by one pair each for `platform_admin` and `owner`. Take the numbers from main at landing; `cerbos-catalog-alignment.test.ts`, `permission-groups-catalog-parity.test.ts` and `ui-grantable-catalog.test.ts` carry the pinned literals.
+
+### 59.3 The six artifacts (the §36 template, copied from §58)
+
+1. **The policy:** `resource_integration_connection.yaml`: the ALLOW and the DENY of 59.1.
+2. **`derived_roles.yaml`:** `perm_integration_connection_connect_shared`.
+3. **`cerbos.ts`:** none. The attributes are the kind's existing ones.
+4. **`permission-catalog.json`:** the entry of 59.2.
+5. **`permission-groups.json`:** the key in its group.
+6. **Migration `<prefix>_iam_google_drive_company.sql`** (the shape of `202610300310_iam_ai_usage_permissions.sql`): the `permissions` row and its `role_permissions` rows for `platform_admin` and `owner` only. Its DO block asserts the exact holders in both directions (the key held by `platform_admin` and `owner` and by no other role), that no custom-role pair holds it, and that `owner` equals `company_admin` plus `OWNER_EXTENSION` over every key in both directions. Then `role-permission-bundles.json` is regenerated from a clean worktree.
+
+No UI mirror in `rbac.ts` is added: the connect controls read `canConnect` from the server's `GET drive/status` (BFF §63.32.1), which asks Cerbos, so the page cannot disagree with the server.
+
+### 59.4 What the owner may change
+
+- **Wider** (OQ-1): to let company admins connect too, the DENY stays, the key is dropped from `OWNER_EXTENSION`, and the routes ask `manage` instead of `connect_shared`; the migration of 59.3 is then not written. The generic `managed_elsewhere` refusal (BFF §63.32.1) must still hold, so that `manage` holders connect through the Drive routes and nowhere else.
+- **Narrower:** none; `platform_admin` alone would leave no one to reconnect after Google ends the grant.
+
+### 59.5 Every other route of §63.31 and §63.32 authorizes as an existing action
+
+| Work (BFF) | Authorizes as | Who that is |
+|---|---|---|
+| The repost mark, the Facebook caption, tagged accounts, story type, carousel-video mark, image descriptions (63.31.2 to 63.31.7) | the edit route's `social_post` · `author`; the Copywriter's suggestion `social_post` · `proofread` (§53.2); the import's `social_engagement` · `plan` (§57) | the officer; the Copywriter; the four |
+| Per-format targets and the cycle's override (63.31.8) | `social_engagement` · `plan` (§53.6), on `PATCH …/allocation` and `PUT cycles` | the four |
+| The company's story types and check switches (63.31.6) | `social_engagement` · `plan`, as every company rule (§57) | the four |
+| The AI check: run, read (63.31.9) | `social_post` · `read`, then the handler's refusal of `users.kind` `automation` and `bot` (403 `automation_cannot_act`): `read` is allowed to such a principal, so the refusal is in code, and it can only narrow | the team's read tier; an agent acts as its person |
+| The Drive status, resolving a link, browsing a folder, the staff media route (63.32.1, 63.32.4, 63.32.5) | `social_post` · `read`, or `design` on the post named by `postId` (as 63.6.2), so a Creatives designer who holds only `design` can use them on their posts | the team, and the client's designer |
+| Adding, refreshing, changing the role of and removing a Drive design; submitting (63.32.4) | `social_post` · `design`, as every design write (§53.2) | the client's designer |
+| Checking a post's footage links (63.32.3) | `social_post` · `author` | the officer |
+| The portal's Drive video (63.32.5) | `portal` · `read`, then `resolvePortalScope` and the visible-post predicate (63.9); the file route's own rule (63.8) | the client's contacts |
+| The recheck job and its change processing (63.32.6) | none: a system path with no person, run by the job under the post's lock (actor NULL in the activity row), as the publisher's result is (§53.12) | — |
+| Connect, reconnect, disconnect the company's Google account (63.32.1) | `integration_connection` · `connect_shared` | the owner and the superadmin |
+
+Neither the AI check nor Drive adds a route a portal contact can reach beyond the one file route of 63.32.5.
+
+### 59.6 Proof
+
+Two suites, each the other's twin, as §58 has:
+- **`platform-nest/cerbos/tests/integration_connection_connect_shared_test.yaml`** (Cerbos policy tests, run with `cerbos compile --tests`; `ci.yml` does not run them, so the car's owner runs `~/cerbos-tests.sh` on its tip, as the shared-train rule asks). Every principal is asked `connect_shared` and `manage` on A's company-tier resource and on B's, each listed explicitly ALLOW or DENY:
+  - **ALLOW `connect_shared`:** the owner of A on A (a principal with `perms` holding the key at company scope A, with `manage` too); `platform_admin` on A and on B.
+  - **DENY `connect_shared`:** the owner of A on B (the tenant trap); a `company_admin` of A, who is ALLOWED `manage` in the same file; a `manager` of A (what every department head holds company-wide, the Social Media head and the GM included; also ALLOWED `manage`); a `social_manager` holder; a member; a viewer; a client contact; an owner with `assurance: "low"`; a `bot` and an `automation` principal each holding `company_admin` and the owner's perms; a principal whose `perms` hold the key at company scope B asked on A.
+  - **`manage` unchanged:** the same principals' `manage` decisions equal those before this change.
+- **`platform-nest/src/rbac/cerbos-integration-connection-connect-shared.test.ts`** (the shape of `iam-14c-integration-connection-manage.test.ts`; static pins always, the live matrix needs `CERBOS_URL`):
+  - **Static:** `connect_shared` is named by exactly `perm_integration_connection_connect_shared`, the `platform_admin` wildcard and the DENY, and by no role; the DENY is on `roles: ["user"]`; every ALLOW keeps `variables.inTenant`; the key is in `OWNER_EXTENSION`, mirrored, `uiGrantable: false`, sensitive, absent from `company_admin`'s bundle and present in `owner`'s and `platform_admin`'s only; the migration's pairs match the bundles; the hazard scan finds no Pattern B or Pattern C finding for the mirror.
+  - **Live:** the matrix above against the running Cerbos, the owner with its live bundle, and each mirrored key alone; the same decisions when the call arrives through the OBO envelope with `x-obo-agent` set.
+  - **Replay:** every existing `integration_connection` decision, unchanged.
+- **The routes' own proof** (BFF §63.32.12): a refused caller gets 403 before the body is read, the generic routes' `managed_elsewhere`, and the callback's re-check of the surface's `authz` for a person whose right was withdrawn between starting and finishing the flow.
+
+**Deploy.** The migration runs on boot. **Restart Cerbos** (the live sidecar and the test container: nothing hot-reloads, and a healthy container is not proof) and probe it: the owner's `connect_shared` allowed; a `company_admin`'s denied while their `manage` is allowed; `platform_admin`'s allowed; a bot's denied.
