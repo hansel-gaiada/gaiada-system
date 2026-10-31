@@ -638,6 +638,44 @@ describe.skipIf(!TEST_URL)("SCP-5 W5-A2 · the periodic report kinds (BFF §63.2
     }
   });
 
+  it("W5-Q: the PDF carries the SIMULATED mark when a number was simulated, and only then (BFF §63.24.8's last proof)", async () => {
+    gw.mode = "good";
+    const e = await makeEngagement("Send simulated", U.officer);
+    const day = addDays(TODAY, -9);
+    await livePost(e, day);
+    await livePost(e, day, { simulated: true, metric: { source: "simulated", impressions: 700, reach: 50 } });
+    const plain = await makeEngagement("Send plain", U.officer);
+    await livePost(plain, day);
+    let simId = "";
+    let plainId = "";
+    try {
+      config.socialSimulationEnabled = true;
+      simId = ok(await create(U.officer, e.id, "daily", day), 201, "simulated numbers").id as string;
+      ok(await submit(U.officer, simId), 200, "submit with the switch on");
+      plainId = ok(await create(U.officer, plain.id, "daily", day), 201, "no simulated number").id as string;
+      ok(await submit(U.officer, plainId), 200, "submit, nothing simulated");
+    } finally {
+      config.socialSimulationEnabled = false;
+    }
+    expect(await rowOf(simId)).toMatchObject({ simulated: true });
+    expect(await rowOf(plainId)).toMatchObject({ simulated: false });
+    ok(await approve(U.hod, simId), 200, "approve the simulated one");
+    ok(await approve(U.hod, plainId), 200, "approve the plain one");
+    if (!REDIS_TEST_URL) {
+      refused(await deliver(U.owner, simId), "pdf_render_not_configured", 503);
+      return;
+    }
+    config.reportRenderer = { url: sidecarUrl, token: "render-tok", platformUiInternalUrl: nestBaseUrl, timeoutMs: 5000 };
+    try {
+      expect(ok(await deliver(U.owner, simId), 200, "send the simulated one").status).toBe("delivered");
+      expect(printed[printed.length - 1].simulated, "the document the PDF is drawn from says simulated").toBe(true);
+      expect(ok(await deliver(U.owner, plainId), 200, "send the plain one").status).toBe("delivered");
+      expect(printed[printed.length - 1].simulated, "no simulated number, no mark").toBeUndefined();
+    } finally {
+      config.reportRenderer = { url: "", token: "", platformUiInternalUrl: "", timeoutMs: 5000 };
+    }
+  });
+
   // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
   // 7. Due, Needs you, the allocation, the dashboard
   // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

@@ -23,7 +23,7 @@ import { declareSocialModuleScope } from "./module-scope";
 import { minorUnitSql } from "./pipeline/boosts-data";
 import { phaseOf } from "./pipeline/machine";
 import { SCP } from "./pipeline/fixture";
-import type { BestPostFact, BoostSpendInput, DailyMetricInput, KpiTargetInput, NextPostFact, PostMetricInput } from "./reports";
+import type { BestPostFact, BoostSpendInput, SharedIdeaFact, DailyMetricInput, KpiTargetInput, NextPostFact, PostMetricInput } from "./reports";
 
 export interface ReportInputs {
   daily: DailyMetricInput[];
@@ -303,4 +303,37 @@ export async function readShortKindExtras(
     nextPosts,
     simulated: a.includeSimulated && simulated,
   };
+}
+
+// ── The monthly report's shared ideas (SCP-5 W5-B2, §63.25.1) ──────────────────────────────────────────────────────────────
+
+/** At most this many shared ideas are listed (a month of a busy client holds far fewer). */
+export const SHARED_IDEAS_MAX = 50;
+
+/**
+ * The engagement's ideas marked shared since the PREVIOUS monthly report was made, up to now (the report's own freeze point, as the other
+ * numbers). The previous report is the engagement's newest live monthly one of an earlier period (any monthly one but this when the report has
+ * no period); with none, every shared idea counts. An idea planned after it was shared keeps its `shared_at`, so it still counts; a deleted
+ * one and one only proposed do not.
+ */
+export async function readSharedIdeas(
+  c: PoolClient, a: { tenantId: string; engagementId: string; reportId: string | null; period: string | null },
+): Promise<SharedIdeaFact[]> {
+  await declareSocialModuleScope(c);
+  const { rows } = await c.query<{ saw: string; metric: string | null; suggestion: string }>(
+    `SELECT i.saw, i.metric, i.suggestion
+       FROM social_ideas i
+      WHERE i.tenant_id = $1 AND i.engagement_id = $2 AND i.deleted_at IS NULL AND i.shared_at IS NOT NULL AND i.shared_at <= now()
+        AND i.shared_at > coalesce((
+          SELECT sr.created_at FROM social_reports sr
+           WHERE sr.tenant_id = $1 AND sr.engagement_id = $2 AND sr.kind = 'monthly' AND sr.deleted_at IS NULL
+             AND ($4::uuid IS NULL OR sr.id <> $4::uuid)
+             AND ($3::text IS NULL OR sr.period < $3::text)
+           ORDER BY sr.period DESC NULLS LAST, sr.created_at DESC, sr.id LIMIT 1
+        ), '-infinity'::timestamptz)
+      ORDER BY i.shared_at, i.id
+      LIMIT ${SHARED_IDEAS_MAX}`,
+    [a.tenantId, a.engagementId, a.period, a.reportId],
+  );
+  return rows.map((r) => ({ saw: r.saw, metric: r.metric, suggestion: r.suggestion }));
 }

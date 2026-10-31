@@ -27,7 +27,7 @@ import SocialImportPage from "./page";
 
 const ok = <T,>(data: T): ReadResult<T> => ({ kind: "ok", data });
 const settings = (over: Partial<SocialSettings> = {}): SocialSettings => ({
-  bufferWorkingDays: 1, boostCandidateFactor: 1.25, holidayCalendar: { known: false, name: null }, canPlan: true, ...over,
+  bufferWorkingDays: 1, boostCandidateFactor: 1.25, holidayCalendar: { known: false, name: null }, onboardingTemplate: null, canPlan: true, ...over,
 });
 const alloc = (over: Partial<AllocationRow> = {}): AllocationRow => ({
   engagementId: "e-alpha", clientId: "c-alpha", clientName: "Brand Alpha", status: "active", officer: null, postsPerCycle: 12, creativeSource: "creatives",

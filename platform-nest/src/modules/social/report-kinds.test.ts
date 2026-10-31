@@ -13,7 +13,7 @@ import {
 } from "./report-kinds";
 import { candidatePeriods, pickDuePeriod } from "./report-periodic-due";
 import { periodicAttention } from "./pipeline/team";
-import { periodDateRange, withShortKindFacts, buildSocialReportDocument, buildSocialReportSnapshot } from "./reports";
+import { periodDateRange, withShortKindFacts, withSharedIdeas, buildSocialReportDocument, buildSocialReportSnapshot } from "./reports";
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const content = (kind: PeriodicKind, rules: RulesDoc = DEFAULT_RULES) => contentOf(kind, reportKindRules(rules, kind));
@@ -424,5 +424,32 @@ describe("the allocation's reportKinds (BFF §63.24.4): de-duplicated in the rou
         expect((e as { getResponse?: () => unknown }).getResponse?.()).toMatchObject({ message: "invalid_field", field: "reportKinds" });
       }
     }
+  });
+});
+
+describe("the monthly report's shared ideas (BFF §63.25.1)", () => {
+  const base = buildSocialReportSnapshot({ rangeStart: "2026-09-01", rangeEnd: "2026-09-30", daily: [], posts: [], postsPublishedInPeriod: 0, kpiTargets: [] });
+  const ideas = [
+    { saw: "Reels got twice the saves", metric: "saves per reel", suggestion: "Make four reels next month" },
+    { saw: "Stories at noon were seen most", metric: null, suggestion: "Post stories at lunchtime" },
+  ];
+  it("no idea adds no table and returns the snapshot as it was", () => {
+    expect(withSharedIdeas(base, [])).toBe(base);
+  });
+  it("adds one table 'Ideas we shared' with what we saw, the metric and the suggestion, keeping a missing metric as null", () => {
+    const out = withSharedIdeas(base, ideas);
+    const t = out.tables.find((x) => x.key === "ideas_shared")!;
+    expect(t.label).toBe("Ideas we shared");
+    expect(t.columns.map((c) => c.key)).toEqual(["saw", "metric", "suggestion"]);
+    expect(t.rows).toEqual(ideas);
+    expect(out.kpis).toEqual(base.kpis);
+    expect(base.tables.some((x) => x.key === "ideas_shared"), "the input is not changed").toBe(false);
+  });
+  it("the document carries the table, so the page and the PDF print it", () => {
+    const doc = buildSocialReportDocument({
+      tenantId: "t", engagementId: "e", clientName: "Mock Client", kind: "monthly", period: "2026-09", status: "approved",
+      frozen: withSharedIdeas(base, ideas), narrativeText: "A month.", generatedAt: "2026-10-05T00:00:00Z",
+    });
+    expect(doc.tables.map((t) => t.key)).toContain("ideas_shared");
   });
 });

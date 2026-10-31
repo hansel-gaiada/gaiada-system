@@ -26,3 +26,26 @@
 .scp-report__numbers { overflow-x: auto; }
 .scp-report__watermark { border-left: 3px solid var(--status-warning); padding: 6px 10px; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
 @media (max-width: 720px) { .scp-report__action { grid-template-columns: 1fr; } }
+/* SCP-5 W5-A4 (BFF §63.24.7, §63.25.4): the kind switch, "Generate with AI" and its run panel, a short kind's page and the monthly's ideas. */
+.scp-reports__kinds { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
+.scp-run { display: grid; gap: 12px; }
+.scp-run__panel { display: grid; gap: 8px; padding: 12px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); }
+.scp-run__bar { width: 100%; max-width: 480px; accent-color: var(--status-ok); }
+.scp-run__results { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font: 400 13px var(--font-body); }
+.scp-run__result--failed { color: var(--status-critical-fg); }
+.scp-run__result--skipped { color: var(--erp-ink-60); }
+.scp-run__recent summary { cursor: pointer; font: 600 12px var(--font-body); color: var(--erp-ink-60); }
+.scp-run__recent ul { display: grid; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; font: 400 13px var(--font-body); }
+.scp-report__nav { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.scp-ideas { display: grid; gap: 12px; }
+.scp-ideas__list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.scp-ideas__item { display: grid; gap: 8px; padding: 12px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); }
+.scp-ideas__head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.scp-ideas__body { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font: 400 13px/1.5 var(--font-body); }
+.scp-ideas__body dt { font: 600 11px var(--font-body); color: var(--erp-ink-60); }
+.scp-ideas__body dd { margin: 0; overflow-wrap: anywhere; }
+.scp-ideas__state--shared { background: var(--status-warning-bg); color: var(--status-warning-fg); }
+.scp-ideas__state--planned { background: var(--status-ok-bg); color: var(--status-ok-fg); }
+.scp-ideas__plan, .scp-ideas__add { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.scp-ideas__add { display: grid; }
+@media (max-width: 720px) { .scp-ideas__body { grid-template-columns: 1fr; } .scp-reports__table { display: block; overflow-x: auto; } }

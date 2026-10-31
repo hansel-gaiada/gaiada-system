@@ -6,10 +6,13 @@
 // (`field_locked`, `status_changed`) comes back in words beside the row. A locked row says why: the date and the networks of an approved or scheduled post are
 // Reschedule's, which asks the client again.
 //
+// USE FROM SAVED (SCP-5e): above the tabs, a picker over the client's content bank (`PostUseSaved.tsx`); the edit it sends is this same `PATCH posts/:postId/pipeline` with `savedItemIds`.
+//
 // SUGGESTIONS (1f). While a post is in proofread the Copywriter's edits are suggestions, one per copy field (`PUT` / `DELETE posts/:postId/suggestions/:field`).
 // The officer sees them while drafting or fixing, each with its stale flag (the field changed since it was suggested) and an "Accept" button (the
 // `accept_suggestion` action, logged as via suggestion). "Approve copy" in the action bar applies the rest.
 import { useId, useState, useTransition } from "react";
+import { UseFromSaved } from "@/components/social/PostUseSaved";
 import { RefusalNote } from "@/components/social/PostRefusal";
 import { formatDateTime } from "@/lib/format";
 import {
@@ -285,6 +288,8 @@ export function PostFields({ post, onResult }: { post: PipelinePost; onResult: R
 
   return (
     <div>
+      {/* SCP-5e (BFF §63.26.3): "Use from Saved", drawn only where the edit rules let the officer change the copy or the reference images. */}
+      <UseFromSaved post={post} author={author} onResult={onResult} />
       <div className="scp-tabs" role="tablist" aria-label="The post">
         <button type="button" role="tab" id="scp-tab-post" aria-selected={tab === "post"} aria-controls="scp-panel" className="scp-tabs__tab" onClick={() => setTab("post")}>Post</button>
         <button type="button" role="tab" id="scp-tab-brief" aria-selected={tab === "brief"} aria-controls="scp-panel" className="scp-tabs__tab" onClick={() => setTab("brief")}>Creative brief</button>

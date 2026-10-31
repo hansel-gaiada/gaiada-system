@@ -781,7 +781,7 @@ export function demoPipelinePost(p: PipePost, userId: string): Record<string, un
     holder: holderOf(p), health: demoPostHealth(p), variants, approvedSchedule, scheduleVia: p.scheduleVia, reviewHash,
     liveUrl: p.liveUrl, wentLiveAt: p.wentLiveAt, simulated: p.simulated, archivedAt: p.archivedAt,
     clientDecision: demoClientDecision(p),
-    boost: boostReader(p.id), tasks: [], copyLog: p.copyLog, history: p.history, actions, nextAction,
+    boost: boostReader(p.id), idea: ideaReader(p.id), tasks: [], copyLog: p.copyLog, history: p.history, actions, nextAction,
   };
 }
 
@@ -795,6 +795,9 @@ export function setDemoReportNeedsReader(fn: (tenantId: string, userId: string) 
 /** SCP-4b (BFF §63.6.2): the post read's `boost`. The boost store lives in `demoSocialBoosts.ts`, which imports this file, so it registers its reader here; null until it has. */
 let boostReader: (postId: string) => unknown = () => null;
 export function setDemoBoostReader(fn: (postId: string) => unknown): void { boostReader = fn; }
+/** SCP-5 W5-A4 (BFF §63.25.4): the post read's `idea` (the idea the post was planned from, or null) comes from the ideas store, which registers its reader here. */
+let ideaReader: (postId: string) => unknown = () => null;
+export function setDemoIdeaReader(fn: (postId: string) => unknown): void { ideaReader = fn; }
 
 /** `GET posts/:postId/pipeline`. 403 for a client contact (the portal has its own routes); 404 `post_not_found`. */
 export function demoPipelineRead(postId: string, userId: string): DemoResult {

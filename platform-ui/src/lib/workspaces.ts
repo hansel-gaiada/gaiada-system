@@ -517,7 +517,11 @@ const SOCIAL_MEDIA: Workspace = {
   work: [
     PM_ROW,
     // Publish › Analytics moves to the Analytics row (§4).
-    { key: "publish", label: "Publish", icon: "gateway", tabs: ["calendar", "composer", "inbox", "assets"].map((k) => fromToolkit("social-media", k)) },
+    // SCP-5e (BFF §63.26.4, §63.17): the content bank, `{D}/saved`, beside the Asset Library tab (which stays). The Social skin's Saved pin opens it (`lib/skins.ts`).
+    { key: "publish", label: "Publish", icon: "gateway", tabs: [...["calendar", "composer", "inbox", "assets"].map((k) => fromToolkit("social-media", k)), {
+      key: "saved", label: "Saved", href: deptPath("saved"), icon: "bookmark",
+      blurb: "Each client's content bank: photos, approved posts, hashtag sets, captions, templates and references.",
+    }] },
     REQUESTS_ROW,
     {
       key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY,
@@ -594,6 +598,22 @@ const SOCIAL_MEDIA: Workspace = {
       tabs: [{
         key: "settings", label: "Settings", href: deptPath("settings"), icon: "settings",
         blurb: "The ready-by buffer, the boost-candidate factor and each client's deadline for the month.",
+      }],
+    },
+    // SCP-5g (BFF §63.28.5): the audit list, `{D}/social-audit` (never `{D}/audit`, SEO's Site Audit). It is in More, not pinned, and ungated: the server decides each write.
+    {
+      key: "social-audit", label: "Audit", icon: "check",
+      tabs: [{
+        key: "social-audit", label: "Audit", href: deptPath("social-audit"), icon: "check",
+        blurb: "Each client's and prospect's social audit, worst first: the score out of twelve and the first fix.",
+      }],
+    },
+    // SCP-5h (BFF §63.29.5): Client onboarding, `{D}/onboarding`. HR's own Onboarding is a different row. It is in More and ungated: the server decides each write.
+    {
+      key: "onboarding", label: "Client onboarding", icon: "projects",
+      tabs: [{
+        key: "onboarding", label: "Client onboarding", href: deptPath("onboarding"), icon: "projects",
+        blurb: "The clients being onboarded: each one's kickoff, progress and next step, and its checklist by phase.",
       }],
     },
   ],

@@ -118,7 +118,7 @@ describe("drafting a report (POST engagements/:id/reports)", () => {
     expect(asReportDetail(call("GET", `reports/${c.id}`, USER.officer).json).document.narrative.source).toBe("deterministic");
   });
   it("checks the ids and the kind first (400), then the role (403), then the client (404), as the server does", () => {
-    refused(draft(USER.client, { kind: "weekly", period: "2026-09" }), 400, "invalid_kind"); // 400 before the 403
+    refused(draft(USER.client, { kind: "hourly", period: "2026-09" }), 400, "invalid_kind"); // 400 before the 403
     refused(draft(USER.client, { kind: "monthly", period: "2026-09" }), 403, "not authorized: cerbos denied create on social_report");
     refused(draft(USER.copywriter, { kind: "monthly", period: "2026-09" }), 403, "not authorized: cerbos denied create on social_report");
     refused(draft(USER.officer, { kind: "monthly", period: "2026-09" }, "no-such-client"), 404, "engagement not found");

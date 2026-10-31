@@ -97,6 +97,8 @@ export interface PipelinePost {
   simulatedPublishNow: SimulatedPublishOffer | null;
   /** SCP-4b (BFF §63.6.2, §63.11): the post's boost: its open one, else its latest, or null. Optional so a hand-built post of a test need not name it. */
   boost?: BoostRow | null;
+  /** SCP-5c (BFF §63.25.4): the idea this post was planned from, or null. Optional so a hand-built post of a test need not name it. */
+  idea?: { id: string; saw: string; metric: string | null; suggestion: string } | null;
   /** The client's latest decision (SCP-2, BFF §63.6.2): given in the portal, or recorded by staff on the client's behalf. Null before one, and again once the
    *  post goes back to the client. */
   clientDecision: ClientDecision | null;
@@ -189,6 +191,7 @@ export function asPipelinePost(raw: unknown): PipelinePost {
       : null,
     clientDecision: asClientDecision(o.clientDecision),
     boost: asBoostRowOrNull(o.boost),
+    idea: isObj(o.idea) && typeof o.idea.id === "string" ? { id: o.idea.id, saw: str(o.idea.saw) ?? "", metric: str(o.idea.metric), suggestion: str(o.idea.suggestion) ?? "" } : null,
     copyLog: arr(o.copyLog).filter(isObj).map((c) => ({
       field: str(c.field) ?? "", before: c.before, after: c.after, via: str(c.via) ?? "", by: person(c.by), suggestedBy: person(c.suggestedBy), stage: str(c.stage) ?? "", at: str(c.at) ?? "",
     })),
@@ -278,6 +281,11 @@ export const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   audit_final: "This audit is final, so it cannot change. A final audit is a dated record; start a new one for the client instead.",
   audit_attached: "This prospect audit is already attached to another client.",
   not_a_prospect_audit: "Only a prospect's audit can be attached to a client.",
+  idea_not_found: "That idea is gone. It may have been deleted. Reload the report.",
+  idea_planned: "That idea is already in a plan, so it cannot change. Discard its post first to free it.",
+  cycle_closed: "That plan month is already over. Pick a later month.",
+  schedule_not_found: "That report schedule is gone. It may have been deleted. Reload the page.",
+  schedule_exists: "This company already has an all-clients schedule for that report kind. Edit that one, or choose some clients.",
 };
 
 /**

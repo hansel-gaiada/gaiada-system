@@ -9,34 +9,49 @@
 // The buttons follow the server's `canApprove` and `canDeliver` and are DISABLED WITH THE REASON when they are not allowed (SCP-Q20: the four check and send; the officer writes and submits). The
 // officer's own writes carry no flag, so those buttons are drawn and a 403 is said in words. UI gating is cosmetic: the server decides every write.
 // A simulated report (a number came from the simulator) carries the SIMULATED mark beside its title and a note that the PDF is watermarked.
-import { useEffect, useId, useRef, useState, useTransition } from "react";
+// SCP-5 W5-A4 (BFF §63.24.7): the same page serves every periodic kind. A quarterly, half-year or yearly report is the monthly's page over its range; a DAILY or WEEKLY report (a short kind) swaps the three
+// areas, the plan and the narrative for "What to tell the client" (the summary and the next-period line), and adds its period's navigation, the best post and the next period from the pipeline. Its numbers are
+// live while it is a draft and frozen when it is submitted. `children` is the page's own extra (the monthly's "Ideas for next month").
+import { useEffect, useId, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ReportViewer } from "@/components/reports/ReportViewer";
 import { RefusalNote } from "@/components/social/PostRefusal";
 import { SimulatedMark } from "@/components/social/SimulatedMark";
+import { BestPost, ComingUp, PeriodNav } from "@/components/social/ShortReportParts";
 import type { Refusal } from "@/lib/socialPipeline";
+import { dayWords, isShortKind, kindNoun, nextWord } from "@/lib/socialReportKinds";
 import {
-  ACTION_MAX, ACTION_PLAN_MAX, AREA_LABEL, NOTE_AREAS, NOTE_MAX, OWNER_LABEL, REPORT_STATE_HELP, REPORTS_LIST_PATH, buildReportBody, buttonsFor, draftedViaWords, emptyAction,
-  formFromDetail, formFromProposal, isReportState, missingNoteLine, missingNotes, numbersDocument, periodWords, reportStateWords, sameForm,
-  type ActionOwner, type NoteArea, type ReportForm, type SocialReportDetail,
+  ACTION_MAX, ACTION_PLAN_MAX, AREA_LABEL, NOTE_AREAS, NOTE_MAX, NOTES_KINDS, OWNER_LABEL, REPORTS_LIST_PATH, SHORT_MAX, SHORT_TABLE_KEYS, buildReportBody, buildShortBody, buttonsFor,
+  documentWithout, draftedViaWords, emptyAction, formFromDetail, formFromProposal, isReportState, missingNoteLine, missingNotes, numbersDocument, periodWords, reportStateWords,
+  sameForm, sameShortForm, shortFormFromDetail, shortFormFromProposal, stateHelp, tableOf,
+  type ActionOwner, type NoteArea, type ReportForm, type ReportNavLink, type ShortForm, type SocialReportDetail,
 } from "@/lib/socialReports";
 import { approveReport, deliverReport, proposeReportDraft, saveReport, sendBackReport, submitReport, type ReportWrite } from "@/lib/socialReportsActions";
 import "./cycles.css";
 import "./post-page.css";
 import "./reports.css";
 
-export function SocialReportView({ deptId, report, clientName, clientReportsHref }: {
+export function SocialReportView({ deptId, report, clientName, clientReportsHref, nav, fiscalYearStartMonth = 1, summaryMax = SHORT_MAX, children }: {
   deptId: string;
   report: SocialReportDetail;
   clientName: string;
   /** Where the client's published reports are listed for staff (the client's Reports tab); null when the client could not be resolved. */
   clientReportsHref: string | null;
+  /** A short kind's neighbouring periods, from the client's reports of that kind; absent on every other kind. */
+  nav?: { prev: ReportNavLink | null; next: ReportNavLink | null };
+  fiscalYearStartMonth?: number;
+  /** The summary's longest length under the company's rules for the kind (1,000 by default). */
+  summaryMax?: number;
+  children?: ReactNode;
 }) {
   const uid = useId();
   const router = useRouter();
   const saved = formFromDetail(report);
+  const short = isShortKind(report.kind);
+  const savedShort = shortFormFromDetail(report);
   const [form, setForm] = useState<ReportForm>(saved);
+  const [shortForm, setShortForm] = useState<ShortForm>(savedShort);
   const [local, setLocal] = useState<{ field: string; message: string } | null>(null);
   const [refusal, setRefusal] = useState<{ refusal: Refusal; message: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -45,16 +60,21 @@ export function SocialReportView({ deptId, report, clientName, clientReportsHref
 
   // When the server's copy changes (a refresh after a save, or a change made by someone else), a form with nothing unsaved follows it.
   const lastSaved = useRef(saved);
+  const lastSavedShort = useRef(savedShort);
   useEffect(() => {
     if (!sameForm(lastSaved.current, saved)) {
       if (sameForm(form, lastSaved.current)) setForm(saved);
       lastSaved.current = saved;
     }
+    if (!sameShortForm(lastSavedShort.current, savedShort)) {
+      if (sameShortForm(shortForm, lastSavedShort.current)) setShortForm(savedShort);
+      lastSavedShort.current = savedShort;
+    }
   });
 
-  const dirty = !sameForm(form, saved);
-  const b = buttonsFor(report, { dirty });
-  const missing = report.kind === "monthly" ? missingNotes(report.notes) : [];
+  const dirty = short ? !sameShortForm(shortForm, savedShort) : !sameForm(form, saved);
+  const b = buttonsFor(report, { dirty, summaryPresent: /\S/.test(savedShort.summary) });
+  const missing = NOTES_KINDS.includes(report.kind) ? missingNotes(report.notes) : [];
   const stateKnown = isReportState(report.status);
   const set = (patch: Partial<ReportForm>) => { setLocal(null); setForm((f) => ({ ...f, ...patch })); };
   const setNote = (area: NoteArea, k: "insight" | "suggestion", v: string) => { setLocal(null); setForm((f) => ({ ...f, notes: { ...f.notes, [area]: { ...f.notes[area], [k]: v } } })); };
@@ -66,11 +86,11 @@ export function SocialReportView({ deptId, report, clientName, clientReportsHref
     setNotice(null);
     setRefusal({ refusal: r.refusal, message: r.message });
     // A refusal that says the report moved: the page is read again, so what is drawn is what is true.
-    if (r.refusal.status === 400 && /status|not_editable|from_this_status|concurrently|notes_incomplete/.test(r.refusal.error)) router.refresh();
+    if (r.refusal.status === 400 && /status|not_editable|from_this_status|concurrently|notes_incomplete|summary_missing|action_plan_missing|next_period_missing|summary_numbers_changed/.test(r.refusal.error)) router.refresh();
   }
 
   function save() {
-    const built = buildReportBody(form);
+    const built = short ? buildShortBody(shortForm, summaryMax) : buildReportBody(form);
     if (!built.ok) { setLocal({ field: built.field, message: built.message }); setRefusal(null); return; }
     start(async () => { done(await saveReport(report.id, built.body), "Saved."); });
   }
@@ -79,9 +99,9 @@ export function SocialReportView({ deptId, report, clientName, clientReportsHref
     start(async () => {
       const r = await proposeReportDraft(report.id);
       if (!r.ok) { done(r, null); return; }
-      setForm(formFromProposal(r.proposal));
+      if (short) setShortForm(shortFormFromProposal(r.proposal)); else setForm(formFromProposal(r.proposal));
       setLocal(null);
-      setAiNote(draftedViaWords(r.proposal.draftedVia));
+      setAiNote(draftedViaWords(r.proposal.draftedVia, report.kind));
     });
   }
   const act = (fn: () => Promise<ReportWrite>, text: string) => { setRefusal(null); setNotice(null); start(async () => { done(await fn(), text); }); };
@@ -96,21 +116,25 @@ export function SocialReportView({ deptId, report, clientName, clientReportsHref
   const disabled = pending;
   const readOnly = !b.editable;
   const reasonId = (k: string) => `${uid}-${k}-why`;
+  const period = periodWords(report.period, report.kind, fiscalYearStartMonth);
+  const help = stateHelp(report.kind, report.status);
 
   return (
     <div className="scp-report">
       <div className="scp-report__head">
-        <h2 className="scp-report__title">{clientName}: {periodWords(report.period, report.kind)}</h2>
+        <h2 className="scp-report__title">{clientName}: {report.kind === "monthly" ? period : `${kindNoun(report.kind)}, ${period}`}</h2>
         <span className={`scp-reports__state scp-reports__state--${report.status}`}>{reportStateWords(report.status)}</span>
         {report.simulated && <SimulatedMark of="metrics" />}
       </div>
       <p className="scp-note" style={{ margin: 0 }}>
-        {stateKnown ? REPORT_STATE_HELP[report.status as keyof typeof REPORT_STATE_HELP] : "This report is in a state this page does not know."}{" "}
+        {stateKnown ? help : "This report is in a state this page does not know."}{" "}
+        {report.due && report.status !== "delivered" ? <>Due {dayWords(report.due)}. </> : null}
         <Link className="scp-link" href={REPORTS_LIST_PATH(deptId)}>All reports</Link>
       </p>
+      {short && nav && <PeriodNav deptId={deptId} engagementId={report.engagementId} kind={report.kind} prev={nav.prev} next={nav.next} />}
       {report.simulated && (
         <p className="scp-report__watermark" role="note">
-          Some of this month&apos;s numbers came from the social simulator, not from a network. The page and the PDF carry the watermark, and nothing here is a real client&apos;s result.
+          Some of this {report.kind === "monthly" ? "month" : "period"}&apos;s numbers came from the social simulator, not from a network. The page and the PDF carry the watermark, and nothing here is a real client&apos;s result.
         </p>
       )}
 
@@ -122,15 +146,44 @@ export function SocialReportView({ deptId, report, clientName, clientReportsHref
       )}
 
       <section aria-labelledby={`${uid}-numbers`}>
-        <h3 className="scp-post__section-title" id={`${uid}-numbers`}>The month&apos;s numbers</h3>
-        <p className="scp-field__hint">Frozen when the report was drafted, so an approved report&apos;s numbers do not drift. A boost&apos;s spend is the client&apos;s own ad spend, never our fees.</p>
+        <h3 className="scp-post__section-title" id={`${uid}-numbers`}>{report.kind === "monthly" ? "The month's numbers" : "The numbers"}</h3>
+        <p className="scp-field__hint">
+          {report.live
+            ? "These numbers are live while the report is a draft. They are frozen when it is submitted, and the summary may state only numbers they hold."
+            : short ? "Frozen when the report was submitted, so a checked report's numbers do not drift."
+            : "Frozen when the report was drafted, so an approved report's numbers do not drift."}{" "}
+          A boost&apos;s spend is the client&apos;s own ad spend, never our fees.
+        </p>
         <div className="scp-report__numbers">
-          <ReportViewer document={{ ...numbersDocument(report.document), simulated: undefined }} scopeHeading={false} />
+          <ReportViewer document={{ ...documentWithout(numbersDocument(report.document), short ? SHORT_TABLE_KEYS : []), simulated: undefined }} scopeHeading={false} />
         </div>
       </section>
+      {short && <BestPost table={tableOf(report.document, "best_post")} headingId={`${uid}-best`} />}
+      {short && <ComingUp deptId={deptId} table={tableOf(report.document, "next_period")} word={nextWord(report.kind)} headingId={`${uid}-next`} />}
 
       <form aria-label="The report" onSubmit={(e) => { e.preventDefault(); if (b.save) save(); }} noValidate>
         <fieldset disabled={readOnly || disabled} style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 16 }}>
+          {short && (
+            <section aria-labelledby={`${uid}-tell`} className="scp-report__plan">
+              <h3 className="scp-post__section-title" id={`${uid}-tell`}>What to tell the client</h3>
+              <p className="scp-field__hint">What the client reads: a short summary of the {report.kind === "daily" ? "day" : "week"} and one line about what comes next. Each is at most {summaryMax} characters.</p>
+              <div className="scp-field">
+                <label htmlFor={`${uid}-summary`}>Summary</label>
+                <textarea id={`${uid}-summary`} className="scp-input" rows={5} value={shortForm.summary} onChange={(e) => { setLocal(null); setShortForm((f) => ({ ...f, summary: e.target.value })); }}
+                  aria-invalid={err("narrativeMd") ? true : undefined} aria-describedby={err("narrativeMd") ? `${uid}-summary-err` : undefined} />
+                <span className={`scp-report__count${shortForm.summary.length > summaryMax ? " scp-report__count--over" : ""}`}>{shortForm.summary.length} / {summaryMax}</span>
+                {err("narrativeMd") && <span id={`${uid}-summary-err`} className="scp-msg scp-msg--error" role="alert">{err("narrativeMd")}</span>}
+              </div>
+              <div className="scp-field">
+                <label htmlFor={`${uid}-nextline`}>Next {nextWord(report.kind)}</label>
+                <textarea id={`${uid}-nextline`} className="scp-input" rows={2} value={shortForm.nextPeriod} onChange={(e) => { setLocal(null); setShortForm((f) => ({ ...f, nextPeriod: e.target.value })); }}
+                  aria-invalid={err("nextPeriod") ? true : undefined} aria-describedby={err("nextPeriod") ? `${uid}-nextline-err` : undefined} />
+                <span className={`scp-report__count${shortForm.nextPeriod.length > SHORT_MAX ? " scp-report__count--over" : ""}`}>{shortForm.nextPeriod.length} / {SHORT_MAX}</span>
+                {err("nextPeriod") && <span id={`${uid}-nextline-err`} className="scp-msg scp-msg--error" role="alert">{err("nextPeriod")}</span>}
+              </div>
+            </section>
+          )}
+          {!short && <>
           <section aria-labelledby={`${uid}-areas`} className="scp-report__plan">
             <h3 className="scp-post__section-title" id={`${uid}-areas`}>Followers, engagement and audience</h3>
             <p className="scp-field__hint">One insight (what the numbers show) and one suggestion (what to do about it) for each area, up to {NOTE_MAX} characters each.</p>
@@ -204,6 +257,7 @@ export function SocialReportView({ deptId, report, clientName, clientReportsHref
               <textarea id={`${uid}-narrative-text`} className="scp-input" rows={6} value={form.narrative} onChange={(e) => set({ narrative: e.target.value })} />
             </div>
           </section>
+          </>}
         </fieldset>
 
         {aiNote && <p className="scp-post__banner scp-post__banner--changes" role="status" style={{ marginTop: 8 }}>{aiNote} <strong>Nothing is saved until you press Save.</strong></p>}
@@ -241,6 +295,7 @@ export function SocialReportView({ deptId, report, clientName, clientReportsHref
           {clientReportsHref ? <> <Link className="scp-link" href={clientReportsHref}>Open this client&apos;s reports</Link></> : null}
         </p>
       )}
+      {children}
     </div>
   );
 }

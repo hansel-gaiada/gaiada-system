@@ -212,7 +212,7 @@ describe("More as a full-screen sheet", () => {
     const menu = groups[0];
     expect(Array.from(menu.querySelectorAll(".ws-more__label")).map((l) => l.textContent)).toEqual(["Calendar", "Reports", "Saved", "AI Assistant"]);
     expect(within(menu).getByRole("link", { name: "Calendar" })).toHaveAttribute("href", "/departments/d-soc/calendar");
-    expect(within(menu).getByRole("link", { name: "Saved" })).toHaveAttribute("href", "/departments/d-soc/assets");
+    expect(within(menu).getByRole("link", { name: "Saved" })).toHaveAttribute("href", "/departments/d-soc/saved");
     // SCP-5a: the Reports pin opens the Social reports tab of the shared Reports row (it opened the row's first tab, Mine, until that tab existed).
     expect(within(menu).getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/departments/d-soc/social-reports");
     // Nothing the bar or the top holds is repeated there, and the rows below are the model's own, as on the desktop.
@@ -237,7 +237,8 @@ describe("More as a full-screen sheet", () => {
     // (The You block has its own Calendar row; the Menu entry is the one in the first section.)
     expect(within(within(sheet()).getAllByRole("group")[0]).getByRole("link", { name: "Calendar" })).toHaveAttribute("aria-current", "page");
     fireEvent.change(screen.getByRole("searchbox", { name: "Find a page" }), { target: { value: "saved" } });
-    expect(Array.from(sheet().querySelectorAll(".ws-more__label")).map((l) => l.textContent)).toEqual(["Saved"]);
+    // The Menu's Saved entry, and the Publish row's own Saved tab in Work (the content bank is a tab of Publish since SCP-5e).
+    expect(Array.from(sheet().querySelectorAll(".ws-more__label")).map((l) => l.textContent)).toEqual(["Saved", "Saved"]);
   });
 
   it("Escape closes it and returns focus to the top bar's More; so does its close button", () => {

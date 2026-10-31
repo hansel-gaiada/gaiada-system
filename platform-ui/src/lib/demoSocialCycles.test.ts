@@ -18,7 +18,7 @@ describe("GET settings", () => {
   it("answers the settings shape with a known calendar and canPlan (the demo user is the superadmin)", () => {
     const r = call("GET", "settings");
     expect(r?.status).toBe(200);
-    expect(asSocialSettings(r?.json)).toEqual({ bufferWorkingDays: 1, boostCandidateFactor: 1.25, holidayCalendar: { known: true, name: "Demo public holidays" }, canPlan: true });
+    expect(asSocialSettings(r?.json)).toEqual({ bufferWorkingDays: 1, boostCandidateFactor: 1.25, holidayCalendar: { known: true, name: "Demo public holidays" }, onboardingTemplate: { id: "onb-tpl-1", name: "Social media client onboarding" }, canPlan: true });
   });
 });
 

@@ -12,6 +12,7 @@ import {
   DEMO_ONBOARDING_PHASES, DEMO_ONBOARDING_STEPS, DEMO_ONBOARDING_TEMPLATE, demoDueDate, demoOnboarding, demoOnboardingPmRoute, demoOnboardingRoute, resetDemoOnboarding,
 } from "./demoSocialOnboarding";
 import { socialDemo } from "./demoSocial";
+import { demoChooseTemplate, demoOnboardingTemplateRoute, resetDemoOnboardingTemplate } from "./demoSocialOnboardingTemplate";
 import { getDemoResponse } from "./demoFixtures";
 import { asOnboarding, groupByPhase } from "./socialOnboarding";
 
@@ -19,7 +20,7 @@ const USER = { officer: "u-social", hod: "u-pm", gm: "u-gm", owner: "demo-owner"
 const [LARKSPUR, TIDEWATER] = ["onb-eng-1", "onb-eng-2"];
 const NEW_ID = "11111111-1111-4111-8111-111111111111";
 
-beforeEach(() => { resetDemoOnboarding(); vi.setSystemTime(new Date("2026-10-16T04:00:00Z")); });
+beforeEach(() => { resetDemoOnboarding(); resetDemoOnboardingTemplate(); vi.setSystemTime(new Date("2026-10-16T04:00:00Z")); });
 
 const call = (m: string, tail: string, user: string, body?: unknown) => {
   const r = demoOnboardingRoute(m, tail, body === undefined ? undefined : JSON.stringify(body), user);
@@ -173,5 +174,28 @@ describe("Open baseline audit", () => {
     expect([second.status, (second.json as { audit: { id: string }; created: boolean }).audit.id, (second.json as { created: boolean }).created]).toEqual([200, id, false]);
     expect(larkspur().baselineAudit).toEqual({ auditId: id, status: "draft", overall: null });
     expect(demoOnboardingRoute("POST", "audits", JSON.stringify({ subject: "client", engagementId: "soc-eng-1" }), USER.hod)).toBeNull();
+  });
+});
+
+describe("GET onboarding follows the template chosen in Settings", () => {
+  it("with none chosen: template null, no application listed, every client with a project blocked by onboarding_template_not_set, and a start is refused", () => {
+    expect(demoChooseTemplate(null)).toBe(true);
+    const l = listing();
+    expect(l.template).toBeNull();
+    expect(l.items.every((i) => i.applicationId === null && i.steps.length === 0 && i.startBlock === "onboarding_template_not_set")).toBe(true);
+    refused(call("POST", `engagements/${TIDEWATER}/onboarding`, USER.hod, { id: NEW_ID, kickoff: "2026-10-19" }), 409, "onboarding_template_not_set");
+    expect(demoChooseTemplate(DEMO_ONBOARDING_TEMPLATE.id)).toBe(true);
+    expect(larkspur().progress).toEqual({ done: 5, total: 15 }); // choosing it again brings the running onboarding back
+  });
+  it("a start copies the chosen template's steps as edited; a running onboarding keeps its own copy", () => {
+    const T = `/api/co-1/pm/templates/${DEMO_ONBOARDING_TEMPLATE.id}`;
+    const list_ = demoOnboardingTemplateRoute("GET", "/api/co-1/pm/templates", new URLSearchParams("kind=project"), undefined, USER.hod)!.json as Array<{ payload: { tasks: Array<{ title: string }> } }>;
+    const payload = structuredClone(list_[0].payload);
+    payload.tasks[0].title = "Kickoff call held";
+    expect(demoOnboardingTemplateRoute("PATCH", T, new URLSearchParams(), JSON.stringify({ payload }), USER.hod)!.status).toBe(200);
+    expect(call("POST", `engagements/${TIDEWATER}/onboarding`, USER.hod, { id: NEW_ID, kickoff: "2026-10-19" }).status).toBe(201);
+    expect(tidewater().steps[0].title).toBe("Kickoff call held");
+    expect(larkspur().steps[0].title).toBe(DEMO_ONBOARDING_STEPS[0].title);
+    expect(listing().template).toEqual(DEMO_ONBOARDING_TEMPLATE);
   });
 });

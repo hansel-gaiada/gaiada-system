@@ -37,7 +37,7 @@ vi.mock("@/lib/socialBoostsActions", () => ({
 }));
 vi.mock("@/lib/portalSpendActions", () => ({ decideBoost: vi.fn(), decideBoostBudget: vi.fn() }));
 vi.mock("@/lib/socialReportsActions", () => ({
-  draftMonthlyReport: vi.fn(), saveReport: vi.fn(), submitReport: vi.fn(), sendBackReport: vi.fn(), proposeReportDraft: vi.fn(), approveReport: vi.fn(), deliverReport: vi.fn(),
+  draftReport: vi.fn(), startRun: vi.fn(), readRun: vi.fn(() => new Promise(() => {})), saveReport: vi.fn(), submitReport: vi.fn(), sendBackReport: vi.fn(), proposeReportDraft: vi.fn(), approveReport: vi.fn(), deliverReport: vi.fn(),
 }));
 
 vi.mock("@/lib/socialSavedActions", () => ({ addSavedItem: vi.fn(), updateSavedItem: vi.fn(), deleteSavedItem: vi.fn() }));
@@ -66,6 +66,8 @@ import { PortalBoostBudgets } from "@/components/portal/social/PortalBoostBudget
 import { BoostBoard } from "./BoostBoard";
 import { BoostCard } from "./BoostCard";
 import { SocialReportList } from "./SocialReportList";
+import { GenerateReports } from "./GenerateReports";
+import { asRunProgress } from "@/lib/socialReportRuns";
 import { SocialReportView } from "./SocialReportView";
 import { SavedEntriesView } from "./SavedBank";
 import { AuditList } from "./AuditList";
@@ -207,6 +209,12 @@ const COVERED: Record<string, Case> = {
     <BoostBoard deptId="d-soc" data={{ items: [boostRow(s)], candidates: [], totals: { committedMinor: 300_000, spendMinor: 0, currency: "IDR" }, nextCursor: null }} />,
   ),
   "components/social/SocialReportList.tsx": (s) => render(<SocialReportList deptId="d-soc" rows={reportRows(s)} filters={{ status: null, period: null }} />),
+  "components/social/GenerateReports.tsx": (s) => render(
+    <GenerateReports
+      deptId="d-soc" kind="weekly" clients={[]} isApprover={false} today="2026-10-16" rule={null} fiscalYearStartMonth={1} runs={[]} followRunId={null}
+      initialRun={asRunProgress({ runId: "run1", kind: "weekly", period: "2026-W41", status: "done", total: 1, done: 1, results: [{ engagementId: "e1", clientName: "A client", reportId: "r1", status: "created", draftedVia: "fallback", simulated: s }], usage: {} })}
+    />,
+  ),
   "components/social/SocialReportView.tsx": (s) => render(<SocialReportView deptId="d-soc" report={reportDetail(s)} clientName="A client" clientReportsHref={null} />),
   "components/social/SavedBank.tsx": (s) => render(
     <SavedEntriesView

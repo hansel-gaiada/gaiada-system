@@ -5,6 +5,7 @@ import "server-only";
 //   GET    engagements/:engagementId/saved?collection=&pillar=&used=&source=&cursor=&limit=      one collection's items, paged
 //   POST   engagements/:engagementId/saved                         add a link, a text or an Asset Library photo (201 `{item, created}`; 200 for a replayed id or a kept asset)
 //   PATCH  saved/:itemId   |   DELETE saved/:itemId                the author's, else the client's officer or one of the four
+//   `savedItemIds` on `PATCH posts/:postId/pipeline` (BFF §63.26.3)  judged and counted for the post edit by `use`, below (the edit itself is demoSocialPipelineRun.ts's)
 //
 // THE GATES. Reading: any staff member (a client contact is refused). Adding: `create` on the client's would-be post, which is the Social Media team's (the two officers, the copywriter, the in-team
 // designer, the company admin) and the four approvers; the Creatives designer is refused. Changing or deleting: the item's author who still holds `create`, else `manage` on the would-be post, which is the
@@ -17,7 +18,7 @@ import "server-only";
 // THE DATA is invented and read where the server reads it: the photos are the asset groups on the live designs of the client's posts (derived, never stored) plus the bank's own kept assets and links; the
 // posts are the client's pipeline posts from `approved` on that have a stored design; the hashtag sets are the brand book's. Northwind Traders' bank holds an item in every collection (one kept asset no post
 // uses, a stock photo link, a Drive video link, three captions, two templates, two references); Saltmarsh Day Spa's bank stores nothing, so its empty collections can be seen.
-import { DEMO_ASSETS } from "./demoSocialPipelineRun";
+import { DEMO_ASSETS, type SavedUse } from "./demoSocialPipelineRun";
 import { PIPE_ENGAGEMENTS, PIPE_POSTS, allocStore, isClientContact, isDemoSocialApprover, who, type DemoResult } from "./demoSocialPipeline";
 import fixture from "./scpStageMachine.json";
 import rules from "./socialRulesDefaults.json";
@@ -461,7 +462,25 @@ export function savedApi(store: SavedStore) {
     return null;
   }
 
-  return { staff, store, find, itemOf };
+  /**
+   * SCP-5e: the saved items of a post edit, in the server's order. `judge` runs after the gate and before the machine's guards: the list is 1 to 10 distinct ids (a demo id is any non-empty string, as
+   * its other ids are), else 400 `savedItemIds`; each must be a LIVE item of the post's client, else the same 400 (nothing is counted). `count` runs only when the edit applied: one more use for each
+   * item, and the time, in the same step.
+   */
+  const use: SavedUse = {
+    judge(engagementId, raw) {
+      if (!Array.isArray(raw) || raw.length < 1 || raw.length > SAVED_LIMITS.useIds) return bad("savedItemIds");
+      if (!raw.every((x) => typeof x === "string" && x !== "") || new Set(raw).size !== raw.length) return bad("savedItemIds");
+      const mine = new Set(live(engagementId).map((r) => r.id));
+      return raw.every((x) => mine.has(x as string)) ? null : bad("savedItemIds");
+    },
+    count(engagementId, raw) {
+      const at = new Date().toISOString();
+      for (const r of live(engagementId)) if ((raw as string[]).includes(r.id)) { r.useCount += 1; r.lastUsedAt = at; }
+    },
+  };
+
+  return { staff, store, find, itemOf, use };
 }
 
 // ── the demo's own store, pinned to globalThis like the other demo stores ───────────────────────────────────────────────
@@ -471,4 +490,7 @@ export const demoSaved = savedApi(demoStore);
 
 /** The routes of 63.26 by `tail`; null when `tail` is none of them. */
 export const demoSavedRoute = demoSaved.staff;
+
+/** The post edit's hook into this store (BFF §63.26.3): `runDemoPipelineWrite` judges and counts `savedItemIds` through it. */
+export const demoSavedUse = demoSaved.use;
 
