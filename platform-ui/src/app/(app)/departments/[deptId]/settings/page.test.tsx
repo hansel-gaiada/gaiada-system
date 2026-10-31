@@ -19,6 +19,10 @@ vi.mock("@/lib/socialCyclesActions", () => ({ saveSocialSettings: vi.fn(), saveC
 vi.mock("@/lib/socialAllocation-data", () => ({ getAllocation: vi.fn() }));
 vi.mock("@/lib/socialAllocationActions", () => ({ saveAllocation: vi.fn() }));
 vi.mock("@/lib/socialReportSchedules-data", () => ({ getReportSchedules: vi.fn() }));
+vi.mock("@/lib/socialRules-data", () => ({ getRules: vi.fn() }));
+vi.mock("@/lib/socialOnboardingTemplate-data", () => ({ getProjectTemplates: vi.fn() }));
+vi.mock("@/lib/socialOnboardingTemplateActions", () => ({ chooseOnboardingTemplate: vi.fn(), saveTemplateSteps: vi.fn() }));
+vi.mock("@/lib/socialRulesActions", () => ({ saveRules: vi.fn(), resetRules: vi.fn(), previewRules: vi.fn(), loadRulesHistory: vi.fn() }));
 vi.mock("@/lib/socialReportSchedulesActions", () => ({ saveSchedule: vi.fn(), editSchedule: vi.fn(), setScheduleOn: vi.fn(), deleteSchedule: vi.fn(), runScheduleNow: vi.fn(), getRunProgress: vi.fn() }));
 
 import { getDepartment } from "@/lib/departments";
@@ -27,6 +31,10 @@ import { saveCycleDeadlines, saveSocialSettings } from "@/lib/socialCyclesAction
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { saveAllocation } from "@/lib/socialAllocationActions";
 import { getReportSchedules } from "@/lib/socialReportSchedules-data";
+import { getRules } from "@/lib/socialRules-data";
+import { getProjectTemplates } from "@/lib/socialOnboardingTemplate-data";
+import type { ProjectTemplate } from "@/lib/socialOnboardingTemplate";
+import { rulesAnswer } from "@/components/social/rulesTestKit";
 import { asSchedule } from "@/lib/socialReportSchedules";
 import type { AllocationRow } from "@/lib/socialAllocation";
 import { PLAN_REFUSAL_REASON, type CycleRow, type CycleTable, type SocialSettings } from "@/lib/socialCycles";
@@ -51,7 +59,7 @@ const gamma: CycleRow = {
   health: { state: "late", spareDays: -4, lateDays: 2, lateWith: "designer", latestSafeHandoff: "2026-09-04", readyBy: "2026-09-09" },
 };
 const settings = (over: Partial<SocialSettings> = {}): SocialSettings => ({
-  bufferWorkingDays: 1, boostCandidateFactor: 1.25, holidayCalendar: { known: false, name: null }, canPlan: true, ...over,
+  bufferWorkingDays: 1, boostCandidateFactor: 1.25, holidayCalendar: { known: false, name: null }, onboardingTemplate: null, canPlan: true, ...over,
 });
 const table = (over: Partial<CycleTable> = {}): CycleTable => ({ month: "2026-10", bufferWorkingDays: 1, holidaysKnown: false, canPlan: true, rows: [alpha, beta, gamma], ...over });
 const ok = <T,>(data: T): ReadResult<T> => ({ kind: "ok", data });
@@ -77,6 +85,9 @@ beforeEach(() => {
   vi.mocked(getAllocation).mockReset().mockResolvedValue(ok([alloc(), alloc({ engagementId: "e-beta", clientName: "Brand Beta", stepEstimates: {} })]));
   vi.mocked(saveAllocation).mockReset();
   vi.mocked(getReportSchedules).mockReset().mockResolvedValue({ kind: "forbidden" });
+  // The rules sections hold hundreds of controls, and a role query over them is slow: the other tests leave them out (a refused read draws one short line) and "Company rules" below reads them in.
+  vi.mocked(getRules).mockReset().mockResolvedValue({ kind: "forbidden" });
+  vi.mocked(getProjectTemplates).mockReset().mockResolvedValue({ kind: "forbidden" });
 });
 afterEach(() => vi.useRealTimers());
 
@@ -418,5 +429,105 @@ describe("Report automation", () => {
     await mount();
     expect(screen.getByRole("heading", { name: "Report automation" })).toBeInTheDocument();
     expect(screen.getByText(/cannot be shown right now \(platform 500\)/)).toBeInTheDocument();
+  });
+});
+
+// SCP-5 W5-C5 (BFF §63.30.5): the company's rules sit between the deadline table and Report automation, one section each. A refused read says so and a failed one says it cannot tell: neither draws the defaults.
+describe("Company rules", () => {
+  beforeEach(() => { vi.mocked(getRules).mockResolvedValue(ok(rulesAnswer())); });
+  it("reads the rules for the signed-in person and draws the Reports section after the deadlines and before Report automation", async () => {
+    vi.mocked(getReportSchedules).mockResolvedValue(ok([]));
+    await mount();
+    expect(getRules).toHaveBeenCalledWith("u-1", "co-a");
+    const reports = screen.getByRole("heading", { name: "Reports" });
+    expect(screen.getByRole("heading", { name: "Deadlines" }).compareDocumentPosition(reports) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(reports.compareDocumentPosition(screen.getByRole("heading", { name: "Report automation" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Report rules" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Ideas for next month" })).toBeInTheDocument();
+  });
+  it("draws the Monthly cycle section after Reports, with the company's steps", async () => {
+    await mount();
+    const cycle = screen.getByRole("heading", { name: "Monthly cycle" });
+    expect(screen.getByRole("heading", { name: "Reports" }).compareDocumentPosition(cycle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Cycle steps" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem", { name: /^Step \d+:/ })).toHaveLength(6);
+  });
+  it("draws the Audit scorecard section after Monthly cycle, with the twelve dimensions and the bands", async () => {
+    await mount();
+    expect(screen.getByRole("heading", { name: "Monthly cycle" }).compareDocumentPosition(screen.getByRole("heading", { name: "Audit scorecard" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Scorecard" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem", { name: /^Dimension \d+:/ })).toHaveLength(12);
+    expect(screen.getAllByRole("listitem", { name: /^Band \d:/ })).toHaveLength(3);
+  });
+  it("draws the Saved section after the Audit scorecard, with the six categories", async () => {
+    await mount();
+    expect(screen.getByRole("heading", { name: "Audit scorecard" }).compareDocumentPosition(screen.getByRole("heading", { name: "Saved" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Saved categories" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem", { name: /^Category \d:/ })).toHaveLength(6);
+  });
+  const template = (): ProjectTemplate => ({
+    id: "t1", name: "Social media client onboarding", updatedAt: "2026-10-30T09:00:00.000Z",
+    payload: { title: "Client onboarding", phases: [{ key: "kickoff", title: "Kickoff" }], roles: [{ key: "lead", label: "Lead" }], tasks: [{ key: "meet", title: "Kickoff meeting held", phase: "kickoff", role: "lead", dueOffsetWorkingDays: 0 }] },
+  });
+  it("draws the Onboarding section after Saved: the picker with the company's template, and its steps", async () => {
+    vi.mocked(getSocialSettings).mockResolvedValue(ok(settings({ onboardingTemplate: { id: "t1", name: "Social media client onboarding" } })));
+    vi.mocked(getProjectTemplates).mockResolvedValue(ok([template()]));
+    await mount();
+    expect(getProjectTemplates).toHaveBeenCalledWith("u-1", "co-a");
+    expect(screen.getByRole("heading", { name: "Saved" }).compareDocumentPosition(screen.getByRole("heading", { name: "Onboarding" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByLabelText(/^The company.s onboarding template$/)).toHaveValue("t1");
+    expect(screen.getByRole("group", { name: /Steps of .Social media client onboarding./ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Title", { selector: "input[data-rule-field='payload.tasks.0.title']" })).toHaveValue("Kickoff meeting held");
+  });
+  it("shows the chosen template's name and why the steps are not shown when PM refuses the list", async () => {
+    vi.mocked(getSocialSettings).mockResolvedValue(ok(settings({ onboardingTemplate: { id: "t1", name: "Social media client onboarding" } })));
+    await mount();
+    expect(screen.getByRole("heading", { name: "Onboarding" })).toBeInTheDocument();
+    expect(screen.getByText(/The templates cannot be listed for you/)).toBeInTheDocument();
+    expect(screen.getByText("Social media client onboarding")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /^Steps of/ })).not.toBeInTheDocument();
+  });
+  it("says it cannot tell when the templates read fails, and does not read them for a person who may not choose", async () => {
+    vi.mocked(getProjectTemplates).mockResolvedValue({ kind: "unavailable", reason: "platform 500" });
+    await mount();
+    expect(screen.getByText(/The templates cannot be shown right now \(platform 500\)/)).toBeInTheDocument();
+    vi.mocked(getProjectTemplates).mockClear();
+    vi.mocked(getSocialSettings).mockResolvedValue(ok(settings({ canPlan: false, onboardingTemplate: { id: "t1", name: "Social media client onboarding" } })));
+    await mount();
+    expect(getProjectTemplates).not.toHaveBeenCalled();
+    expect(screen.getAllByText(/You can read the template here\./).length).toBeGreaterThan(0);
+  });
+  it("still draws the Onboarding section when the rules cannot be read", async () => {
+    vi.mocked(getRules).mockResolvedValue({ kind: "unavailable", reason: "platform 500" });
+    await mount();
+    expect(screen.getByText(/rules cannot be shown right now \(platform 500\)/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Onboarding" })).toBeInTheDocument();
+  });
+  it("offers the allocation's open clients to the previews", async () => {
+    await mount();
+    const pick = screen.getAllByLabelText("For client")[0];
+    expect(within(pick).getByRole("option", { name: "Brand Alpha" })).toBeInTheDocument();
+  });
+  it("shows the values read-only to a person who cannot edit, and still draws the sections", async () => {
+    vi.mocked(getRules).mockResolvedValue(ok(rulesAnswer({ canEdit: false })));
+    await mount();
+    expect(screen.getByRole("region", { name: "Report rules" })).toBeInTheDocument();
+    expect(screen.getByLabelText("The fiscal year starts in")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save report rules" })).not.toBeInTheDocument();
+  });
+  it("says the rules cannot be shown for a refused read, and draws no values", async () => {
+    vi.mocked(getRules).mockResolvedValue({ kind: "forbidden" });
+    await mount();
+    expect(screen.getByRole("heading", { name: "Company rules" })).toBeInTheDocument();
+    expect(screen.getByText(/rules cannot be shown to you/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("The fiscal year starts in")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Deadlines" })).toBeInTheDocument();
+  });
+  it("says it cannot tell for a failed read, never the defaults", async () => {
+    vi.mocked(getRules).mockResolvedValue({ kind: "unavailable", reason: "platform 500" });
+    await mount();
+    expect(screen.getByText(/cannot be shown right now \(platform 500\)\. They are not lost, and they are not the defaults/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("The fiscal year starts in")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Reports" })).not.toBeInTheDocument();
   });
 });

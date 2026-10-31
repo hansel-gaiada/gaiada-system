@@ -23,6 +23,8 @@ import { demoSavedRoute } from "./demoSocialSaved";
 import { demoAuditRoute } from "./demoSocialAudit";
 import { demoOnboardingRoute } from "./demoSocialOnboarding";
 import { demoReportSchedulesRoute } from "./demoSocialReportSchedules";
+import { demoRulesRoute } from "./demoSocialRules";
+import { demoChooseTemplate, demoChosenTemplate } from "./demoSocialOnboardingTemplate";
 import {
   DEMO_SIMULATED_NETWORKS, demoAccounts, demoRemoveSimulatedAccounts, demoSeedSimulatedAccounts,
   type DemoAccount, type DemoSimulatedNetwork, type DemoSocialNetwork as AccountsNetwork,
@@ -938,15 +940,17 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
 
   // ── SCP-1c: settings and cycles (BFF §63.4, §63.5) ───────────────────────────────────────────────
   const notApprover = () => err(403, "not_a_social_approver");
-  if (tail === "settings" && m === "GET") return ok(demoSettingsAnswer(userId));
+  if (tail === "settings" && m === "GET") return ok({ ...demoSettingsAnswer(userId), onboardingTemplate: demoChosenTemplate() });
   if (tail === "settings" && m === "PUT") {
     if (!isDemoSocialApprover(userId)) return notApprover();
     const body_ = b() as Record<string, unknown>;
-    for (const k of Object.keys(body_)) if (k !== "bufferWorkingDays" && k !== "boostCandidateFactor") return demoField(400, "unknown_field", { field: k });
+    for (const k of Object.keys(body_)) if (k !== "bufferWorkingDays" && k !== "boostCandidateFactor" && k !== "onboardingTemplateId") return demoField(400, "unknown_field", { field: k });
     const bw = body_.bufferWorkingDays;
     if (bw !== undefined && (typeof bw !== "number" || !Number.isInteger(bw) || bw < 0 || bw > 10)) return demoField(400, "invalid_field", { field: "bufferWorkingDays" });
     const bf = body_.boostCandidateFactor;
     if (bf !== undefined && (typeof bf !== "number" || !Number.isFinite(bf) || bf < 1 || bf > 10 || Math.abs(Math.round(bf * 100) - bf * 100) > 1e-9)) return demoField(400, "invalid_field", { field: "boostCandidateFactor" });
+    // SCP-5 W5-C5 (BFF §63.29.2): the company's onboarding template; null clears it, anything but a live project template is refused by its field.
+    if (body_.onboardingTemplateId !== undefined && !demoChooseTemplate(body_.onboardingTemplateId)) return demoField(400, "invalid_field", { field: "onboardingTemplateId" });
     if (typeof bw === "number") cyclesStore.bufferWorkingDays = bw;
     if (typeof bf === "number") cyclesStore.boostCandidateFactor = Math.round(bf * 100) / 100;
     // the server recomputes every open cycle's ready-by in the same call
@@ -955,7 +959,7 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
       const next = demoWalkBack(c.deadline, cyclesStore.bufferWorkingDays);
       if (next !== c.readyBy) { c.readyBy = next; recomputed += 1; }
     }
-    return ok({ ...demoSettingsAnswer(userId), cyclesRecomputed: recomputed });
+    return ok({ ...demoSettingsAnswer(userId), onboardingTemplate: demoChosenTemplate(), cyclesRecomputed: recomputed });
   }
   if (tail === "cycles" && m === "GET") {
     const month = params.get("month") || todayIsoInDisplayZone().slice(0, 7);
@@ -1005,6 +1009,8 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   if (tail === "team" && m === "GET") return demoTeamRoute(params, userId);
   // ── SCP-5 W5-A6: report automation (BFF §63.24.9), in demoSocialReportSchedules.ts (before the reports: it also answers the progress of its own runs) ─────────────────────
   { const schedules = demoReportSchedulesRoute(m, tail, body, userId); if (schedules) return schedules; }
+  // ── SCP-5 W5-C5: the company rules (BFF §63.30), in demoSocialRules.ts ─────────────────────────────────────────────────────────────
+  { const rules = demoRulesRoute(m, tail, params, body, userId); if (rules) return rules; }
   // ── SCP-5a: the monthly report (BFF §63.18), in demoSocialReports.ts ───────────────────────────────────────────────────────────
   // ── SCP-5 W5-A4: "Generate with AI" runs and the company's rules (BFF §63.24.5, §63.30.4), in demoSocialReportRuns.ts; asked first, as `reports/generate` would read as a report id ──
   { const runs = demoReportRunsRoute(m, tail, params, body, userId); if (runs) return runs; }
