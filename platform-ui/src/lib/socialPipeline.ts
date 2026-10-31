@@ -278,6 +278,9 @@ export const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   audit_final: "This audit is final, so it cannot change. A final audit is a dated record; start a new one for the client instead.",
   audit_attached: "This prospect audit is already attached to another client.",
   not_a_prospect_audit: "Only a prospect's audit can be attached to a client.",
+  idea_not_found: "That idea is gone. It may have been deleted. Reload the report.",
+  idea_planned: "That idea is already in a plan, so it cannot change. Discard its post first to free it.",
+  cycle_closed: "That plan month is already over. Pick a later month.",
 };
 
 /**
