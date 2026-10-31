@@ -1,0 +1,11 @@
+[Unit]
+# M5-P5b2: every 15 minutes. STATUS: PROTOTYPED. Not installed. See ai-crawler-pull.service.
+Description=Gaiada AI-crawler log pull, every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+Unit=ai-crawler-pull.service
+
+[Install]
+WantedBy=timers.target
