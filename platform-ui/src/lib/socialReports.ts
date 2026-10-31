@@ -13,7 +13,7 @@ import { isIsoDate } from "./contracts";
 import type { ReportDocument } from "./reports";
 import { shiftMonth } from "./socialClient";
 import { refusalText, REFUSAL_WORDS, type Refusal } from "./socialPipeline";
-import { anyPeriodLabel, isKindTab, isShortKind, nextWord, type KindTab } from "./socialReportKinds";
+import { anyPeriodLabel, isKindTab, isPeriodicKind, isShortKind, nextWord, periodHasStarted, periodLabel, shiftPeriod, type KindTab } from "./socialReportKinds";
 
 const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
@@ -209,6 +209,31 @@ export function asReportDetail(raw: unknown): SocialReportDetail {
 export const FORM_TABLE_KEYS: readonly string[] = ["notes", "action_plan"];
 export function numbersDocument(doc: ReportDocument): ReportDocument {
   return { ...doc, tables: doc.tables.filter((t) => !FORM_TABLE_KEYS.includes(t.key)) };
+}
+
+/** The tables a short kind's page draws under their own headings, so the numbers block does not draw them twice. */
+export const SHORT_TABLE_KEYS: readonly string[] = ["best_post", "next_period"];
+export const tableOf = (doc: ReportDocument, key: string): ReportDocument["tables"][number] | undefined => doc.tables.find((t) => t.key === key);
+export const documentWithout = (doc: ReportDocument, keys: readonly string[]): ReportDocument => ({ ...doc, tables: doc.tables.filter((t) => !keys.includes(t.key)) });
+
+/** A neighbouring period of a short report: its label, and the client's report of it when there is one. */
+export interface ReportNavLink { period: string; label: string; reportId: string | null }
+
+/**
+ * The period before and the period after a report of a periodic kind (BFF §63.24.7: "its period's navigation"), each the same client's report of the same kind when `rows` has one. The period after
+ * is null while it has not begun (the server refuses a period in the future); the period before is always offered.
+ */
+export function reportNav(
+  r: { engagementId: string; kind: string; period: string | null }, rows: readonly Pick<SocialReportRow, "id" | "engagementId" | "kind" | "period">[], today: string, fiscalYearStartMonth = 1,
+): { prev: ReportNavLink | null; next: ReportNavLink | null } {
+  if (!isPeriodicKind(r.kind) || !r.period) return { prev: null, next: null };
+  const link = (delta: number): ReportNavLink | null => {
+    const period = shiftPeriod(r.kind as never, r.period!, delta, fiscalYearStartMonth);
+    if (!period || (delta > 0 && !periodHasStarted(r.kind as never, period, today, fiscalYearStartMonth))) return null;
+    const found = rows.find((x) => x.engagementId === r.engagementId && x.kind === r.kind && x.period === period);
+    return { period, label: periodLabel(r.kind as never, period, fiscalYearStartMonth), reportId: found?.id ?? null };
+  };
+  return { prev: link(-1), next: link(1) };
 }
 
 // ── "Draft with AI" (POST reports/:id/ai-draft) and "Draft this month's report" (POST engagements/:id/reports) ──
