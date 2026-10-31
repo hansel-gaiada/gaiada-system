@@ -8,10 +8,11 @@ import "server-only";
 // THE GATE is the client's would-be post (63.25.2): the client's officer and the four approvers write; anyone else is 403 `not_officer_or_approver`, a client contact the plain 403. Reading is any staff
 // member. THE ORDER of every write: the idea or client (404), the gate (403), the body (400 `missing_field` / `invalid_field` + `field`), then the idea's state (409 `idea_planned`). "Add to next plan" makes a
 // real `planned` post of the picked cycle through the pipeline store's own create (so the next read of the pipeline shows it), links it both ways, and a post made so reads its idea (`idea`). The company's
-// metric rule is the seed's: required. An idea has no `simulated` mark (it is typed text). The discard release (a discarded post frees its idea) is not twinned: the demo's pipeline has no discard.
+// metric rule is the seed's: required. An idea has no `simulated` mark (it is typed text). Discarding the planned post frees its idea (`releaseIdeaOfPost`, hooked into the pipeline's `release_idea` effect); archiving does not.
 //
 // THE DATA is invented: Northwind's report for last month has an idea in each state, the planned one in next month's cycle.
 import { PIPE_ENGAGEMENTS, PIPE_POSTS, allocStore, cyclesStore, demoCreatePost, demoMonthShift, isClientContact, isDemoSocialApprover, setDemoIdeaReader, who, type DemoResult } from "./demoSocialPipeline";
+import { setDemoPostDiscardHook } from "./demoSocialPipelineRun";
 import { demoReports } from "./demoSocialReports";
 import { todayIsoInDisplayZone } from "./format";
 import { METRIC_MAX, SAW_MAX, SUGGESTION_MAX } from "./socialIdeas";
@@ -148,6 +149,16 @@ function remove(ideaId: string, userId: string): DemoResult {
   g.idea.deleted = true;
   return ok({ deleted: true, id: g.idea.id });
 }
+
+/** The server's `release_idea`: the idea of a discarded post goes back to Shared if it had been shared, else Proposed, and loses its post. */
+export function releaseIdeaOfPost(postId: string, s: IdeaStore = store): void {
+  const i = s.ideas.find((x) => x.postId === postId && !x.deleted);
+  if (!i) return;
+  i.status = i.sharedAt ? "shared" : "proposed";
+  i.postId = null;
+  i.cycleId = null;
+}
+setDemoPostDiscardHook((postId) => releaseIdeaOfPost(postId));
 
 /** The idea routes by `tail`; null for any other path or method (the caller falls through). */
 export function demoIdeasRoute(method: string, tail: string, _params: URLSearchParams, body: string | undefined, userId: string): DemoResult | null {

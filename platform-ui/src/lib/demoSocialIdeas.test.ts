@@ -130,3 +130,30 @@ describe("share, plan and delete", () => {
     expect(actionsFor(by("proposed"), list(USER.officer2).canWrite).remove).toBe(false);
   });
 });
+
+describe("discarding the planned post releases its idea; archiving does not", () => {
+  const planned = (shareFirst: boolean) => {
+    const id = (call("POST", `engagements/${NORTH}/ideas`, USER.officer, { ...mine, saw: `Release probe ${shareFirst}` }).json as { idea: { id: string } }).idea.id;
+    if (shareFirst) call("POST", `ideas/${id}/share`, USER.officer);
+    const j = call("POST", `ideas/${id}/plan`, USER.officer, { cycleId: NEXT_CYCLE }).json as { post: { id: string } };
+    return { id, postId: j.post.id };
+  };
+  const idea = (id: string) => list().items.find((i) => i.id === id)!;
+  const act = (postId: string, action: string, params: Record<string, unknown> = {}) =>
+    call("POST", `posts/${postId}/actions`, USER.officer, { action, expectedStatus: "planned", actionId: crypto.randomUUID(), ...params });
+
+  it("a shared idea goes back to Shared, a proposed one to Proposed, and both lose their post", () => {
+    for (const shared of [true, false]) {
+      const { id, postId } = planned(shared);
+      expect(idea(id).status).toBe("planned");
+      expect(act(postId, "discard").status).toBe(200);
+      expect(idea(id)).toMatchObject({ status: shared ? "shared" : "proposed", post: null });
+      expect(PIPE_POSTS.some((p) => p.id === postId)).toBe(false);
+    }
+  });
+  it("archive leaves the idea planned with its post", () => {
+    const { id, postId } = planned(true);
+    expect(act(postId, "archive", { reason: "The client paused this campaign." }).status).toBe(200);
+    expect(idea(id)).toMatchObject({ status: "planned", post: { id: postId } });
+  });
+});
