@@ -2,6 +2,7 @@
 // api/:tenantId/modules/search/properties/:id/ . Contract: docs/FRONTEND-BFF-CONTRACT.md section 28h. Rules and guarantees: tracking-tags.service.ts.
 //   GET  tracking-tags?webdeskTenant=<slug>&site=<siteId>   Cerbos resource_search_property · read         (the value is public: it ends up in the site's HTML)
 //   PUT  tracking-tags/linkedin  {webdeskTenant, site, partnerId}   Cerbos resource_search_property · manage_tags   (search manager, company admin)
+//   PUT  tracking-tags/google-ads  {webdeskTenant, site, ids, conversions}   Cerbos resource_search_property · manage_tags   (M5-P4g)
 //
 // Authorize BEFORE validating (a denial never depends on the body or the query): the PUT's `manage_tags` check runs before the body is
 // looked at, so a denial test with a valid body really tests authorization. 403 (not allowed) and 404 (not this company's property) are
@@ -12,8 +13,8 @@ import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import {
-  TrackingTagsError, parseSiteQuery, putLinkedinPartnerId, readTrackingTags,
-  type TrackingTagsPutResponse, type TrackingTagsView,
+  TrackingTagsError, parseSiteQuery, putGoogleAds, putLinkedinPartnerId, readTrackingTags,
+  type GoogleAdsPutResponse, type TrackingTagsPutResponse, type TrackingTagsView,
 } from "./tracking-tags.service";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -58,6 +59,20 @@ export class SearchTrackingTagsController {
     await this.gate(req, tenantId, id, "manage_tags");
     try {
       return await putLinkedinPartnerId(req.principal, tenantId, id.toLowerCase(), body);
+    } catch (e) {
+      throw asHttp(e);
+    }
+  }
+
+  @Put("properties/:id/tracking-tags/google-ads")
+  @HttpCode(200)
+  @Header("Cache-Control", "no-store")
+  async putGoogleAds(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string, @Body() body: unknown,
+  ): Promise<GoogleAdsPutResponse> {
+    await this.gate(req, tenantId, id, "manage_tags");
+    try {
+      return await putGoogleAds(req.principal, tenantId, id.toLowerCase(), body);
     } catch (e) {
       throw asHttp(e);
     }

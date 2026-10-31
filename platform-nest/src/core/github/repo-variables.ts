@@ -1,7 +1,8 @@
 // M5-P4 (WSK-D92, docs/blueprints/webdesk-design-v2.md section 14) — the GitHub calls the "Tracking tags" feature needs: read, create,
-// update and delete ONE repository Actions VARIABLE. The one variable today is `PUBLIC_LINKEDIN_PARTNER_ID`, which the gaiada.com
-// rebuild workflow reads as `${{ vars.PUBLIC_LINKEDIN_PARTNER_ID }}` and bakes into the LinkedIn Insight tag. Staff set it from the ERP;
-// it reaches the site on its NEXT rebuild.
+// update and delete a repository Actions VARIABLE. The variables today are `PUBLIC_LINKEDIN_PARTNER_ID`, which the gaiada.com
+// rebuild workflow reads as `${{ vars.PUBLIC_LINKEDIN_PARTNER_ID }}` and bakes into the LinkedIn Insight tag, and (M5-P4g) the two Google
+// Ads variables `PUBLIC_GOOGLE_ADS_IDS` and `PUBLIC_GOOGLE_ADS_CONVERSIONS`, read the same way. Staff set them from the ERP; they reach
+// the site on its NEXT rebuild.
 //
 //   GET    /repos/{o}/{r}/actions/variables/{name}    -> {name, value, updated_at} | 404 (unset)
 //   POST   /repos/{o}/{r}/actions/variables           {name, value} -> 201 (create); 409 when the name already exists
@@ -11,7 +12,7 @@
 // ── A VARIABLE IS NOT A SECRET, AND THE NAME IS AN ALLOW-LIST ─────────────────────────────────────
 // A repository variable is plain text GitHub returns on a read, so unlike org-secrets.ts this file reads values back. What it must never
 // do is let a request choose WHICH variable: every call below refuses a name that is not in `ALLOWED_REPO_VARIABLES` (a constant here, not
-// a parameter any route passes through), so the feature can touch exactly the variable it exists for and no other repo setting.
+// a parameter any route passes through), so the feature can touch exactly the variables it exists for and no other repo setting.
 //
 // ── NO EGRESS HERE, NO CREDENTIAL HERE ────────────────────────────────────────────────────────────
 // Every request goes through a `GitCaller` (git-data.ts): production binds it to `githubRequest(orgTenant, "erp", actor, ...)`, tests to
@@ -29,7 +30,11 @@ import { githubStatusOf } from "./git-data";
 
 /** The ONLY variable names the ERP may read or write through this file. */
 export const LINKEDIN_PARTNER_ID_VARIABLE = "PUBLIC_LINKEDIN_PARTNER_ID";
-export const ALLOWED_REPO_VARIABLES: readonly string[] = [LINKEDIN_PARTNER_ID_VARIABLE];
+/** M5-P4g: comma-separated Google Ads tag ids (`AW-123456789,AW-987654321`). */
+export const GOOGLE_ADS_IDS_VARIABLE = "PUBLIC_GOOGLE_ADS_IDS";
+/** M5-P4g: comma-separated conversions (`lead=AW-123456789/abcDEF,whatsapp=AW-123456789/xyz`). */
+export const GOOGLE_ADS_CONVERSIONS_VARIABLE = "PUBLIC_GOOGLE_ADS_CONVERSIONS";
+export const ALLOWED_REPO_VARIABLES: readonly string[] = [LINKEDIN_PARTNER_ID_VARIABLE, GOOGLE_ADS_IDS_VARIABLE, GOOGLE_ADS_CONVERSIONS_VARIABLE];
 
 /** The permission the ERP GitHub App needs for these calls, as a 403 names it. */
 export const REPO_VARIABLES_PERMISSION = "actions_variables";
