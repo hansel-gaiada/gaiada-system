@@ -67,7 +67,8 @@ describe("the picker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save the choice" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Not saved. That is not a live project template of this company.");
     vi.mocked(chooseOnboardingTemplate).mockResolvedValue(fail("not_a_social_approver", 403, undefined, "choose"));
-    fireEvent.click(screen.getByRole("button", { name: "Save the choice" }));
+    // The alert can show while the first save still reads "Working…": wait for the button to come back before the second click.
+    fireEvent.click(await screen.findByRole("button", { name: "Save the choice" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(PLAN_REFUSAL_REASON.replace("change this", "choose the onboarding template")));
   });
   it("offers no picker and no steps to a person who may not choose, and says what the template is", () => {
