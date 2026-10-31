@@ -21,7 +21,7 @@ import { createCompany, createUser, addMembership, createClient } from "../../te
 import { registerModule, resetModules } from "../registry";
 import { resetCoreRollupProviders, syncMetricDefinitions } from "../../rollups/engine";
 import { FakeGithub } from "../../core/github/git-data.testkit";
-import { LINKEDIN_PARTNER_ID_VARIABLE } from "../../core/github/repo-variables";
+import { GOOGLE_ADS_CONVERSIONS_VARIABLE, GOOGLE_ADS_IDS_VARIABLE, LINKEDIN_PARTNER_ID_VARIABLE } from "../../core/github/repo-variables";
 import { searchModule } from "./index";
 import { setTrackingTagsDeps } from "./tracking-tags.service";
 
@@ -45,6 +45,8 @@ const S = { modules: ["search"] };
 const SLUG = "tags-co";
 const SITE = "55555555-5555-4555-8555-555555555555";
 const VAR = LINKEDIN_PARTNER_ID_VARIABLE;
+const IDS = GOOGLE_ADS_IDS_VARIABLE;
+const CONV = GOOGLE_ADS_CONVERSIONS_VARIABLE;
 const REPO = "acme-org/acme-site";
 
 describe.skipIf(!TEST_URL)("M5-P4 · tracking tags routes", () => {
@@ -66,6 +68,9 @@ describe.skipIf(!TEST_URL)("M5-P4 · tracking tags routes", () => {
   const put = (payload: unknown, prop = propA) =>
     app.inject({ method: "PUT", url: `/api/${A}/modules/search/properties/${prop}/tracking-tags/linkedin`, headers: { ...asUser(u), "content-type": "application/json" }, payload: JSON.stringify(payload) });
   const body = (over: Record<string, unknown> = {}) => ({ webdeskTenant: SLUG, site: SITE, partnerId: "123456", ...over });
+  const putAds = (payload: unknown, prop = propA) =>
+    app.inject({ method: "PUT", url: `/api/${A}/modules/search/properties/${prop}/tracking-tags/google-ads`, headers: { ...asUser(u), "content-type": "application/json" }, payload: JSON.stringify(payload) });
+  const adsBody = (over: Record<string, unknown> = {}) => ({ webdeskTenant: SLUG, site: SITE, ids: ["AW-123456789"], conversions: { lead: "AW-123456789/abc" }, ...over });
   const rows = () => q<{ actor_id: string; verb: string; target_entity_id: string; metadata: Record<string, unknown> }>(
     `SELECT actor_id, verb, target_entity_id, metadata FROM activities WHERE tenant_id = $1 AND verb IN ('tracking_tag_set','tracking_tag_cleared') ORDER BY occurred_at`, [A]);
 
@@ -157,7 +162,7 @@ describe.skipIf(!TEST_URL)("M5-P4 · tracking tags routes", () => {
       denied.add("resource_search_property:manage_tags");
       const res = await get();
       expect(res.statusCode, res.body).toBe(200);
-      expect(res.json()).toEqual({ linkedin: { partnerId: null }, target: { repo: REPO, variable: VAR }, canManage: false, state: "ok" });
+      expect(res.json()).toEqual({ linkedin: { partnerId: null }, googleAds: { ids: [], conversions: {} }, target: { repo: REPO, variable: VAR }, canManage: false, state: "ok" });
       expect(calls[0]).toMatchObject({ kind: "resource_search_property", action: "read", id: propA, tenantId: A });
     });
 
@@ -260,6 +265,61 @@ describe.skipIf(!TEST_URL)("M5-P4 · tracking tags routes", () => {
       await put(body({ partnerId: "424242" }));
       const g = await get();
       expect(g.json()).toMatchObject({ linkedin: { partnerId: "424242" }, state: "ok", canManage: true });
+    });
+  });
+  describe("google ads (M5-P4g)", () => {
+    it("positive control: manage_tags on the property, then github_repo push at the ORG tenant; two audit rows tagged google_ads", async () => {
+      const res = await putAds(adsBody());
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.json()).toMatchObject({ result: "set", takesEffect: "next_rebuild", target: { repo: REPO, variables: [IDS, CONV] } });
+      expect(calls[0]).toMatchObject({ kind: "resource_search_property", action: "manage_tags", id: propA, tenantId: A });
+      expect(calls).toContainEqual(expect.objectContaining({ kind: "github_repo", action: "push", tenantId: ORG }));
+      expect(gh.variables.get(IDS)?.value).toBe("AW-123456789");
+      expect(gh.variables.get(CONV)?.value).toBe("lead=AW-123456789/abc");
+      const r = await rows();
+      expect(r.map((x) => x.metadata.variable)).toEqual([IDS, CONV]);
+      expect(r.every((x) => x.metadata.tag === "google_ads" && x.target_entity_id === propA && x.actor_id === u)).toBe(true);
+    });
+
+    it("a manage_tags denial with a VALID body is 403: no GitHub call, no audit row; with an INVALID body it is still 403", async () => {
+      denied.add("resource_search_property:manage_tags");
+      expect((await putAds(adsBody())).statusCode).toBe(403);
+      expect((await putAds({ junk: true })).statusCode).toBe(403);
+      expect(gh.calls).toHaveLength(0);
+      expect(await rows()).toEqual([]);
+    });
+
+    it("a github_repo push denial at the org tenant is 403 and nothing is written", async () => {
+      denied.add("github_repo:push");
+      expect((await putAds(adsBody())).statusCode).toBe(403);
+      expect(gh.calls).toHaveLength(0);
+    });
+
+    it("each refusal is a typed 400 with words", async () => {
+      for (const [payload, reason] of [
+        [{ ...adsBody(), partnerId: "1" }, "ads_body_invalid"],
+        [adsBody({ ids: ["AW-1"] }), "ads_id_invalid"],
+        [adsBody({ conversions: { lead: "AW-999999999/x" } }), "ads_conversion_invalid"],
+      ] as const) {
+        const res = await putAds(payload);
+        expect(res.statusCode).toBe(400);
+        expect(res.json()).toMatchObject({ reason });
+        expect(typeof res.json().error).toBe("string");
+      }
+      expect(gh.calls).toHaveLength(0);
+    });
+
+    it("the binding: a mismatched property is 409 tracking_site_mismatch, another company's property is 404", async () => {
+      expect((await putAds(adsBody(), propOther)).statusCode).toBe(409);
+      expect((await putAds(adsBody(), propB)).statusCode).toBe(404);
+      expect(gh.calls).toHaveLength(0);
+    });
+
+    it("the GET returns what the PUT stored, and clearing returns it to empty", async () => {
+      await putAds(adsBody({ conversions: { lead: "AW-123456789/abc", phone: "AW-123456789/p" } }));
+      expect((await get()).json()).toMatchObject({ googleAds: { ids: ["AW-123456789"], conversions: { lead: "AW-123456789/abc", phone: "AW-123456789/p" } } });
+      expect((await putAds(adsBody({ ids: null, conversions: {} }))).json().result).toBe("cleared");
+      expect((await get()).json().googleAds).toEqual({ ids: [], conversions: {} });
     });
   });
 });

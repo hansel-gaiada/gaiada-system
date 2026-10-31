@@ -1,4 +1,6 @@
 // M5-P4 (WSK-D92, docs/blueprints/webdesk-design-v2.md section 14) — "Tracking tags": staff set a site's LinkedIn partner id from the ERP.
+// M5-P4g adds the site's Google Ads tag ids and conversion actions (owner 2026-10-31: "Google ads should be setable in SEO department UI
+// for each of the clients"): two more variables, `PUBLIC_GOOGLE_ADS_IDS` and `PUBLIC_GOOGLE_ADS_CONVERSIONS`, with the same guarantees.
 // Routes in tracking-tags.controller.ts; contract docs/FRONTEND-BFF-CONTRACT.md section 28h.
 //
 // WHAT IT IS. The gaiada.com site (gaiadabali/gaiada-web-revamp) loads LinkedIn's Insight tag only when its build has a partner id (digits)
@@ -7,7 +9,7 @@
 // ERP GitHub App. A change takes effect on the NEXT rebuild of the site; nothing here starts one.
 //
 // WHAT IS GUARANTEED HERE
-//   * One variable only. The name is the constant in core/github/repo-variables.ts, never read from a request; the body names no variable.
+//   * Allow-listed variables only. The names are constants in core/github/repo-variables.ts, never read from a request; no body names one.
 //   * The write is `search_property . manage_tags` (search manager, company admin; NOT plain search staff) and the caller is also
 //     authorized for `github_repo . push` on the GitHub ORG tenant (the same chokepoint step every ordinary repo write takes). The READ
 //     is `search_property . read`, because the value is public: it ends up in the site's HTML.
@@ -17,9 +19,17 @@
 //   * The repo comes from the build-target resolver (`resolveSiteBuildTarget`, staging), never from a request. No target: 409
 //     `no_build_target` on a write, `state: "no_build_target"` on the read.
 //   * Idempotent. The same value twice is one read and no write; the answer says `unchanged`.
-//   * One audit row per ACTUAL write (who, property, repo, variable, old -> new). The value is public, so it is recorded.
+//   * One audit row per ACTUAL write (who, property, repo, variable, old -> new). The value is public, so it is recorded. A Google Ads
+//     save is up to two writes (ids, conversions), so up to two rows; if the second fails after the first landed, the first is audited.
 //   * GitHub being unable to answer is words, never "Not set": a 404 on the variable is confirmed against the repo itself, so a repo the
 //     App cannot see is `github_app_not_installed`, not an empty value (an empty value is a claim).
+//
+// GOOGLE ADS (M5-P4g). The variable contract is shared with the site: `PUBLIC_GOOGLE_ADS_IDS` is 1 to 5 `AW-<6-15 digits>` ids joined by
+// `,`; `PUBLIC_GOOGLE_ADS_CONVERSIONS` is `key=AW-<digits>/<label>` entries (key lead, whatsapp, phone or email, in that order) joined
+// by `,`, each AW id one of the ids. The ERP WRITES that canonical form and READS stored values with the site's own rule (invalid
+// entries dropped, duplicates dropped, first wins), so the card shows what the site will actually use. No ids: both variables are
+// deleted; no conversion: the conversions variable is deleted, never written empty. Write order: set = ids then conversions, clear =
+// conversions then ids, so the site never reads a conversion whose id is gone.
 //
 // TENANCY. The property is read through withTenants([tenant], fn, {modules:['search']}); the GitHub call runs under the org tenant the
 // GHT-1 resolver names for this company (never the URL tenant), as every GitHub write in this codebase does.
@@ -31,7 +41,8 @@ import { erpGitCaller, githubStatusOf, type GitCaller, type RepoRef } from "../.
 import { GithubApiError, GithubNotConfiguredError, GithubRateLimitedError, GithubTokenExchangeError } from "../../core/github/errors";
 import { getRepoInfo } from "../../core/github/org-secrets";
 import {
-  LINKEDIN_PARTNER_ID_VARIABLE, RepoVariableError, deleteRepoVariable, getRepoVariable, setRepoVariable,
+  GOOGLE_ADS_CONVERSIONS_VARIABLE, GOOGLE_ADS_IDS_VARIABLE, LINKEDIN_PARTNER_ID_VARIABLE, RepoVariableError,
+  deleteRepoVariable, getRepoVariable, setRepoVariable,
 } from "../../core/github/repo-variables";
 
 const SEARCH = { modules: ["search"] };
@@ -51,6 +62,9 @@ export type TrackingRefusal =
   | "tracking_query_invalid"
   | "tracking_body_invalid"
   | "partner_id_invalid"
+  | "ads_body_invalid"
+  | "ads_id_invalid"
+  | "ads_conversion_invalid"
   | "tracking_site_mismatch"
   | "no_build_target"
   | "github_org_unavailable"
@@ -65,6 +79,9 @@ const STATUS: Record<TrackingRefusal, 400 | 404 | 409 | 503> = {
   tracking_query_invalid: 400,
   tracking_body_invalid: 400,
   partner_id_invalid: 400,
+  ads_body_invalid: 400,
+  ads_id_invalid: 400,
+  ads_conversion_invalid: 400,
   tracking_site_mismatch: 409,
   no_build_target: 409,
   github_org_unavailable: 503,
@@ -90,6 +107,9 @@ export const TRACKING_WORDS: Record<TrackingRefusal, string> = {
   tracking_query_invalid: "The site is named by webdeskTenant (a slug) and site (an id).",
   tracking_body_invalid: "The request must be exactly { webdeskTenant, site, partnerId }.",
   partner_id_invalid: "The LinkedIn partner id must be digits only (up to 15). To remove it, send null.",
+  ads_body_invalid: "The request must be exactly { webdeskTenant, site, ids, conversions }: ids a list (or null), conversions an object with only the keys lead, whatsapp, phone and email.",
+  ads_id_invalid: "Each Google Ads tag id must look like AW-123456789 (AW- and 6 to 15 digits). Use at most 5 ids and no duplicates.",
+  ads_conversion_invalid: "Each conversion must look like AW-123456789/label (letters, digits, - and _ in the label), and its AW id must be one of the tag ids. Conversions need at least one tag id.",
   tracking_site_mismatch: "This property is not the one for that website: the property's domain is not one of the website's environment domains.",
   no_build_target: "This website has no build repository the ERP can write to yet, so there is nowhere to store the tag. Provision or link the site first.",
   github_org_unavailable: "GitHub cannot be reached for this company: its GitHub organization is not configured or is not registered for this company's group.",
@@ -155,6 +175,110 @@ export function parsePutBody(raw: unknown): PutBody {
   const trimmed = p.trim();
   if (!PARTNER_ID_RE.test(trimmed)) throw new TrackingTagsError("partner_id_invalid", TRACKING_WORDS.partner_id_invalid);
   return { webdeskTenant, site, partnerId: trimmed };
+}
+
+// ── Google Ads: the variable contract (shared with the site) ─────────────────────────────────────
+
+export const ADS_ID_RE = /^AW-[0-9]{6,15}$/;
+/** `AW-<digits>/<label>`: the AW id is group 1, the label group 2. */
+export const ADS_CONVERSION_RE = /^(AW-[0-9]{6,15})\/([A-Za-z0-9_-]{1,64})$/;
+export const ADS_MAX_IDS = 5;
+/** The four conversion keys, in the order the ERP writes them. */
+export const ADS_CONVERSION_KEYS = ["lead", "whatsapp", "phone", "email"] as const;
+export type AdsConversionKey = (typeof ADS_CONVERSION_KEYS)[number];
+export type AdsConversions = { [K in AdsConversionKey]?: string };
+export interface GoogleAds { ids: string[]; conversions: AdsConversions }
+
+const isConversionKey = (k: string): k is AdsConversionKey => (ADS_CONVERSION_KEYS as readonly string[]).includes(k);
+
+/** READ rule for `PUBLIC_GOOGLE_ADS_IDS`, as the site reads it: split on `,`, trim, keep valid ids, drop duplicates (first wins), first 5. */
+export function parseAdsIdsValue(value: string | null): string[] {
+  if (value === null) return [];
+  const out: string[] = [];
+  for (const part of value.split(",")) {
+    const id = part.trim();
+    if (ADS_ID_RE.test(id) && !out.includes(id)) out.push(id);
+  }
+  return out.slice(0, ADS_MAX_IDS);
+}
+
+/**
+ * READ rule for `PUBLIC_GOOGLE_ADS_CONVERSIONS`: split on `,`, split each at the FIRST `=`, trim; keep a known key with a valid value whose
+ * AW id is one of `ids`; the first kept occurrence of a key wins.
+ */
+export function parseAdsConversionsValue(value: string | null, ids: readonly string[]): AdsConversions {
+  const out: AdsConversions = {};
+  if (value === null) return out;
+  for (const part of value.split(",")) {
+    const at = part.indexOf("=");
+    if (at < 0) continue;
+    const key = part.slice(0, at).trim();
+    const val = part.slice(at + 1).trim();
+    if (!isConversionKey(key) || out[key] !== undefined) continue;
+    const m = ADS_CONVERSION_RE.exec(val);
+    if (m && ids.includes(m[1]!)) out[key] = val;
+  }
+  return out;
+}
+
+/** The canonical `PUBLIC_GOOGLE_ADS_IDS` value (joined by `,`, no spaces), or null when there are no ids (the variable is deleted). */
+export function formatAdsIds(ids: readonly string[]): string | null {
+  return ids.length === 0 ? null : ids.join(",");
+}
+
+/** The canonical `PUBLIC_GOOGLE_ADS_CONVERSIONS` value (keys in the order lead, whatsapp, phone, email; only those set), or null when none. */
+export function formatAdsConversions(conversions: AdsConversions): string | null {
+  const parts: string[] = [];
+  for (const k of ADS_CONVERSION_KEYS) {
+    const v = conversions[k];
+    if (v !== undefined) parts.push(`${k}=${v}`);
+  }
+  return parts.length === 0 ? null : parts.join(",");
+}
+
+export interface AdsPutBody extends SiteRefQuery { ids: string[]; conversions: AdsConversions }
+
+const adsRefusal = (r: "ads_body_invalid" | "ads_id_invalid" | "ads_conversion_invalid") => new TrackingTagsError(r, TRACKING_WORDS[r]);
+
+/**
+ * The Google Ads PUT body, EXACTLY `{ webdeskTenant, site, ids, conversions }`. `ids` is a list or null (null or [] clears); `conversions` is
+ * an object with keys among the four, each a string or null (null or "" is not set). Everything is trimmed first.
+ */
+export function parseAdsPutBody(raw: unknown): AdsPutBody {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw adsRefusal("ads_body_invalid");
+  const b = raw as Record<string, unknown>;
+  const keys = Object.keys(b).sort();
+  if (keys.length !== 4 || keys[0] !== "conversions" || keys[1] !== "ids" || keys[2] !== "site" || keys[3] !== "webdeskTenant") throw adsRefusal("ads_body_invalid");
+  const rawIds = b.ids;
+  const rawConv = b.conversions;
+  if (rawIds !== null && !Array.isArray(rawIds)) throw adsRefusal("ads_body_invalid");
+  if (!rawConv || typeof rawConv !== "object" || Array.isArray(rawConv)) throw adsRefusal("ads_body_invalid");
+  const conv = rawConv as Record<string, unknown>;
+  for (const k of Object.keys(conv)) {
+    if (!isConversionKey(k)) throw adsRefusal("ads_body_invalid");
+    const v = conv[k];
+    if (v !== null && typeof v !== "string") throw adsRefusal("ads_body_invalid");
+  }
+  const { webdeskTenant, site } = parseSiteQuery(b);
+
+  const ids: string[] = [];
+  for (const item of (rawIds as unknown[] | null) ?? []) {
+    const id = typeof item === "string" ? item.trim() : "";
+    if (!ADS_ID_RE.test(id) || ids.includes(id)) throw adsRefusal("ads_id_invalid");
+    ids.push(id);
+  }
+  if (ids.length > ADS_MAX_IDS) throw adsRefusal("ads_id_invalid");
+
+  const conversions: AdsConversions = {};
+  for (const k of ADS_CONVERSION_KEYS) {
+    const v = conv[k];
+    const t = typeof v === "string" ? v.trim() : "";
+    if (t === "") continue;
+    const m = ADS_CONVERSION_RE.exec(t);
+    if (!m || !ids.includes(m[1]!)) throw adsRefusal("ads_conversion_invalid");
+    conversions[k] = t;
+  }
+  return { webdeskTenant, site, ids, conversions };
 }
 
 /** `https://github.com/o/r` style repos as `owner/name`. */
@@ -237,6 +361,8 @@ export type TrackingState = "ok" | "no_build_target" | "github_unavailable";
 
 export interface TrackingTagsView {
   linkedin: { partnerId: string | null };
+  /** M5-P4g: what the site will use, read with the site's own rule. Empty for every state that is not `ok`. */
+  googleAds: GoogleAds;
   target: { repo: string; variable: string } | null;
   canManage: boolean;
   state: TrackingState;
@@ -244,6 +370,8 @@ export interface TrackingTagsView {
 }
 
 export type PutResult = "set" | "cleared" | "unchanged";
+
+const noAds = (): GoogleAds => ({ ids: [], conversions: {} });
 
 export interface TrackingTagsPutResponse {
   linkedin: { partnerId: string | null };
@@ -307,7 +435,7 @@ async function confirmedUnset(call: GitCaller, repo: RepoRef): Promise<void> {
 // ── use cases ────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * GET: the stored partner id and where it lives. The caller was authorized for `read` on the property by the controller. A GitHub
+ * GET: the stored partner id and Google Ads settings, and where they live. The caller was authorized for `read` on the property by the controller. A GitHub
  * problem is `state: "github_unavailable"` with words (the page still draws); a mismatched binding or a missing property is an error.
  */
 export async function readTrackingTags(principal: Principal, tenantId: string, propertyId: string, site: SiteRefQuery): Promise<TrackingTagsView> {
@@ -315,7 +443,7 @@ export async function readTrackingTags(principal: Principal, tenantId: string, p
   const canManage = await deps.canManage(principal, tenantId, propertyId);
   const target = await deps.stagingRepo(tenantId, site);
   if (!target.ok) {
-    return { linkedin: { partnerId: null }, target: null, canManage: false, state: "no_build_target", reason: TRACKING_WORDS.no_build_target };
+    return { linkedin: { partnerId: null }, googleAds: noAds(), target: null, canManage: false, state: "no_build_target", reason: TRACKING_WORDS.no_build_target };
   }
   const repo = parseRepo(target.repo);
   const shown = { repo: target.repo, variable: LINKEDIN_PARTNER_ID_VARIABLE };
@@ -324,12 +452,17 @@ export async function readTrackingTags(principal: Principal, tenantId: string, p
     if (!org.ok) throw new TrackingTagsError("github_org_unavailable", TRACKING_WORDS.github_org_unavailable);
     const call = deps.git(org.tenantId, principal.userId ?? "system");
     const v = await getRepoVariable(call, repo, LINKEDIN_PARTNER_ID_VARIABLE);
-    if (!v) await confirmedUnset(call, repo);
-    return { linkedin: { partnerId: partnerIdOfValue(v?.value ?? null) }, target: shown, canManage, state: "ok" };
+    const adsIds = await getRepoVariable(call, repo, GOOGLE_ADS_IDS_VARIABLE);
+    const adsConv = await getRepoVariable(call, repo, GOOGLE_ADS_CONVERSIONS_VARIABLE);
+    // A null read is "not set" only for a repo the App can see: confirmed once, however many of the three came back null.
+    if (!v || !adsIds || !adsConv) await confirmedUnset(call, repo);
+    const ids = parseAdsIdsValue(adsIds?.value ?? null);
+    const googleAds: GoogleAds = { ids, conversions: parseAdsConversionsValue(adsConv?.value ?? null, ids) };
+    return { linkedin: { partnerId: partnerIdOfValue(v?.value ?? null) }, googleAds, target: shown, canManage, state: "ok" };
   } catch (err) {
     const c = classifyGithubFailure(err);
     if (!c) throw err;
-    return { linkedin: { partnerId: null }, target: shown, canManage, state: "github_unavailable", reason: c.message };
+    return { linkedin: { partnerId: null }, googleAds: noAds(), target: shown, canManage, state: "github_unavailable", reason: c.message };
   }
 }
 
@@ -389,4 +522,90 @@ export async function putLinkedinPartnerId(principal: Principal, tenantId: strin
     });
   }
   return { linkedin: { partnerId: body.partnerId }, target: shown, result, takesEffect: "next_rebuild" };
+}
+
+export interface GoogleAdsPutResponse {
+  googleAds: GoogleAds;
+  target: { repo: string; variables: [typeof GOOGLE_ADS_IDS_VARIABLE, typeof GOOGLE_ADS_CONVERSIONS_VARIABLE] };
+  result: PutResult;
+  /** Always "next_rebuild": the site reads the variables when it is built; nothing here starts a build. */
+  takesEffect: "next_rebuild";
+}
+
+/**
+ * PUT (M5-P4g): set or clear a site's Google Ads ids and conversions. Same order as the LinkedIn PUT: validate the body, bind the site,
+ * resolve the repo, authorize the GitHub write at the org tenant, read the current values, write only what differs, audit each write.
+ * Set writes ids then conversions; clear writes conversions then ids. "Unchanged" compares canonical forms: a stored value that reads as
+ * the wanted one is left alone, and a clear deletes any stored variable, even one that reads as nothing (an empty answer is a claim).
+ */
+export async function putGoogleAds(principal: Principal, tenantId: string, propertyId: string, rawBody: unknown): Promise<GoogleAdsPutResponse> {
+  const body = parseAdsPutBody(rawBody);
+  const { property } = await bind(tenantId, propertyId, body);
+  const target = await deps.stagingRepo(tenantId, body);
+  if (!target.ok) throw new TrackingTagsError("no_build_target", TRACKING_WORDS.no_build_target);
+  const repo = parseRepo(target.repo);
+  const shown: GoogleAdsPutResponse["target"] = { repo: target.repo, variables: [GOOGLE_ADS_IDS_VARIABLE, GOOGLE_ADS_CONVERSIONS_VARIABLE] };
+
+  const org = await deps.resolveOrg(tenantId);
+  if (!org.ok) throw new TrackingTagsError("github_org_unavailable", TRACKING_WORDS.github_org_unavailable);
+  await deps.authorizePush(principal, org.tenantId);
+
+  const actorId = principal.userId;
+  const call = deps.git(org.tenantId, actorId ?? "system");
+  const wantIds = formatAdsIds(body.ids);
+  const wantConv = formatAdsConversions(body.conversions);
+  const writes: Array<{ variable: string; from: string | null; to: string | null }> = [];
+  const auditWrites = async (): Promise<void> => {
+    for (const w of writes) {
+      await deps.audit(tenantId, actorId, w.to === null ? TRACKING_VERB_CLEARED : TRACKING_VERB_SET, property.id, {
+        tag: "google_ads",
+        repo: repoLabel(repo),
+        variable: w.variable,
+        from: w.from,
+        to: w.to,
+        webdeskTenant: body.webdeskTenant,
+        site: body.site,
+      });
+    }
+  };
+
+  try {
+    const curIds = await getRepoVariable(call, repo, GOOGLE_ADS_IDS_VARIABLE);
+    const curConv = await getRepoVariable(call, repo, GOOGLE_ADS_CONVERSIONS_VARIABLE);
+    if (!curIds || !curConv) await confirmedUnset(call, repo);
+    const readIds = parseAdsIdsValue(curIds?.value ?? null);
+    // Nothing wanted: unchanged only when the variable is absent. Something wanted: unchanged when the stored value reads as it.
+    const idsSame = wantIds === null ? curIds === null : formatAdsIds(readIds) === wantIds;
+    const convSame = wantConv === null ? curConv === null : formatAdsConversions(parseAdsConversionsValue(curConv?.value ?? null, readIds)) === wantConv;
+
+    const writeIds = async (): Promise<void> => {
+      if (idsSame) return;
+      if (wantIds === null) await deleteRepoVariable(call, repo, GOOGLE_ADS_IDS_VARIABLE);
+      else await setRepoVariable(call, repo, GOOGLE_ADS_IDS_VARIABLE, wantIds);
+      writes.push({ variable: GOOGLE_ADS_IDS_VARIABLE, from: curIds?.value ?? null, to: wantIds });
+    };
+    const writeConv = async (): Promise<void> => {
+      if (convSame) return;
+      if (wantConv === null) await deleteRepoVariable(call, repo, GOOGLE_ADS_CONVERSIONS_VARIABLE);
+      else await setRepoVariable(call, repo, GOOGLE_ADS_CONVERSIONS_VARIABLE, wantConv);
+      writes.push({ variable: GOOGLE_ADS_CONVERSIONS_VARIABLE, from: curConv?.value ?? null, to: wantConv });
+    };
+    if (wantIds === null) {
+      await writeConv();
+      await writeIds();
+    } else {
+      await writeIds();
+      await writeConv();
+    }
+  } catch (err) {
+    // A write that landed before the failure is still a write: audit it, then report the failure.
+    await auditWrites();
+    const c = classifyGithubFailure(err);
+    if (c) throw c;
+    throw err;
+  }
+
+  await auditWrites();
+  const result: PutResult = writes.length === 0 ? "unchanged" : wantIds === null ? "cleared" : "set";
+  return { googleAds: { ids: body.ids, conversions: body.conversions }, target: shown, result, takesEffect: "next_rebuild" };
 }

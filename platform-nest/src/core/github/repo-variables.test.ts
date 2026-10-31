@@ -17,8 +17,8 @@ describe("repo variables (fake GitHub)", () => {
     call = gh.caller();
   });
 
-  it("the allow-list is exactly the one variable the feature exists for", () => {
-    expect(ALLOWED_REPO_VARIABLES).toEqual(["PUBLIC_LINKEDIN_PARTNER_ID"]);
+  it("the allow-list is exactly the variables the feature exists for", () => {
+    expect(ALLOWED_REPO_VARIABLES).toEqual(["PUBLIC_LINKEDIN_PARTNER_ID", "PUBLIC_GOOGLE_ADS_IDS", "PUBLIC_GOOGLE_ADS_CONVERSIONS"]);
   });
 
   it("an unset variable is null (404 is an answer), a set one comes back with its value", async () => {
@@ -90,7 +90,7 @@ describe("repo variables (fake GitHub)", () => {
   });
 
   it("any other name is refused BEFORE a request is made, on every call", async () => {
-    for (const bad of ["WEBDESK_DEPLOY_TOKEN", "public_linkedin_partner_id", "../x", ""]) {
+    for (const bad of ["WEBDESK_DEPLOY_TOKEN", "public_linkedin_partner_id", "PUBLIC_GOOGLE_ADS_ID", "PUBLIC_GOOGLE_ADS_IDS ", "public_google_ads_conversions", "PUBLIC_GOOGLE_ADS_TOKEN", "../x", ""]) {
       for (const run of [
         () => getRepoVariable(call, repo, bad),
         () => createRepoVariable(call, repo, bad, "1"),
