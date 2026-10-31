@@ -87,7 +87,7 @@ describe("the Social menu: which entries a person sees", () => {
     expect(link("Home")).toHaveAttribute("href", "/departments/d-soc");
     expect(link("Tasks")).toHaveAttribute("href", "/me/tasks");
     expect(link("Calendar")).toHaveAttribute("href", "/departments/d-soc/calendar");
-    expect(link("Saved")).toHaveAttribute("href", "/departments/d-soc/assets");
+    expect(link("Saved")).toHaveAttribute("href", "/departments/d-soc/saved");
     expect(link("Notifications")).toHaveAttribute("href", "/me/inbox");
     // SCP-5a: the Reports pin opens the Social reports tab (the row's first tab, Mine, until that tab existed).
     expect(link("Reports")).toHaveAttribute("href", "/departments/d-soc/social-reports");
@@ -205,7 +205,7 @@ describe("the Social menu: which entry is current", () => {
     const { unmount } = renderAt(socialModel(head), "/departments/d-soc/calendar");
     expect(current()).toEqual(["Calendar"]);
     unmount();
-    renderAt(socialModel(head), "/departments/d-soc/assets");
+    renderAt(socialModel(head), "/departments/d-soc/saved");
     expect(current()).toEqual(["Saved"]);
   });
 

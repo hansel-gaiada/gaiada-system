@@ -138,10 +138,12 @@ describe("skins: the pinned menu", () => {
     expect(pinnedFor("social", rows)!.some((p) => p.key === "calendar")).toBe(false);
   });
 
-  it("Saved opens the department's Asset Library, and the Social Media toolkit declares that tab", () => {
+  it("Saved opens the content bank (publish › saved, SCP-5e), and the Asset Library tab and the Social Media toolkit's declaration of it stay", () => {
     const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
-    expect(pinnedFor("social", allRows(soc))!.find((p) => p.key === "saved")).toMatchObject({ kind: "link", label: "Saved", href: "/departments/d-soc/assets", row: "publish", tab: "assets" });
+    expect(SKINS.social.pinned!.find((p) => p.key === "saved")).toEqual({ kind: "row", key: "saved", row: "publish", tab: "saved", label: "Saved", icon: "bookmark" });
+    expect(pinnedFor("social", allRows(soc))!.find((p) => p.key === "saved")).toMatchObject({ kind: "link", label: "Saved", href: "/departments/d-soc/saved", row: "publish", tab: "saved" });
     expect(bespokeToolkit("social-media")!.groups.flatMap((g) => g.tabs).some((t) => t.key === "assets" && t.path === "assets")).toBe(true);
+    expect(allRows(soc).find((r) => r.key === "publish")!.tabs.map((t) => t.key)).toEqual(["calendar", "composer", "inbox", "assets", "saved"]);
   });
 
   it("carries a row's count on the entry that opens the row's first tab", () => {
