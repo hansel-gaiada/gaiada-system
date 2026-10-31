@@ -4053,6 +4053,33 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const portfolioMatch = p.match(/^\/api\/([^/]+)\/modules\/webdev\/console\/portfolio$/);
   if (portfolioMatch && m === "GET") return ok(demoPortfolio());
 
+  // ── Web Dev site DNS checklist + task (M6-P6i / M6-P6p) ────────────────────────────────
+  // GET .../webdev/sites/:id/dns · GET .../dns/task · POST .../dns/recheck. Without these the generic fallback answers an unknown GET with
+  // `ok([])` (an ARRAY), which the card's strict parser would show as contract drift. One shape for every site: records not yet pointing,
+  // an open task, and a recheck that stays pending.
+  const dnsMatch = p.match(/^\/api\/([^/]+)\/modules\/webdev\/sites\/([^/]+)\/dns(\/task|\/recheck)?$/);
+  if (dnsMatch) {
+    const siteId = decodeURIComponent(dnsMatch[2]);
+    const records = [{ type: "A", name: "demo.example", target: "203.0.113.10" }];
+    const task = {
+      id: "demo-dns-link-1", siteId, state: "open", domain: "demo.example", taskId: "demo-dns-task-1", records,
+      assigneeSource: "project_owner", assigneeUserId: "demo-hansel", closedBy: null, closedAt: null,
+      lastCheckedAt: "2026-10-30T08:00:00.000Z", lastCheckReason: "no_records", erpSawPointing: false,
+    };
+    if (dnsMatch[3] === "/task" && m === "GET") return ok(task);
+    if (dnsMatch[3] === "/recheck" && m === "POST") return ok({ task, check: { state: "pending", reason: "no_records" } });
+    if (!dnsMatch[3] && m === "GET") {
+      return ok({
+        siteId, domain: "demo.example", environment: "production", hostKind: "our-box", hostRef: "helios", recordsOwner: "owner",
+        checklist: { state: "ready", records, instruction: null },
+        observed: { a: [], aaaa: [], cname: [] },
+        check: { state: "pending", reason: "no_records" },
+        checkedAt: "2026-10-30T08:00:00.000Z",
+        property: { id: null, state: "none" },
+      });
+    }
+  }
+
   const connListMatch = p.match(/^\/api\/([^/]+)\/integrations\/connections$/);
   if (connListMatch) {
     const t = connListMatch[1];
