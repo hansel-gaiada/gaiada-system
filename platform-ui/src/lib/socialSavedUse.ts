@@ -44,7 +44,8 @@ export interface PickEntry {
   useCount: number | null;
 }
 
-export interface PickGroup { key: string; label: string; entries: PickEntry[] }
+/** `more`: the picker read only the first pages of this collection (the server still had a cursor), so the list is not the whole bank. */
+export interface PickGroup { key: string; label: string; entries: PickEntry[]; more: boolean }
 
 export const targetOf = (e: Pick<PickEntry, "holds">): UseTarget => (e.holds === "text" ? "caption" : e.holds === "hashtags" ? "hashtags" : e.holds === "link" ? "rawAssets" : "design");
 
@@ -86,7 +87,7 @@ export function pickerGroups(collections: readonly SavedCollection[], pages: rea
         entries.push({ key: `h:${s.key}`, id: null, title: s.name, holds: "hashtags", body: null, url: null, media: null, source: null, aiNote: null, tags: s.tags, versionId: null, useWords: "From the brand book", useCount: null });
       }
     }
-    out.push({ key: c.key, label: c.key === OTHER_KEY ? "Other" : c.label, entries });
+    out.push({ key: c.key, label: c.key === OTHER_KEY ? "Other" : c.label, entries, more: page.nextCursor !== null });
   }
   return out;
 }

@@ -77,8 +77,8 @@ export async function loadSavedPicker(engagementId: string): Promise<SavedPicker
   const root = `${base(tenant)}/engagements/${encodeURIComponent(engagementId)}/saved`;
   try {
     const { collections } = asCollections(await platformFetch<unknown>(root, userId));
-    const pages: SavedPage[] = [];
-    for (const c of collections.filter((x) => x.key !== "posts")) {
+    // The collections are read side by side; each one's pages in turn (a page needs the cursor of the one before).
+    const pages: SavedPage[] = await Promise.all(collections.filter((x) => x.key !== "posts").map(async (c) => {
       let cursor: string | null = null;
       const items: unknown[] = [];
       for (let n = 0; n < PICKER_PAGES_MAX; n++) {
@@ -89,8 +89,8 @@ export async function loadSavedPicker(engagementId: string): Promise<SavedPicker
         cursor = typeof o.nextCursor === "string" && o.nextCursor !== "" ? o.nextCursor : null;
         if (!cursor) break;
       }
-      pages.push(asSavedPage({ items, nextCursor: cursor }, c.key));
-    }
+      return asSavedPage({ items, nextCursor: cursor }, c.key);
+    }));
     return { collections, pages };
   } catch (e) {
     if (e instanceof PlatformError) return null;

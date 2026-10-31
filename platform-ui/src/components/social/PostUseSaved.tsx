@@ -100,6 +100,7 @@ function Picker({ post, author, onClose, onResult }: { post: PipelinePost; autho
             {shown.map((g) => (
               <fieldset key={g.key} className="scp-usepick__group">
                 <legend>{g.label}</legend>
+                {g.more && <p className="scp-note" style={{ margin: "0 0 8px" }}>Only the newest items of this category are listed here. Search, or open the Saved page, to find older ones.</p>}
                 <ul className="scp-usepick__list">
                   {g.entries.map((e) => {
                     const off = unusableWords(post, e);

@@ -125,6 +125,12 @@ describe("the picker's groups and search", () => {
     expect(groups[2].entries[0]).toMatchObject({ id: null, holds: "hashtags", tags: ["#local", "fresh"], useWords: "From the brand book" });
   });
 
+  it("says when a category was cut short (the server still had a cursor), so a short list is never taken for the whole bank", () => {
+    expect(groups.map((g) => g.more)).toEqual([false, false, false]);
+    const cut = pickerGroups(collections.collections, [asSavedPage({ items: [{ id: "i-9", category: "captions", holds: "text", title: "Old opener", body: "x", useCount: 0, used: false }], nextCursor: "c-2" }, "captions")]);
+    expect(cut).toEqual([expect.objectContaining({ key: "captions", more: true })]);
+  });
+
   it("searches every word across the title, the text, the link and the tags, case-blind; an empty search keeps all and a group left empty is dropped", () => {
     expect(searchGroups(groups, "")).toHaveLength(3);
     expect(searchGroups(groups, "LOCAL").map((g) => g.label)).toEqual(["Captions", "Hashtag sets"]);
