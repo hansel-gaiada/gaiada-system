@@ -374,6 +374,21 @@ export function stepDueFor(rule: CycleStepDue["rule"]): CycleStepDue {
   return { rule: "none" };
 }
 
+/** A cycle step's due rule in words. A month offset is stored 0 to -3 and said as months before the content month. */
+export function stepDueWords(d: CycleStepDue): string {
+  if (d.rule === "none") return "No due date";
+  if (d.rule === "report_due_day") return d.monthOffset === 0 ? "On the client's report day, in the content month" : `On the client's report day, ${-d.monthOffset} ${d.monthOffset === -1 ? "month" : "months"} before the content month`;
+  const days = d.lessWorkingDays > 0 ? `${d.lessWorkingDays} working ${d.lessWorkingDays === 1 ? "day" : "days"}` : "";
+  if (d.lessEstimatesFrom) return `The ready-by date less the estimates from ${STEP_KEY_LABEL[d.lessEstimatesFrom]} on${days ? `, and ${days}` : ""}`;
+  return days ? `The ready-by date less ${days}` : "On the ready-by date";
+}
+/** A cycle step's close condition in words. */
+export function autoCloseWords(a: CycleAutoClose): string {
+  const base = AUTO_CLOSE_LABEL[a.rule] ?? a.rule;
+  if (a.rule === "report_delivered") return a.reportMonthOffset === 0 ? `${base} for the content month` : `${base} for ${-a.reportMonthOffset} ${a.reportMonthOffset === -1 ? "month" : "months"} before the content month`;
+  return base;
+}
+
 /** The due rules a kind can take (the server refuses any other). */
 export function dueChoices(kind: PeriodicKind): Array<{ rule: ReportDueRule["rule"]; label: string }> {
   const out: Array<{ rule: ReportDueRule["rule"]; label: string }> = [{ rule: "working_days_after", label: "Some working days after the period ends" }];

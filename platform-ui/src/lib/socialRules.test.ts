@@ -5,7 +5,7 @@ import { REFUSAL_WORDS } from "./socialPipeline";
 import { PLAN_REFUSAL_REASON } from "./socialCycles";
 import {
   RULES_SECTIONS, asHistory, asPreview, asRulesAnswer, autoCloseFor, checkPartOn, cloneJson, diffRows, diffRules, dueChoices, dueFor, dueRuleWords, fieldWords, historyWords,
-  invalidFieldWords, moveItem, newBand, newCategory, newDimension, newStep, previewBody, pruneCheck, rulesRefusalText, sameJson, slugKey, stepDueFor, valueWords, type RulesDoc,
+  invalidFieldWords, moveItem, stepDueWords, autoCloseWords, newBand, newCategory, newDimension, newStep, previewBody, pruneCheck, rulesRefusalText, sameJson, slugKey, stepDueFor, valueWords, type RulesDoc,
 } from "./socialRules";
 
 // SCP-5 W5-C5 (BFF §63.30): the rules' parsers, words and the pure helpers the editors share. The document under test is the seed twin itself.
@@ -119,6 +119,17 @@ describe("diffs and words", () => {
     expect(rows.map((r) => r.path)).toEqual(["reports.kinds.weekly.due.rule", "reports.kinds.weekly.due.n", "reports.kinds.weekly.due.weekday", "reports.kinds.weekly.due.week"]);
     expect(rows[0]).toMatchObject({ words: "Weekly report, the due date, the rule", now: "weekday", wasOrDefault: "working_days_after" });
     expect(sameJson(DOC.reports, doc().reports)).toBe(true);
+  });
+  it("words a cycle step's due rule and close condition", () => {
+    expect(stepDueWords({ rule: "none" })).toBe("No due date");
+    expect(stepDueWords({ rule: "ready_by", lessEstimatesFrom: null, lessWorkingDays: 0 })).toBe("On the ready-by date");
+    expect(stepDueWords({ rule: "ready_by", lessEstimatesFrom: null, lessWorkingDays: 1 })).toBe("The ready-by date less 1 working day");
+    expect(stepDueWords({ rule: "ready_by", lessEstimatesFrom: "design", lessWorkingDays: 2 })).toBe("The ready-by date less the estimates from Design on, and 2 working days");
+    expect(stepDueWords({ rule: "report_due_day", monthOffset: 0 })).toBe("On the client's report day, in the content month");
+    expect(stepDueWords({ rule: "report_due_day", monthOffset: -2 })).toBe("On the client's report day, 2 months before the content month");
+    expect(autoCloseWords({ rule: "manual" })).toBe("Only by hand");
+    expect(autoCloseWords({ rule: "report_delivered", reportMonthOffset: -1 })).toBe("When the monthly report is delivered for 1 month before the content month");
+    expect(autoCloseWords({ rule: "copy_locked" })).toBe("When the copy is locked");
   });
   it("words a due rule", () => {
     expect(dueRuleWords({ rule: "working_days_after", n: 0 })).toBe("On the day the period ends");

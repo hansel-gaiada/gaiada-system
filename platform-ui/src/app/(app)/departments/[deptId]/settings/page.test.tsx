@@ -81,7 +81,8 @@ beforeEach(() => {
   vi.mocked(getAllocation).mockReset().mockResolvedValue(ok([alloc(), alloc({ engagementId: "e-beta", clientName: "Brand Beta", stepEstimates: {} })]));
   vi.mocked(saveAllocation).mockReset();
   vi.mocked(getReportSchedules).mockReset().mockResolvedValue({ kind: "forbidden" });
-  vi.mocked(getRules).mockReset().mockResolvedValue(ok(rulesAnswer()));
+  // The rules sections hold hundreds of controls, and a role query over them is slow: the other tests leave them out (a refused read draws one short line) and "Company rules" below reads them in.
+  vi.mocked(getRules).mockReset().mockResolvedValue({ kind: "forbidden" });
 });
 afterEach(() => vi.useRealTimers());
 
@@ -428,6 +429,7 @@ describe("Report automation", () => {
 
 // SCP-5 W5-C5 (BFF §63.30.5): the company's rules sit between the deadline table and Report automation, one section each. A refused read says so and a failed one says it cannot tell: neither draws the defaults.
 describe("Company rules", () => {
+  beforeEach(() => { vi.mocked(getRules).mockResolvedValue(ok(rulesAnswer())); });
   it("reads the rules for the signed-in person and draws the Reports section after the deadlines and before Report automation", async () => {
     vi.mocked(getReportSchedules).mockResolvedValue(ok([]));
     await mount();
@@ -437,6 +439,13 @@ describe("Company rules", () => {
     expect(reports.compareDocumentPosition(screen.getByRole("heading", { name: "Report automation" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("region", { name: "Report rules" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Ideas for next month" })).toBeInTheDocument();
+  });
+  it("draws the Monthly cycle section after Reports, with the company's steps", async () => {
+    await mount();
+    const cycle = screen.getByRole("heading", { name: "Monthly cycle" });
+    expect(screen.getByRole("heading", { name: "Reports" }).compareDocumentPosition(cycle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Cycle steps" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem", { name: /^Step \d+:/ })).toHaveLength(6);
   });
   it("offers the allocation's open clients to the previews", async () => {
     await mount();
