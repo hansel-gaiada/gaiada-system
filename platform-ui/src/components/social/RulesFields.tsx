@@ -28,7 +28,7 @@ function Shell({ id, path, label, hint, def, wide, children }: Common & { id: st
 const describedBy = (id: string, hint: boolean, err: boolean): string | undefined => [hint ? `${id}-hint` : "", err ? `${id}-err` : ""].filter(Boolean).join(" ") || undefined;
 
 /** A whole number. It keeps what is typed; an empty or non-numeric box sends NaN (JSON null), and the server names the field. */
-export function NumberField({ path, label, value, onChange, min, max, hint, def, wide }: Common & { value: number; onChange: (n: number) => void; min?: number; max?: number }) {
+export function NumberField({ path, label, value, onChange, min, max, step = 1, hint, def, wide }: Common & { value: number; onChange: (n: number) => void; min?: number; max?: number; step?: number }) {
   const id = useId();
   const err = useFieldError(path);
   const [text, setText] = useState(Number.isFinite(value) ? String(value) : "");
@@ -40,7 +40,7 @@ export function NumberField({ path, label, value, onChange, min, max, hint, def,
   return (
     <Shell id={id} path={path} label={label} hint={hint} def={def} wide={wide}>
       <input
-        id={id} className="scp-input" type="number" inputMode="numeric" min={min} max={max} step={1} value={text} data-rule-field={path}
+        id={id} className="scp-input" type="number" inputMode={step === 1 ? "numeric" : "decimal"} min={min} max={max} step={step} value={text} data-rule-field={path}
         aria-invalid={!!err || Number.isNaN(typed)} aria-describedby={describedBy(id, !!hint, !!err)}
         onChange={(e) => { const n = e.target.value.trim() === "" ? NaN : Number(e.target.value); last.current = n; setText(e.target.value); onChange(n); }}
       />

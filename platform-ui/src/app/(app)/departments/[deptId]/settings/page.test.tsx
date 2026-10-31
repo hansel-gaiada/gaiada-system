@@ -447,6 +447,13 @@ describe("Company rules", () => {
     expect(screen.getByRole("region", { name: "Cycle steps" })).toBeInTheDocument();
     expect(screen.getAllByRole("listitem", { name: /^Step \d+:/ })).toHaveLength(6);
   });
+  it("draws the Audit scorecard section after Monthly cycle, with the twelve dimensions and the bands", async () => {
+    await mount();
+    expect(screen.getByRole("heading", { name: "Monthly cycle" }).compareDocumentPosition(screen.getByRole("heading", { name: "Audit scorecard" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Scorecard" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem", { name: /^Dimension \d+:/ })).toHaveLength(12);
+    expect(screen.getAllByRole("listitem", { name: /^Band \d:/ })).toHaveLength(3);
+  });
   it("offers the allocation's open clients to the previews", async () => {
     await mount();
     const pick = screen.getAllByLabelText("For client")[0];
