@@ -248,12 +248,13 @@ export function asCreatedReport(raw: unknown): CreatedReport {
 }
 
 /** What the page says about a draft's source. The template is a plain, honest fallback and says so. */
-export function draftedViaWords(via: string): string {
+export function draftedViaWords(via: string, kind = "monthly"): string {
+  const span = kind === "monthly" ? "month" : "period";
   switch (via) {
-    case "ai": return "Drafted with AI from the period's numbers and the client's brand notes. Read it, change what you want, and save.";
-    case "template": case "fallback": return "The AI could not be used just now (it was down, or its answer stated a number it was not given), so this is the plain template from the period's numbers. Read it, change what you want, and save.";
+    case "ai": return `Drafted with AI from the ${span}'s numbers and the client's brand notes. Read it, change what you want, and save.`;
+    case "template": case "fallback": return `The AI could not be used just now (it was down, or its answer stated a number it was not given), so this is the plain template from the ${span}'s numbers. Read it, change what you want, and save.`;
     case "none": return "AI drafting is turned off for this kind of report, so it starts empty. Write it, then save.";
-    case "existing": return "This client already has a report for that period, so it is opened as it is.";
+    case "existing": return `This client already has a report for that ${span}, so it is opened as it is.`;
     default: return "Drafted.";
   }
 }

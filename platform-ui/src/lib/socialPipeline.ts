@@ -97,6 +97,8 @@ export interface PipelinePost {
   simulatedPublishNow: SimulatedPublishOffer | null;
   /** SCP-4b (BFF §63.6.2, §63.11): the post's boost: its open one, else its latest, or null. Optional so a hand-built post of a test need not name it. */
   boost?: BoostRow | null;
+  /** SCP-5c (BFF §63.25.4): the idea this post was planned from, or null. Optional so a hand-built post of a test need not name it. */
+  idea?: { id: string; saw: string; metric: string | null; suggestion: string } | null;
   /** The client's latest decision (SCP-2, BFF §63.6.2): given in the portal, or recorded by staff on the client's behalf. Null before one, and again once the
    *  post goes back to the client. */
   clientDecision: ClientDecision | null;
@@ -189,6 +191,7 @@ export function asPipelinePost(raw: unknown): PipelinePost {
       : null,
     clientDecision: asClientDecision(o.clientDecision),
     boost: asBoostRowOrNull(o.boost),
+    idea: isObj(o.idea) && typeof o.idea.id === "string" ? { id: o.idea.id, saw: str(o.idea.saw) ?? "", metric: str(o.idea.metric), suggestion: str(o.idea.suggestion) ?? "" } : null,
     copyLog: arr(o.copyLog).filter(isObj).map((c) => ({
       field: str(c.field) ?? "", before: c.before, after: c.after, via: str(c.via) ?? "", by: person(c.by), suggestedBy: person(c.suggestedBy), stage: str(c.stage) ?? "", at: str(c.at) ?? "",
     })),
