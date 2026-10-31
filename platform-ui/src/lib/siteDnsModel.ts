@@ -55,6 +55,12 @@ export type DnsRead<T> = { state: "ok"; data: T } | { state: "unavailable"; kind
 
 export class SiteDnsShapeError extends Error {}
 
+/** Who sees "Check DNS now" (a cosmetic gate; the server's `webdev_site` `update` decides). `webdev.provision` is the closest capability the UI
+ *  has: Cerbos `update` is company_admin, manager and the webdev module manager, and `webdev.provision` is company_admin and manager. The
+ *  module-manager tier is not mirrored (rbac.ts), so that person sees no button, like every other webdev action today. It lives here, not in
+ *  siteDnsActions.ts, because a "use server" file may export only async functions (`next build` refuses anything else). */
+export const RECHECK_CAPABILITY = "webdev.provision" as const;
+
 const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const bad = (why: string): never => { throw new SiteDnsShapeError(why); };
 

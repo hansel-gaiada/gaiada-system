@@ -6,15 +6,11 @@ import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { can } from "./rbac";
-import { SiteDnsShapeError, parseRecheck, recheckRefusalSentence, type Recheck } from "./siteDnsModel";
+import { RECHECK_CAPABILITY, SiteDnsShapeError, parseRecheck, recheckRefusalSentence, type Recheck } from "./siteDnsModel";
 
 export type RecheckResult =
   | { ok: true; task: Recheck["task"]; check: Recheck["check"] }
   | { ok: false; message: string };
-
-/** `webdev.provision` is the closest capability the UI has: Cerbos `webdev_site` `update` is company_admin, manager and the webdev module manager,
- *  and `webdev.provision` is company_admin and manager. The module-manager tier is not mirrored (rbac.ts), so that person sees no button. */
-export const RECHECK_CAPABILITY = "webdev.provision" as const;
 
 export async function recheckSiteDnsAction(siteId: string): Promise<RecheckResult> {
   const userId = await getSessionUserId();
