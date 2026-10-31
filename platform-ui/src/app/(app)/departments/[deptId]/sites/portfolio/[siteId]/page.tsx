@@ -24,7 +24,8 @@ import { ProbeConsentRequest } from "@/components/webdesk/ProbeConsentRequest";
 import { formatDateTime } from "@/lib/format";
 import { can } from "@/lib/rbac";
 import { readSiteDns, readSiteDnsTask } from "@/lib/siteDns-data";
-import { recheckSiteDnsAction, RECHECK_CAPABILITY } from "@/lib/siteDnsActions";
+import { recheckSiteDnsAction } from "@/lib/siteDnsActions";
+import { RECHECK_CAPABILITY } from "@/lib/siteDnsModel";
 import { SiteDnsCard } from "@/components/webdesk/SiteDnsCard";
 import "@/components/webdesk/webdesk.css";
 
