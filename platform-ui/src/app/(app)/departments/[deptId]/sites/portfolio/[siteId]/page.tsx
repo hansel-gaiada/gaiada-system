@@ -22,6 +22,10 @@ import { consentState, type ConsentState } from "@/lib/probeConsent";
 import { requestProbeConsentAction } from "@/lib/probeConsentActions";
 import { ProbeConsentRequest } from "@/components/webdesk/ProbeConsentRequest";
 import { formatDateTime } from "@/lib/format";
+import { can } from "@/lib/rbac";
+import { readSiteDns, readSiteDnsTask } from "@/lib/siteDns-data";
+import { recheckSiteDnsAction, RECHECK_CAPABILITY } from "@/lib/siteDnsActions";
+import { SiteDnsCard } from "@/components/webdesk/SiteDnsCard";
 import "@/components/webdesk/webdesk.css";
 
 type Params = Promise<{ deptId: string; siteId: string }>;
@@ -85,6 +89,13 @@ export default async function PortfolioSitePage({ params }: { params: Params }) 
     : { available: true, pending: [] };
   const consent = consentState(site, consentReads.available ? consentReads.pending : []);
   const consentUnavailable = !consentReads.available;
+
+  // The DNS card's two reads (M6-P6i checklist, M6-P6p task). `site.id` is the `webdev_sites` row id both routes take. Independent: each
+  // read carries its own failure, so one failing never hides the other.
+  const [dns, dnsTask] = await Promise.all([
+    readSiteDns(userId, tenant, site.id),
+    readSiteDnsTask(userId, tenant, site.id),
+  ]);
 
   const listHref = `/departments/${deptId}/sites/portfolio`;
   const server = serverOf(site);
@@ -200,6 +211,15 @@ export default async function PortfolioSitePage({ params }: { params: Params }) 
           </div>
         </Card>
       ) : null}
+
+      {/* Domain and DNS (M6-P6i, M6-P6p): the records this domain needs, what public DNS answers, and the task that asks a person to
+          create them. Read-only except "Check DNS now". */}
+      <SiteDnsCard
+        dns={dns}
+        task={dnsTask}
+        canRecheck={can(me, RECHECK_CAPABILITY, tenant)}
+        onRecheck={recheckSiteDnsAction.bind(null, site.id)}
+      />
 
       {/* Health, reported rather than computed. This surface runs no check of its own — it says what
           the monitoring module says, and when it cannot reach that module it says THAT. The two

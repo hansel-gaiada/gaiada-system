@@ -258,3 +258,11 @@
 .wd-consent__actions { display: flex; gap: var(--space-8); }
 .wd-consent__error { margin: 0; font: 400 12px var(--font-body); color: var(--status-critical-fg); }
 .wd-consent__done { margin: 0; font: 400 13px var(--font-body); color: var(--ink-muted); }
+
+/* ── Domain and DNS card (M6-P6i / M6-P6p) ───────────────────────────────────────────────────── */
+.wd-dns__section { margin-top: var(--space-20); }
+.wd-dns__label { display: block; margin: 0 0 var(--space-8); }
+.wd-dns__line { margin: 0 0 var(--space-8); font: 400 14px var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
+.wd-dns__observed { margin: 0 0 var(--space-8); padding-left: var(--space-20); font: 400 14px var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
+.wd-dns__result { margin: var(--space-8) 0; padding: var(--space-8) var(--space-12); border-left: 2px solid var(--accent-fg); font: 400 14px var(--font-body); color: var(--text-primary); }
+.wd-dns__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); margin: var(--space-8) 0 0; }
