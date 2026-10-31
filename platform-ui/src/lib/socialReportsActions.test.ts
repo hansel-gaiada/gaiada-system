@@ -11,7 +11,7 @@ import { getSessionUserId } from "./session-server";
 import { getActiveTenant } from "./tenant";
 import { platformFetch, PlatformError } from "./platform";
 import { CHECK_SEND_REASON, WRITE_REASON } from "./socialReports";
-import { approveReport, deliverReport, draftMonthlyReport, proposeReportDraft, saveReport, sendBackReport, submitReport } from "./socialReportsActions";
+import { approveReport, deliverReport, draftReport, proposeReportDraft, readRun, saveReport, sendBackReport, startRun, submitReport } from "./socialReportsActions";
 
 const B = "/api/co-a/modules/social";
 const calls = () => vi.mocked(platformFetch).mock.calls.map((c) => [String((c[2] as { method?: string } | undefined)?.method ?? "GET"), c[0]]);
@@ -24,12 +24,31 @@ beforeEach(() => {
 });
 
 describe("the report writes", () => {
-  it("draft: POST engagements/:id/reports with a monthly kind, the month and the click's id", async () => {
+  it("draft: POST engagements/:id/reports with the kind, its period and the click's id", async () => {
     vi.mocked(platformFetch).mockResolvedValue({ id: "r1", status: "draft", simulated: true, draftedVia: "fallback" });
-    const r = await draftMonthlyReport("e 1", "2026-09", "11111111-1111-4111-8111-111111111111");
+    const r = await draftReport("e 1", "monthly", "2026-09", "11111111-1111-4111-8111-111111111111");
     expect(calls()).toEqual([["POST", `${B}/engagements/e%201/reports`]]);
     expect(body()).toEqual({ id: "11111111-1111-4111-8111-111111111111", kind: "monthly", period: "2026-09" });
     expect(r).toEqual({ ok: true, report: { id: "r1", status: "draft", simulated: true, draftedVia: "fallback" } });
+    await draftReport("e1", "weekly", "2026-W46", "22222222-2222-4222-8222-222222222222");
+    expect(body(1)).toEqual({ id: "22222222-2222-4222-8222-222222222222", kind: "weekly", period: "2026-W46" });
+  });
+  it("save a short kind: PATCH with the summary and the next-period line, and no notes or plan", async () => {
+    await saveReport("r1", { narrativeMd: "S", nextPeriod: null });
+    expect(body()).toEqual({ narrativeMd: "S", nextPeriod: null });
+  });
+  it("start a run: POST reports/generate with the click's id, the kind and the period, and NO engagementIds (the server lists the clients, once)", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ runId: "run1", kind: "weekly", period: "2026-W45", total: 4, clients: [] });
+    const r = await startRun("weekly", "2026-W45", "33333333-3333-4333-8333-333333333333");
+    expect(calls()).toEqual([["POST", `${B}/reports/generate`]]);
+    expect(body()).toEqual({ id: "33333333-3333-4333-8333-333333333333", kind: "weekly", period: "2026-W45" });
+    expect(r).toEqual({ ok: true, run: { runId: "run1", kind: "weekly", period: "2026-W45", total: 4 } });
+  });
+  it("read a run: GET reports/generate/:runId, nothing written", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ runId: "run 1", kind: "daily", period: "2026-11-09", status: "done", total: 1, done: 1, results: [], usage: {} });
+    const r = await readRun("run 1");
+    expect(calls()).toEqual([["GET", `${B}/reports/generate/run%201`]]);
+    expect(r).toMatchObject({ ok: true, run: { runId: "run 1", status: "done" } });
   });
   it("save: PATCH reports/:id with exactly the narrative, the notes and the plan, and nothing about the status", async () => {
     const r = await saveReport("r1", { narrativeMd: "N", notes: { followers: { insight: "i", suggestion: "s" } }, actionPlan: [{ action: "a", owner: "agency" }] });
@@ -74,6 +93,26 @@ describe("refusals come back as data, in words", () => {
     expect(await saveReport("r1", { narrativeMd: "", notes: {}, actionPlan: [] })).toMatchObject({ ok: false, refusal: { field: "actionPlan" }, message: expect.stringMatching(/at most 10 actions/) });
     vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(503, "pdf_render_not_configured"));
     expect(await deliverReport("r1")).toMatchObject({ ok: false, message: expect.stringMatching(/PDF maker is not set up/) });
+  });
+  it("a run refused while another is going carries that run's id, and a missing run is said in words", async () => {
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(409, "generation_running", undefined, undefined, undefined, { error: "generation_running", detail: { runId: "run9" } }));
+    expect(await startRun("daily", "2026-11-09", "id")).toMatchObject({ ok: false, refusal: { status: 409, error: "generation_running", detail: { runId: "run9" } }, message: expect.stringMatching(/already going/) });
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(404, "run_not_found"));
+    expect(await readRun("nope")).toMatchObject({ ok: false, message: expect.stringMatching(/run was not found/) });
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(403, "not authorized: cerbos denied create on social_report"));
+    expect(await startRun("daily", "2026-11-09", "id")).toMatchObject({ ok: false, message: expect.stringMatching(/officer drafts for their own clients/) });
+  });
+  it("the periodic kinds' refusals come back with the contract's codes and their sentences", async () => {
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(400, "period_not_over"));
+    expect(await draftReport("e1", "quarterly", "2026-Q4", "id")).toMatchObject({ ok: false, refusal: { error: "period_not_over" }, message: expect.stringMatching(/not over yet/) });
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(409, "report_kind_off"));
+    expect(await draftReport("e1", "weekly", "2026-W45", "id")).toMatchObject({ ok: false, message: expect.stringMatching(/turned this kind of report off/) });
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(409, "ai_drafting_off"));
+    expect(await proposeReportDraft("r1")).toMatchObject({ ok: false, message: expect.stringMatching(/written by hand/) });
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(400, "summary_missing"));
+    expect(await approveReport("r1")).toMatchObject({ ok: false, message: expect.stringMatching(/no summary/) });
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(400, "summary_numbers_changed", undefined, undefined, undefined, { error: "summary_numbers_changed", detail: { numbers: ["7"] } }));
+    expect(await submitReport("r1")).toMatchObject({ ok: false, refusal: { detail: { numbers: ["7"] } }, message: expect.stringMatching(/moved: 7/) });
   });
   it("a signed-out person or a person with no company gets a refusal, not a request", async () => {
     vi.mocked(getSessionUserId).mockResolvedValueOnce(null as never);

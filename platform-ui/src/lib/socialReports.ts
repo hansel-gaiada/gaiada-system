@@ -344,8 +344,10 @@ export function buildReportBody(f: ReportForm): FormCheck {
 export const CHECK_SEND_REASON = "Only the Social Media head, the GM, the owner and the superadmin check and send a report. The officer writes it and submits it.";
 export const WRITE_REASON = "Only this client's officer and the Social Media approvers can write the report. The Social Media head or the GM can change who the officer is on the Allocation page.";
 export const DRAFT_REASON = "Only the client's officer and the Social Media approvers can draft a report.";
+/** Under a 403 of "Generate with AI" for every client (BFF §63.24.5): the officer drafts for their own clients, the four for all of them. */
+export const GENERATE_REASON = "Only a client's officer and the Social Media approvers can generate reports. The officer drafts for their own clients; the Social Media head, the GM, the owner and the superadmin draft for every client.";
 
-export type ReportWriteKind = "create" | "save" | "submit" | "send_back" | "ai_draft" | "approve" | "deliver";
+export type ReportWriteKind = "create" | "save" | "submit" | "send_back" | "ai_draft" | "approve" | "deliver" | "generate";
 
 /** The refusal words by code (BFF §63.18: the SMM-23 codes stay, `notes_incomplete` is new). */
 export const REPORT_REFUSAL_WORDS: Readonly<Record<string, string>> = {
@@ -392,13 +394,15 @@ function forbiddenWords(kind: ReportWriteKind): string {
   switch (kind) {
     case "approve": case "send_back": case "deliver": return CHECK_SEND_REASON;
     case "create": return DRAFT_REASON;
+    case "generate": return GENERATE_REASON;
     default: return WRITE_REASON;
   }
 }
 
 /** A refusal in a sentence. A 403 says who may do what was asked; a 404 says the report or client is gone. The code stays the contract; this is the words. */
 export function reportRefusalText(r: Refusal, kind: ReportWriteKind = "save"): string {
-  if (r.status === 403) return r.reason === "assurance_required" ? refusalText(r) : `You cannot do this. ${forbiddenWords(kind)}`;
+  if (r.status === 403) return r.reason === "assurance_required" || r.error === "automation_cannot_act" ? refusalText(r) : `You cannot do this. ${forbiddenWords(kind)}`;
+  if (r.status === 404 && r.error === "run_not_found") return REPORT_REFUSAL_WORDS.run_not_found;
   if (r.status === 404) return /engagement/i.test(r.error) ? "That client was not found, or is not yours to see." : "That report was not found. It may have been removed.";
   if (r.error === "invalid_field" || r.error === "missing_field") return (r.field && FIELD_WORDS[r.field]) || refusalText(r);
   if (r.error === "summary_numbers_changed") {

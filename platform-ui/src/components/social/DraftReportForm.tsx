@@ -5,7 +5,7 @@
 import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RefusalNote } from "@/components/social/PostRefusal";
-import { draftMonthlyReport } from "@/lib/socialReportsActions";
+import { draftReport } from "@/lib/socialReportsActions";
 import { newUuid, shiftMonth } from "@/lib/socialClient";
 import { periodWords, reportHref } from "@/lib/socialReports";
 import type { Refusal } from "@/lib/socialPipeline";
@@ -26,7 +26,7 @@ export function DraftReportForm({ deptId, clients, thisMonth }: { deptId: string
   function draft() {
     setRefusal(null);
     start(async () => {
-      const r = await draftMonthlyReport(engagementId, period, newUuid());
+      const r = await draftReport(engagementId, "monthly", period, newUuid());
       if (!r.ok) { setRefusal({ refusal: r.refusal, message: r.message }); return; }
       router.push(reportHref(deptId, r.report.id));
     });
