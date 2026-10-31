@@ -170,10 +170,15 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     // AIP-15 (2026-10-30) added `core.ai_usage.{read_unit,lift_stop}`: a department head reads their own unit's AI usage (totals and
     // people) and lifts its soft stop (PERMISSION-CONTRACT §58). Unit-bounded like the rest; `read_company` (company admins, the GM seat, the
     // owner), `read_people` and `manage` (the owner's only) are not in this bundle.
+    //
+    // AIP-23b (2026-10-31) added `core.dept_assistant_note.{read,decide,delete,pin}`: a department head reads, approves, rejects, deletes and
+    // pins their own unit's department notes (PERMISSION-CONTRACT §59). Unit-bounded like the rest; `propose` and `withdraw` (held through
+    // the member grant at company scope, narrowed by home placement and authorship) and `manage` (the owner's only) are not in this bundle.
     expect(keys).toEqual([
       "agency.campaign_part.update",
       "core.ai_usage.lift_stop", "core.ai_usage.read_unit",
       "core.creative_asset.decide_review",
+      "core.dept_assistant_note.decide", "core.dept_assistant_note.delete", "core.dept_assistant_note.pin", "core.dept_assistant_note.read",
       "core.dept_assistant_preamble.edit", "core.dept_assistant_preamble.read",
       "core.dept_notice.edit", "core.dept_notice.post", "core.dept_notice.withdraw",
       "core.position.assign", "core.position.read", "core.position.unassign",
@@ -210,6 +215,9 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     expect(keys).not.toContain("core.ai_usage.read_company");
     expect(keys).not.toContain("core.ai_usage.read_people");
     expect(keys).not.toContain("core.ai_usage.manage");
+    expect(keys).not.toContain("core.dept_assistant_note.propose");
+    expect(keys).not.toContain("core.dept_assistant_note.withdraw");
+    expect(keys).not.toContain("core.dept_assistant_note.manage");
   });
 
   it("ACCEPTANCE: a legitimate client@company grant is completely unaffected", async () => {

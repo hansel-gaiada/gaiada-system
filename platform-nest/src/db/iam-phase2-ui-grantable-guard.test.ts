@@ -107,9 +107,11 @@ describe.skipIf(!TEST_URL)("IAM Phase 2 (P2-03) — permissions.ui_grantable + p
     // true -> false: the owner ruled "only superadmin and owner", so no custom role or position may carry it. Deliberate pin update.
     // AIP-15 (2026-10-30, PERMISSION-CONTRACT §58, migration 202610300310): 33 -> 35. core.ai_usage.read_people and core.ai_usage.manage
     // are the owner's only (OWNER_EXTENSION), so no custom role or position may carry them. Deliberate pin update.
-    it("exactly 35 rows are ui_grantable=false (15 relationship + 10 portal.* + core.contract.countersign + finance.config.set_bank_details + the 5 social approver keys + assistant.brain.choose_provider + core.ai_usage.read_people and .manage)", async () => {
+    // AIP-23b (2026-10-31, PERMISSION-CONTRACT §59, migration 202610311710): 35 -> 36. core.dept_assistant_note.manage is the owner's only
+    // (OWNER_EXTENSION, owner ruling AIP-D21), so no custom role or position may carry it. Deliberate pin update.
+    it("exactly 36 rows are ui_grantable=false (15 relationship + 10 portal.* + core.contract.countersign + finance.config.set_bank_details + the 5 social approver keys + assistant.brain.choose_provider + core.ai_usage.read_people and .manage + core.dept_assistant_note.manage)", async () => {
       const { rows } = await withGlobal((c) => c.query<{ n: string }>(`SELECT count(*)::text AS n FROM permissions WHERE ui_grantable = false`));
-      expect(Number(rows[0].n)).toBe(35);
+      expect(Number(rows[0].n)).toBe(36);
     });
   });
 

@@ -186,6 +186,11 @@ const DIRECT: Record<string, RealRole[]> = {
   // it; its reach is proved by the live matrix (cerbos-ai-usage.test.ts). Kept byte-aligned across generate-role-bundles.mjs and
   // role-permission-parity.db.test.ts.
   ai_usage_gm_seat: [],
+  // AIP-23b (PERMISSION-CONTRACT §59): the GM seat on the `dept_assistant_note` kind maps to NO real role, exactly as ai_usage_gm_seat: a seat
+  // is a relationship computed per company from that company's own positions (fed as `gmIds`), not a grant, so no bundle carries a key
+  // through it; its reach is proved by the live matrix (cerbos-dept-assistant-note.test.ts). Kept byte-aligned across
+  // generate-role-bundles.mjs and role-permission-parity.db.test.ts.
+  dept_note_gm_seat: [],
 };
 
 // MON-10b — the five module-tiered monitoring kinds (0117 + the completion migration). BARE names,

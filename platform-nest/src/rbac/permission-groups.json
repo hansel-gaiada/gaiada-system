@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 178,
-      "grantablePermissionsInCatalog": 494,
-      "permissionsCoveredByGroups": 455,
+      "groups": 179,
+      "grantablePermissionsInCatalog": 501,
+      "permissionsCoveredByGroups": 462,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 118
@@ -2077,6 +2077,22 @@
         "core.ai_usage.read_people",
         "core.ai_usage.manage",
         "core.ai_usage.lift_stop"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "assistant_dept_notes",
+      "name": "Assistant: department notes",
+      "domain": "core",
+      "description": "A department's shared assistant memory (AIP-23, owner rulings AIP-D20 to AIP-D24): short work facts a person suggests and an approver approves before the assistant uses them. Staff whose home placement is in the department read the approved notes and suggest new ones (viewers read only), and anyone takes back their own; the department's head approves, rejects, deletes and pins over their own unit's subtree, and the GM in every department; only the owner manages every department (manage is not UI-grantable). Agents, automation, contributors and client accounts reach nothing.",
+      "permissions": [
+        "core.dept_assistant_note.read",
+        "core.dept_assistant_note.propose",
+        "core.dept_assistant_note.withdraw",
+        "core.dept_assistant_note.decide",
+        "core.dept_assistant_note.delete",
+        "core.dept_assistant_note.pin",
+        "core.dept_assistant_note.manage"
       ],
       "sensitive": false
     }
