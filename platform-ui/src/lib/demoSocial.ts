@@ -22,6 +22,7 @@ import { demoIdeasRoute } from "./demoSocialIdeas";
 import { demoSavedRoute } from "./demoSocialSaved";
 import { demoAuditRoute } from "./demoSocialAudit";
 import { demoOnboardingRoute } from "./demoSocialOnboarding";
+import { demoReportSchedulesRoute } from "./demoSocialReportSchedules";
 import {
   DEMO_SIMULATED_NETWORKS, demoAccounts, demoRemoveSimulatedAccounts, demoSeedSimulatedAccounts,
   type DemoAccount, type DemoSimulatedNetwork, type DemoSocialNetwork as AccountsNetwork,
@@ -1002,6 +1003,8 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   { const boosts = demoBoostsRoute(m, tail, params, body, userId); if (boosts) return boosts; }
   // ── SCP-5d: the Team dashboard (BFF §63.19), in demoSocialTeam.ts ──────────────────────────────────────────
   if (tail === "team" && m === "GET") return demoTeamRoute(params, userId);
+  // ── SCP-5 W5-A6: report automation (BFF §63.24.9), in demoSocialReportSchedules.ts (before the reports: it also answers the progress of its own runs) ─────────────────────
+  { const schedules = demoReportSchedulesRoute(m, tail, body, userId); if (schedules) return schedules; }
   // ── SCP-5a: the monthly report (BFF §63.18), in demoSocialReports.ts ───────────────────────────────────────────────────────────
   // ── SCP-5 W5-A4: "Generate with AI" runs and the company's rules (BFF §63.24.5, §63.30.4), in demoSocialReportRuns.ts; asked first, as `reports/generate` would read as a report id ──
   { const runs = demoReportRunsRoute(m, tail, params, body, userId); if (runs) return runs; }

@@ -284,6 +284,8 @@ export const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   idea_not_found: "That idea is gone. It may have been deleted. Reload the report.",
   idea_planned: "That idea is already in a plan, so it cannot change. Discard its post first to free it.",
   cycle_closed: "That plan month is already over. Pick a later month.",
+  schedule_not_found: "That report schedule is gone. It may have been deleted. Reload the page.",
+  schedule_exists: "This company already has an all-clients schedule for that report kind. Edit that one, or choose some clients.",
 };
 
 /**

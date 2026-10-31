@@ -1,0 +1,30 @@
+/* SCP-5 W5-A6 (BFF §63.24.9) — Report automation on {D}/settings. Tokens only (the tokens guard): no colour, radius or shadow literal; the look of the rest is cycles.css. */
+.scp-auto { display: grid; gap: 12px; }
+.scp-auto__cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.scp-auto__card { display: grid; gap: 10px; padding: 14px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); min-width: 0; }
+.scp-auto__head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; }
+.scp-auto__title { margin: 0; font: 700 15px var(--font-body); color: var(--text-primary); }
+.scp-auto__state { display: inline-flex; padding: 1px 8px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); font: 700 11px var(--font-body); color: var(--erp-ink-60); }
+.scp-auto__state--on { background: var(--status-ok-bg); color: var(--status-ok-fg); }
+.scp-auto__state--paused { background: var(--status-critical-bg); color: var(--status-critical-fg); }
+.scp-auto__facts { display: grid; gap: 6px; margin: 0; }
+.scp-auto__facts > div { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: baseline; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.scp-auto__facts dt { font: 700 11px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-60); }
+.scp-auto__facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.scp-auto__cost { font: 400 12px var(--font-body); color: var(--text-primary); }
+.scp-auto__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.scp-auto__form { display: grid; gap: 14px; }
+.scp-auto__fieldset { display: grid; gap: 6px; margin: 0; padding: 10px 12px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); min-width: 0; }
+.scp-auto__fieldset legend { padding: 0 4px; font: 600 11px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-60); }
+.scp-auto__radio { display: flex; gap: 8px; align-items: flex-start; font: 400 13px var(--font-body); color: var(--text-primary); }
+.scp-auto__clients { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 180px; overflow-y: auto; }
+.scp-auto__grid { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.scp-auto__preview { display: grid; gap: 6px; padding: 10px 12px; border: 0.5px dashed var(--erp-hairline); border-radius: var(--radius-md); }
+.scp-auto__words { margin: 0; font: 600 13px var(--font-body); color: var(--text-primary); }
+.scp-auto__label { margin: 0; font: 700 11px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-60); }
+.scp-auto__runs { margin: 0; padding-left: 18px; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+@media (max-width: 720px) {
+  .scp-auto__facts > div { grid-template-columns: 1fr; gap: 0; }
+  .scp-auto__grid > .scp-field { flex: 1 1 100%; }
+  .scp-auto__grid .scp-input, .scp-auto__form .scp-input { width: 100%; box-sizing: border-box; }
+}

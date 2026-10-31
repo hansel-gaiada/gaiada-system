@@ -10,11 +10,13 @@ import { todayIsoInDisplayZone } from "@/lib/format";
 import { monthTitle, parseMonth, shiftMonth } from "@/lib/deptCalendar";
 import { getCycleTable, getSocialSettings } from "@/lib/socialCycles-data";
 import { getAllocation } from "@/lib/socialAllocation-data";
+import { getReportSchedules } from "@/lib/socialReportSchedules-data";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { SocialSettingsForm } from "@/components/social/SocialSettingsForm";
 import { CycleDeadlineTable } from "@/components/social/CycleDeadlineTable";
 import { StepEstimatesEditor } from "@/components/social/StepEstimatesEditor";
+import { ReportAutomation } from "@/components/social/ReportAutomation";
 import "@/components/social/cycles.css";
 
 type Params = Promise<{ deptId: string }>;
@@ -60,6 +62,9 @@ export default async function SocialSettingsPage({ params, searchParams }: { par
   }
   if (settings.kind === "unavailable") return <ReadRefusal subject="The Social Media settings" kind="unavailable" reason={settings.reason} />;
   if (table.kind === "unavailable") return <ReadRefusal subject="The deadline table" kind="unavailable" reason={table.reason} />;
+
+  // SCP-5 W5-A6 (BFF §63.24.9): Report automation is the four's (`plan`): read only for a person who `canPlan`, and hidden when the server refuses.
+  const schedules = settings.data.canPlan ? await getReportSchedules(userId, tenant) : null;
 
   const prev = shiftMonth(month, -1);
   const next = shiftMonth(month, 1);
@@ -112,6 +117,12 @@ export default async function SocialSettingsPage({ params, searchParams }: { par
           {/* keyed by month so stepping months resets the editable drafts */}
           <CycleDeadlineTable key={month} table={table.data} />
         </section>
+
+        {/* SCP-5 W5-A6 (BFF §63.24.9): Report automation, in its own component. It draws nothing for a person the server does not let read schedules. */}
+        <ReportAutomation
+          deptId={deptId} schedules={schedules}
+          clients={allocation.kind === "ok" ? allocation.data.filter((r) => r.status !== "closed").map((r) => ({ engagementId: r.engagementId, clientName: r.clientName })) : null}
+        />
       </div>
     </Card>
   );
