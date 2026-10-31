@@ -13469,7 +13469,7 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 - **Cerbos** is asked once per distinct officer before the transaction, in apply only; a stale answer (the officer changed in between) is 409 `status_changed`. A denial of the machine's `create` is its own 403, which rolls the import back.
 - **The activity rows** are written after the commit, one per changed engagement (`updated`, `{allocation, via: "sheet_import", importId}`) and one per new post (`create`, the create's metadata with `via` and `importId`); a failed write is logged and never undoes the import.
 
-### 63.24 Periodic reports, "Generate with AI" and report automation (SCP-5b, SCP-Q37 to SCP-Q40; plan §8 SCP-5) — on 63.18's rows, routes, states and gates — **STATUS: PLANNED (2026-10-30)**
+### 63.24 Periodic reports, "Generate with AI" and report automation (SCP-5b, SCP-Q37 to SCP-Q40; plan §8 SCP-5) — on 63.18's rows, routes, states and gates — **STATUS: SERVER BUILT (W5-A1 in release 472, W5-A2 in 473, W5-A3 in 475, W5-A5 in 476); the pages (W5-A4, W5-A6) IN PROGRESS (2026-10-31)**
 
 **What it is.** A client's report for a day, a week, a month, a quarter, a half year or a year: the period's numbers, the words that go with them, and what comes next. Each is a `social_reports` row of one kind, on 63.18's routes, its four states (Draft, HoD check, Ready, Sent) and its gates. The monthly report stays exactly as SCP-5a built it; the five other periodic kinds follow its pattern; `campaign` and `adhoc` keep SMM-23's rules. **Every rule below is a default** (SCP-Q41): each company sets its own in Settings (63.30), and a report, a run or a schedule's run keeps the rules it was made under (`rules_ref`). "Generate with AI" drafts them for one client or for every client the person may draft for (63.24.5), an agent drafts them by chat (63.24.6), as the owner ruled (SCP-Q37), and the four can set them to be drafted on a schedule (63.24.9, SCP-Q38).
 
@@ -13527,7 +13527,7 @@ New codes: 400 through the module's `refuse()`, `summary_missing`, `summary_numb
 
 **63.24.5 "Generate with AI"** (SCP-Q37).
 - **One client** is the create route of 63.24.3: one gateway call, answered in the request, as the monthly's create is today.
-- **All clients: `POST reports/generate`** `{id, kind, period}`.
+- **All clients: `POST reports/generate`** `{id, kind, period, engagementIds?}`. `engagementIds` (as built, W5-A3) narrows the run to chosen clients: 1 to 200 uuids, deduplicated; an id that is not a live engagement of the company is 400 `invalid_field` `engagementIds`. Only the chosen clients are looked at; one the caller may not draft for is listed `skipped` with `not_allowed` (not left out, so they see why), and `kind_not_due` does not apply to a chosen client. A schedule's `chosen` scope (63.24.9) runs through the same rule.
   - **The gate:** `social_report` · `create`, a company-level decision as in 63.18 (the report kind carries no client); without it, 403. **The clients the caller may draft for:** one of the four (`social_engagement` · `plan`, asked as a plain check) gets every active engagement; anyone else holding `create` gets the engagements they are the officer of. Nobody else is listed. The set is decided once, at the route, and the run drafts exactly those clients.
   - **Left out or skipped:** an engagement that is not `active` is left out; for a kind other than the monthly, a client not due it is listed `skipped` with `kind_not_due`; the internal client `skipped` with `internal_client`.
   - **Validation:** as the create route, from the company's current rules: 409 `report_kind_off` for a kind turned off, 409 `ai_drafting_off` for a kind drafted by hand. Here every kind frozen at create needs its period ended, the monthly included (400 `period_not_over`): a run over a period still going would freeze half of it.
@@ -13651,7 +13651,8 @@ Activity on entity `social_report_schedule`: `created`, `updated`, `paused`, `re
 | Tool | Route | Class |
 |---|---|---|
 | `social.reportSchedules` | `GET report-schedules` | read |
-| `social.saveReportSchedule` | `POST` and `PATCH report-schedules` (create, edit, pause, resume) | `write`, impact `medium`: it sets what the ERP does by itself every period, so the person confirms in the thread |
+| `social.saveReportSchedule` | `POST report-schedules` (create) | `write`, impact `medium`: it sets what the ERP does by itself every period, so the person confirms in the thread |
+| `social.editReportSchedule` | `PATCH report-schedules/:id` (edit, pause, resume; as built, W5-A5, split from the create) | `write`, impact `medium` |
 | `social.deleteReportSchedule` | `DELETE report-schedules/:id` | `write`, impact `medium` |
 | `social.runReportSchedule` | `POST report-schedules/:id/run` | `write`, impact `medium` |
 
@@ -13665,7 +13666,7 @@ Activity on entity `social_report_schedule`: `created`, `updated`, `paused`, `re
 - the spend: a run's usage sums its calls, a schedule's 30-day and month-to-date spend sums its runs, and nothing is refused on spend;
 - the page: phone width and keyboard, axe in light and dark, DEMO_MODE.
 
-### 63.25 Ideas for next month (SCP-5c) — **STATUS: PLANNED (2026-10-30)**
+### 63.25 Ideas for next month (SCP-5c) — **STATUS: SERVER BUILT (W5-B1 in release 470, W5-B2 in 472); the monthly page's section and "From an idea" (W5-A4) IN PROGRESS (2026-10-31)**
 
 **What it is.** Per client: what we saw, the metric it rests on, and what we suggest. "Add to next plan" turns an idea into a `planned` post of a cycle the person picks, linked both ways; "Mark shared" records that the team shared it with the client. By default ideas stay internal and nothing reaches the portal or the report's PDF (SCP-Q27). A company may set shared ideas to print in the next monthly report (`ideas.sharedInMonthlyReport`, 63.30): that report's document and PDF then list its client's ideas marked shared since the previous monthly report, by the report's own rules. They sit on the monthly report's page, as in the team's design.
 
@@ -13727,7 +13728,7 @@ CHECKs (`status` is NOT NULL; every other side is written with `IS NULL`): `(sta
 
 **63.25.5 Proofs:** every CHECK with its NULL cases, both FKs and both unique indexes; the officer of another client and a `company_admin` refused 403 `not_officer_or_approver`, the client's officer and each of the four allowed; "Add to next plan" writes the post and the idea in one transaction (a refused create leaves the idea as it was), a replay answers `alreadyApplied`, `cycle_closed`, another client's cycle 404; discarding the planned post releases the idea, archiving it does not; a planned idea refuses edit and delete; the post read's `idea`.
 
-### 63.26 Saved: the content bank (SCP-5e) — **STATUS: PLANNED (2026-10-30)**
+### 63.26 Saved: the content bank (SCP-5e) — **STATUS: BUILT (W5-B1 in release 470, W5-B3 in 473, the page W5-B5 in 476); OPEN: "Use in a post" on the post page (the server's `savedItemIds` is built) (2026-10-31)**
 
 **What it is.** Each client's bank, seen by the team only: the Asset Library's photos with used, unused and source; the client's approved posts; saved captions, templates and references; and the brand book's hashtag sets. It reuses before it stores: a design's photo, an approved post and a hashtag set are READ from where they live, and the bank stores only what has no home (a caption, a template, a reference, a Drive link, an asset saved for later). Per client (SCP-Q28). Its categories are the company's (`saved.categories`, 63.30): the design's six by default, renamed, reordered, hidden or added to in Settings.
 
@@ -13799,7 +13800,7 @@ An agent uses an item through `social.editPost` with `savedItemIds` (63.15, `low
 
 **63.26.5 Proofs:** each shape's CHECK with its NULL cases; an item refused for a category the company does not have, or one that does not take its shape; a removed category's items shown under "Other"; the asset FK refusing another company's group; one `asset` item per client and group; the derived photos (a design's group shows as used without a saved row; removing the design makes a kept asset unused); `used`, `source` and `pillar` filters; the author edits and deletes their item, the officer and a seat anyone's, another member is 403 `not_officer_or_approver`; `savedItemIds` counted only when the edit applies, and refused for another client's item; the hashtag sets read from the brand book; nothing of the bank reachable from the portal.
 
-### 63.27 The monthly cycle as PM tasks (SCP-5f; plan §4.5, SCP-D4) — **STATUS: PLANNED (2026-10-30)**
+### 63.27 The monthly cycle as PM tasks (SCP-5f; plan §4.5, SCP-D4) — **STATUS: BUILT (W5-C1 in release 473, the reads and the Plan tab's strip W5-C2 in 476; 63.27.4 is as built) (2026-10-31)**
 
 **What it is.** One client's month as six PM tasks per cycle, in the client's project beside 63.13's content-month task: the report, planning, copy lock, artwork, client approval and scheduling. They show on PM's board, Timeline, Ball and workload. The pipeline creates them, dates them and closes the ones it can see (SCP-Q31: all six). It is PM's task system, not a second one, and still no task is made per post (SCP-D4). The six steps are the seeded defaults: each company sets its steps, their order, titles, due rules and auto-close conditions (`cycle.steps`, 63.30), and a cycle keeps the rules it was made under (`social_cycles.rules_ref`), so a change reaches new cycles only.
 
@@ -13830,8 +13831,9 @@ Without estimates, every step but `report` falls due on R; the Team dashboard al
 - **The link is locked:** a PM task route that changes a `social_cycle_step` task's link is 409 `task_link_locked`, as 63.13's. `GET pm/tasks/:taskId` and the task lists answer `linkedStep` (additive), and the task drawer links the step to the client's page.
 
 **63.27.4 Reads.**
-- `GET cycles/:cycleId/health` (63.5) gains `steps: [{step, title, taskId \| null, dueDate \| null, done, progress, autoClose, late}]` (additive; `late` once past due and not done).
-- The Team dashboard's `needsAttention` (63.19) gains `cycle_step_late` `{engagementId, clientName, step, dueDate}`, team-level with no person.
+- `GET cycles/:cycleId/health` (63.5) gains `steps: [{step, title, taskId \| null, dueDate \| null, done, progress, autoClose: 'auto' \| 'manual', holder: {role: 'officer', label} \| null, late}]` in the rules' order, and `stepsReason: 'no_project' \| 'project_not_found' \| null` (additive). `late` once past due and not done. `holder` is the role holding an open step, worded by `HOLDER_LABELS` (a role word, never a person, as 63.19), and null once done. `autoClose` is `manual` for a step closed by hand only. With a `stepsReason` (the engagement has no project, or its project was deleted) `steps` is `[]`.
+- The Team dashboard's `needsAttention` (63.19) gains `cycle_step_late` `{engagementId, clientName, step, dueDate, title, since}`: `title` is the step's, `since` its due date. It is team-level with no person, and sits after `boost_waiting` and before the reports in the list's order.
+- PM's task reads gain `linkedStep`: the step's key on a `social_cycle_step` task, else null.
 - The client page's Plan tab draws the six steps as a strip above the grid (due, done or late), each linking to its PM task. No new page or key.
 
 **DEMO_MODE.** The demo cycles carry their six steps in each state, one late and one closed by hand, then reopened.
@@ -13847,7 +13849,7 @@ Without estimates, every step but `report` falls due on R; the Team dashboard al
 - a new officer on the allocation takes the Ball of every open step; new estimates re-date them;
 - no project: no steps, and the reason; the link locked; two stage actions on posts of one cycle at once never deadlock.
 
-### 63.28 The social audit (SCP-5g) — **STATUS: PLANNED (2026-10-30)**
+### 63.28 The social audit (SCP-5g) — **STATUS: BUILT (W5-B1 in release 470, W5-B4 with SCP-Q43 and the pages W5-B5 in 476) (2026-10-31)**
 
 **What it is.** A twelve-dimension scorecard: each dimension 0 to 5 by halves, an overall score out of 100, a band, the three weakest dimensions as the fixes, and a summary. For an existing client six dimensions are automatic from pipeline data and six are typed; for a prospect all twelve are typed, as plan §8 says. A draft is live; finalizing freezes it as a dated record, such as a new client's baseline (63.29).
 
@@ -13921,7 +13923,7 @@ CHECKs (NULL-safe): `subject <> 'client' OR (engagement_id IS NOT NULL AND month
 
 **63.28.6 Proofs:** the fixture twins byte-equal; the six automatic rules on a golden table (no target, no allocated formats, no benchmark peers, no reels, a month touching six weeks, no agreed budget), each with its reason; the overall over the scored dimensions only, and the band edges; the CHECKs with their NULL cases, and one draft per client; a final audit refuses edits and deletion, and its `frozen` stays put when the pipeline moves; another client's officer 403, the client's officer and a seat allowed, the owner refused a client's audit and allowed a prospect's; Draft with AI saves nothing; attach once.
 
-### 63.29 Client onboarding as a PM project template (SCP-5h; plan §4.5, SCP-D4) — **STATUS: PLANNED (2026-10-30)**
+### 63.29 Client onboarding as a PM project template (SCP-5h; plan §4.5, SCP-D4) — **STATUS: BUILT (W5-C3 in release 470, W5-C4 in 476) (2026-10-31)**
 
 **What it is.** Every new client goes through the company's checklist (its own template, edited in Settings, 63.30; the seed is SCP-Q35's), as PM tasks in the client's own project (the client's ERP project is the project the team's checklist asked for), each due a number of working days after the kickoff. PM gains what it lacks for this, a project template and a way to apply it, for every department; Social adds the company's chosen template, starting it for a client, and the onboarding page.
 
@@ -13990,7 +13992,7 @@ Roles: `officer`, `lead` and `client`. A `client` step is the client's to provid
 
 **63.29.6 Proofs:** the payload's 400s (an unknown phase or role, a repeated key, an offset out of range); the apply's due dates on the golden working-day table (a kickoff on a holiday, a weekend, the year turn) and its milestones; one application per project and template, a replay answering the same ids; a kickoff move re-dating only the open tasks; the start refused to the officer and a `company_admin` (403 `not_a_social_approver`), `no_project` and `onboarding_template_not_set`; a `client` step assigned to the officer; the settings picker refusing another company's template and a `task` template.
 
-### 63.30 Company rules for SCP-5 (SCP-Q41) — **STATUS: PLANNED (2026-10-30)**
+### 63.30 Company rules for SCP-5 (SCP-Q41) — **STATUS: SERVER BUILT (W5-A0 in release 471); the settings page's rules sections (W5-C5) PLANNED (2026-10-31)**
 
 **What it is.** Each company sets its own rules for the rest of SCP-5 in the UI, and the owner's rulings SCP-Q25 to SCP-Q40 are the seeded defaults (plan §2). The owner's words: "i want ui can be used to set all these rules. it will give flexibility that company need". It also keeps the module free of our own group's habits ("internal now, SaaS later"). §63.24 to §63.29 read their rules from here, and none of them hard-codes a rule this section names.
 
