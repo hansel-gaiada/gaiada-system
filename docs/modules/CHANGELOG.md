@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.230.0` - M6-P6i + M6-P6p: the "Domain and DNS" card on the site console page - PROTOTYPED
+
+- **What it is.** A card on `/departments/<dept>/sites/portfolio/<siteId>` (the page the DNS task's own description links to). `siteId` there is the `webdev_sites` registry row id, the id both `sites/:id/dns*` routes take. No backend change.
+  - **The checklist (P6i, `GET sites/:id/dns`):** domain and environment, who changes the records (us or the client), the checklist state in words (`not_claimed`, `needs_binding`, `target_unknown`, `ready`), the records table and the instruction, what public DNS answers now (A, AAAA, CNAME, or its error), the check (`pointing`, or `pending` with one sentence per reason), when it was checked, and the search property's consent state.
+  - **The task (P6p, `GET sites/:id/dns/task`):** none, open or closed in words, who it is assigned to and why, a link to the PM task (`/tasks/<taskId>`), who closed it and when, the last check and its reason, and whether the ERP saw the records point.
+  - **Check DNS now (`POST sites/:id/dns/recheck`):** a server action behind the `webdev.provision` capability (company_admin and manager, the nearest mirror of `webdev_site` `update`; the server decides). It shows the new task and check from the answer; a `null` check says nothing was checked because there is no open task; a 403 or 404 is a sentence.
+  - **Failure is words.** The two reads are independent: one failing draws its own sentence and never hides the other, and a failed read is never drawn as an empty records table or as "no task". An off-contract body is a "contract drift" sentence (`lib/siteDnsModel.ts`, strict parsers). DEMO_MODE fixtures added for the three routes.
+- **Status.** PROTOTYPED: unit-tested (model, readers, action, card), not yet driven against a live platform, so the field-for-field match with the real answers is not DEV-VERIFIED.
+
 ### platform-nest `0.211.0` + platform-ui `0.229.0` - shared train 20261030-7: AIP-18 the soft stop, AIP-17b's owner forms, SCP-5 W5-A3; WDV and PID-2 plans (docs, scripts) - PROTOTYPED
 
 - **AIP-18 (platform-nest; plan §6.3 item 9; owner ruling AIP-D8; BFF §66.11).** The soft stop: when a person is at their daily reply allowance, or their home department is over a budget set to `soft_stop` and not lifted this month, the assistant keeps answering in a lighter mode and never refuses:
