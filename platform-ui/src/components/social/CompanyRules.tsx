@@ -8,6 +8,7 @@ import type { ClientChoice } from "@/components/social/RulesPreview";
 import { RulesReports } from "@/components/social/RulesReports";
 import { RulesCycle } from "@/components/social/RulesCycle";
 import { RulesAudit } from "@/components/social/RulesAudit";
+import { RulesSaved } from "@/components/social/RulesSaved";
 import "@/components/social/cycles.css";
 import "@/components/social/rules.css";
 
@@ -35,6 +36,7 @@ export function CompanyRules({ rules, clients }: {
       <RulesReports answer={a} clients={clients} />
       <RulesCycle answer={a} clients={clients} />
       <RulesAudit answer={a} clients={clients} />
+      <RulesSaved answer={a} />
     </div>
   );
 }

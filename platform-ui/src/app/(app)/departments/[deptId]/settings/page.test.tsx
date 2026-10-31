@@ -454,6 +454,12 @@ describe("Company rules", () => {
     expect(screen.getAllByRole("listitem", { name: /^Dimension \d+:/ })).toHaveLength(12);
     expect(screen.getAllByRole("listitem", { name: /^Band \d:/ })).toHaveLength(3);
   });
+  it("draws the Saved section after the Audit scorecard, with the six categories", async () => {
+    await mount();
+    expect(screen.getByRole("heading", { name: "Audit scorecard" }).compareDocumentPosition(screen.getByRole("heading", { name: "Saved" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Saved categories" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem", { name: /^Category \d:/ })).toHaveLength(6);
+  });
   it("offers the allocation's open clients to the previews", async () => {
     await mount();
     const pick = screen.getAllByLabelText("For client")[0];
