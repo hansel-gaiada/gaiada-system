@@ -13294,7 +13294,7 @@ Contracted on 2026-10-30 and ruled the same day (SCP-Q25 to SCP-Q41, plan §2): 
 
 **No question is open.** Ruled on 2026-10-26, after this contract's review: SCP-Q21, the four approvers decide a pipeline post's publish approval directly (63.10); SCP-Q22, the writer of a monthly report may also approve it, so reports have no maker/checker rule (63.18); SCP-Q23, ticket SCP-1q closes self-promotion into a lead seat before SCP's approvals go live (PERMISSION §53.4).
 
-### 63.23 The one-off sheet import (SCP-6a; plan §8 SCP-6, SCP-D10) — `platform-nest/src/modules/social/pipeline/sheet-import.ts` (pure), `sheet-parse.ts`, `sheet-import.controller.ts` (new); `src/core/upload-body-limits.ts`; page `{D}/settings/import` — **STATUS: BUILT 2026-10-29 (platform-nest 0.202.0, platform-ui 0.222.0; 63.23.8 is what the build reads more closely). Proved on the Linux CI gate on a mock sheet; the live proof on the mock seed ticks SCP-6a. Used on the real sheet when the owner allows real data (SCP-6b).**
+### 63.23 The one-off sheet import (SCP-6a; plan §8 SCP-6, SCP-D10) — `platform-nest/src/modules/social/pipeline/sheet-import.ts` (pure), `sheet-parse.ts`, `sheet-import.controller.ts` (new); `src/core/upload-body-limits.ts`; page `{D}/settings/import` — **STATUS: BUILT 2026-10-29 (platform-nest 0.202.0, platform-ui 0.222.0; 63.23.8 is what the build reads more closely; 63.23.9 is the team's real file, SCP-6b1, platform-nest 0.213.0 and platform-ui 0.231.0). Proved on the Linux CI gate on a mock sheet; the live proof on the mock seed ticks SCP-6a. Used on the real sheet when the owner allows real data (SCP-6b).**
 
 **What it is.** The Social Media team's sheet holds two things the ERP needs once, when the team moves over: the **allocation** (one row per client: the officer, posts per month, creative source, batch, report format and due day, platforms, formats, default post time) and **next month's plan** (one row per post). The import reads a sheet the team uploads (`.xlsx` or `.csv`) or pastes (rows copied from Google Sheets or Excel arrive as tab-separated text). The person says which column is which and picks the names the server could not match. Every row's outcome is shown, and only then does anything get written.
 
@@ -13310,12 +13310,13 @@ Contracted on 2026-10-30 and ruled the same day (SCP-Q25 to SCP-Q41, plan §2): 
 
 #### 63.23.1 `POST import/parse`
 
-Takes `{filename, contentBase64}` (an `.xlsx` or `.csv`, at most 2 MiB decoded) or `{text}` (pasted, at most 2 MiB as UTF-8). Answers `{tabs: [{name, rows: string[][]}]}`.
+Takes `{filename, contentBase64}` (an `.xlsx` or `.csv`, at most 2 MiB decoded) or `{text}` (pasted, at most 2 MiB as UTF-8). Answers `{tabs: [{name, rows: string[][], merges?}]}` (`merges` is the xlsx tab's merged ranges, 63.23.9).
 - **xlsx:** one tab per visible worksheet, in workbook order, read with `exceljs` (already a dependency). Every cell becomes text:
   - a date cell becomes `YYYY-MM-DD`, with ` HH:MM` when it has a time part (exceljs hands dates over as UTC wall time);
   - a number becomes its plain string, with no thousands separator;
   - a formula becomes its cached result, rich text its plain text, a hyperlink its text, an empty cell `""`.
   - Trailing empty rows and columns are trimmed.
+  - The slave cells of a merged range read as `""`; each tab also answers `merges` (63.23.9, SCP-6b1), so the import can tell a slave from an empty cell.
 - **csv:** one tab named after the file without its extension. RFC 4180 quoting, using the keyword import's tokenizer (`search/keyword-import.ts`), moved to a shared module, not copied. A BOM is dropped. The separator is `,` or `;`, whichever the first line holds more of.
 - **text:** one tab named `Pasted`. Tab-separated when the first line holds a tab, else the csv rule. A quoted cell keeps its newlines, which is what Google Sheets puts on the clipboard.
 - **Limits:** at most 20 tabs, 2,000 rows and 60 columns per tab, and 5,000 characters per cell.
@@ -13336,12 +13337,17 @@ Takes `{filename, contentBase64}` (an `.xlsx` or `.csv`, at most 2 MiB decoded) 
   clientMatches?: { [sheetName]: engagementId },   // the person's pick for a client name the server could not match
   officerMatches?: { [sheetName]: userId },        // allocation only
   // plan only:
-  month: 'YYYY-MM', dateOrder: 'dmy'|'mdy'|'ymd', timeZone: string }   // timeZone: an IANA zone
+  month: 'YYYY-MM', dateOrder: 'dmy'|'mdy'|'ymd', timeZone: string,    // timeZone: an IANA zone
+  // plan only, all optional (63.23.9, SCP-6b1):
+  engagementId?: string,    // one client for the whole file; then columns.client must be absent
+  allStories?: boolean,     // every row is a story; then columns.format must be absent
+  merges?: [top, left, bottom, right][] }   // the tab's merged ranges, in the coordinates of `rows`
 ```
 
 Validation runs after authorization. A malformed body is 400 `invalid_field` with `field`:
 - a field name in `columns` that the route does not know, an index outside 0 to 59, or one column given to two fields;
-- a required field (`client`; for the plan also `date`) missing from `columns`;
+- a required field (`client`; for the plan also `date`) missing from `columns` (63.23.9: a plan's `client` is met by `engagementId` instead);
+- for the plan, an `engagementId` that is not a uuid, is given beside `columns.client`, or is not an open engagement of this company (`field: "engagementId"`); an `allStories` that is not a boolean or is given beside `columns.format` (`field: "allStories"`); `merges` that are malformed, overlap or are out of range (`field: "merges"`);
 - more rows than allowed, a cell that is not a string, or a `skip` index outside `rows`;
 - a `clientMatches` value that is not an open engagement of this company, or an `officerMatches` value that is not an active employee member (both named by `field`, for example `clientMatches.<sheetName>`);
 - for the plan, a `month` that is not `YYYY-MM` or is before the report month (`todayIsoInTz(config.reportsTz)`), an unknown `dateOrder`, or a `timeZone` that `Intl` does not know.
@@ -13361,11 +13367,11 @@ Validation runs after authorization. A malformed body is 400 `invalid_field` wit
 
 ```
 { dryRun: boolean, importId: string | null,
-  summary: { rows, ready, unchanged, refused, skipped },
+  summary: { rows, ready, unchanged, refused, skipped, joined? },   // joined (63.23.9): present only when above zero
   unmatched: { clients: [{ sheetName, rows: number[], suggestions: [{ engagementId, clientName }] }],
                officers: [{ sheetName, rows: number[] }] },
   rows: [ { row: number,                                      // the index into rows
-            outcome: 'ready'|'unchanged'|'refused'|'skipped',
+            outcome: 'ready'|'unchanged'|'refused'|'skipped'|'joined',   // joined: plan only, with joinedTo (63.23.9)
             refusals: [{ field, code }],                      // every problem of the row at once
             warnings: [{ field, code }],
             ...the row as it would be written (63.23.4, 63.23.5) } ] }
@@ -13377,6 +13383,7 @@ Validation runs after authorization. A malformed body is 400 `invalid_field` wit
 - **Row codes.**
   - Refusals: `missing_value`, `invalid_field`, `client_not_found`, `client_ambiguous`, `officer_not_found`, `officer_ambiguous`, `duplicate_client`, `date_outside_month`, `date_in_past`, `missing_title`, `no_cycle_deadline`.
   - Warnings: `title_from_caption`, `default_time_used`, `same_title_in_cycle`, `discarded_since`.
+  - Added by 63.23.9: the outcome `joined`; the warnings `date_from_merged_cell`, `title_from_on_asset_text`, `title_from_cta`, `title_generated`, `asset_link_missing_url`. `missing_title` now only happens when no title can be built (a row with no date).
 
 #### 63.23.4 Allocation rows
 
@@ -13403,13 +13410,13 @@ Fields: `client` (required), `officer`, `postsPerCycle`, `creativeSource`, `deli
 
 #### 63.23.5 Plan rows
 
-One month per import. Fields: `client` and `date` (both required), `time`, `title`, `format`, `pillar`, `placement`, `isExtra`, `angle`, `objective`, `keyMessage`, `visualDirection`, `caption`, `onAssetText`, `cta`, `hashtags`.
+One month per import. Fields: `client` and `date` (both required), `time`, `title`, `format`, `pillar`, `placement`, `isExtra`, `angle`, `objective`, `keyMessage`, `visualDirection`, `caption`, `onAssetText`, `cta`, `hashtags`, and (63.23.9) `assetLinks`.
 - **`date`** is read in `dateOrder`. The page's default is `dmy`.
   - `2026-11-03` and an xlsx date are always year-month-day.
   - A month name (`3 Nov`, `Nov 3`, `3 November 2026`) is read as such, in English or Indonesian; without a year it takes `month`'s year.
   - Outside `month`: `date_outside_month` (only that, never also `date_in_past`). Inside it but before today (the report day): `date_in_past`.
 - **`time`** follows `defaultPostTime`'s forms. An empty cell takes the engagement's `default_post_time`, and without one `09:00`, with the warning `default_time_used`. `scheduledAt` is the date and time in `timeZone`, written as an ISO instant.
-- **`title`** is required by the machine (1 to 200 characters). An empty title takes the caption's first line, cut at 80 characters, with the warning `title_from_caption`. With neither: `missing_title`.
+- **`title`** is required by the machine (1 to 200 characters). An empty title takes the caption's first line, cut at 80 characters, with the warning `title_from_caption`. 63.23.9 extends the order: then the text on the design's first line, the call to action's first line, then a generated `Story 6 Nov`. `missing_title` is left for a row with no date.
 - **`isExtra`** is yes from `yes`, `y`, `ya`, `true`, `1`, `x`, `✓` or `extra`. An empty cell is no.
 - **`hashtags`** are split on spaces, commas and new lines, with each `#` dropped.
 - **Every value then passes the machine's own field rule.** `FIELD_VALUE_RULES` (63.6.3) is exported as `contentFieldProblem`, and its refusal names the field. Nothing here restates a length or a list of values.
@@ -13468,6 +13475,97 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 - **The same client, date and title twice in one sheet** is one post (one id): the later row is `unchanged` with `same_title_in_cycle`.
 - **Cerbos** is asked once per distinct officer before the transaction, in apply only; a stale answer (the officer changed in between) is 409 `status_changed`. A denial of the machine's `create` is its own 403, which rolls the import back.
 - **The activity rows** are written after the commit, one per changed engagement (`updated`, `{allocation, via: "sheet_import", importId}`) and one per new post (`create`, the create's metadata with `via` and `importId`); a failed write is logged and never undoes the import.
+
+#### 63.23.9 The team's real file (SCP-6b1, 2026-10-31)
+
+**What it is.** The Social Media team keeps one file per client per month, with two tabs: CONTENT PLAN (each post spans two rows) and STORIES (one row per story). The import of 63.23.1 to 63.23.8 read a flat sheet. This subsection is the authority for what it does with the real file. It changes no route and adds no table. Every addition is optional, so a body without them reads as before.
+
+**The file.**
+- **CONTENT PLAN:** title rows, then a header row (POST DATE, TYPE OF POST, LINK FOOTAGE, EDITED IG & FB CONTENT, INSTAGRAM CONTENT ANGLES, CAPTION IG, CAPTION FB, and the checking columns). A post is two rows. The date, the type, the links and the angle are merged down over the pair. The first row holds the captions, the second the hashtags and plain-text image descriptions. Designs are pasted over the cells as pictures.
+- **STORIES:** title rows, then a header row (NUMBER, POSTING DATE, TYPE STORIES, LINK VIDEO/VIDEO PREVIEW, TEXT, CTA LINK, and the checking columns). One row per story. Two stories of one day share a vertically merged POSTING DATE.
+- The file has no client column and, with the pictures in it, weighs over a hundred MB.
+
+**1. Pictures are left out in the browser (the page only).**
+- The page runs `stripXlsxMedia` (`lib/xlsxStrip.ts`) on every `.xlsx` before it is encoded and uploaded. It reads the zip's end record and central directory, then writes a new zip holding every entry except those whose name starts with `xl/media/`.
+  - Each kept entry is copied byte for byte, from its local header to the next local header (so its data and any data descriptor come along). Nothing is inflated.
+  - The central directory and the end record are written again with the new offsets.
+  - ZIP64 or a malformed zip makes it throw. The page then says it can't read the file.
+- The page refuses an `.xlsx` over 300 MB before reading it ("This file is too large to read here"). A file still over 2 MiB after this is refused as before.
+- Under the upload the page says: "Pictures in the file are left out: designs are added on each post."
+- The server is unchanged here: the 2 MiB cap and the zip-bomb check of 63.23.1 apply to what arrives.
+
+**2. One client for the whole file (plan).**
+- The plan body gains `engagementId?: string`. When it is given:
+  - every row's client is that engagement, and `client` is not a required column;
+  - `columns.client` must be absent. Both together is 400 `invalid_field`, `field: "engagementId"`;
+  - it must be a uuid of an engagement of this company that is neither closed nor deleted. Anything else (another company's, a closed one, one that does not exist) is 400 `invalid_field`, `field: "engagementId"`. The check runs after authorization, like `clientMatches`.
+- The required-field rule for a plan is now: `date`, and `client` or `engagementId`. With neither it is 400 `invalid_field`, `field: "columns.client"`, as before.
+- `clientMatches` is not read for the client when `engagementId` is given; nothing is ever listed in `unmatched.clients` then.
+- The allocation ignores `engagementId`, `allStories` and `merges`.
+
+**3. Merged cells.**
+- `POST import/parse` answers each `.xlsx` tab with `merges: [top, left, bottom, right][]`, 0-based and inclusive, in the coordinates of the trimmed rows. A range is clipped to the trimmed area. One that falls outside it, or is a single cell once clipped, is left out. A tab with none answers `[]`. The field is additive and absent for csv and pasted text.
+- The plan body gains `merges?`: that tab's list, in the coordinates of the `rows` sent (the page moves it up by the header row's index, and leaves out a range that starts above the header). It is 400 `invalid_field`, `field: "merges"` unless every entry is four whole numbers with `top <= bottom` and `left <= right`, `bottom` inside `rows`, `right` at most 59, no cell is in two ranges, and there are at most 5,000.
+- Each range's top row holds the value. A cell below it is a **slave** of that top row, and a slave cell reads as empty text.
+- **A row joins the post above** when its `date` cell is a slave of row m and at least one other mapped column that is not a copy column is a slave of the same row m. The copy columns are `caption`, `onAssetText`, `cta` and `hashtags`: a merged copy column never makes a row a continuation.
+  - The row's outcome is the new value `joined`, with `joinedTo: m` (the index into `rows`). It is never written on its own and never refused for its own empty cells; nothing else of it is read.
+  - Its non-empty cells in columns that are not slaves are added to row m's text for the mapped field, after a blank line. One exception: text in the `caption` column made only of `#words` (every whitespace-separated token starts with `#`) is added to `hashtags`, whether or not `hashtags` has a column.
+  - Several joined rows chain to the same m. A joined row that is itself unticked is skipped and adds nothing.
+  - When row m is skipped (unticked or blank) its joined rows are `skipped`. When it is refused they are `refused` with m's refusals. Both show `joinedTo`.
+- **A row that only shares a merged date** (its `date` cell is a slave of row m and no other mapped non-copy column is) is a post of its own. With an empty date cell it takes row m's date, with the warning `date_from_merged_cell` on `date`.
+- A blank date that is not merged is `missing_value`, as before.
+- The answer's `summary` gains `joined`: the number of rows with outcome `joined`. It is present only when that number is above zero. `rows` counts every row; the other counts do not include a joined row.
+
+**4. The angle cell.**
+- The text read for `angle` (or for `pillar`, when only that is mapped) may hold a line that starts with `Content Pillar:`, `Pillar:` or `Pilar Konten:`, and/or one that starts with `Content Angle:`, `Angle:` or `Sudut Pandang:`. Case is ignored and spaces around the colon are tolerated. The first of each kind counts.
+- Those lines give `pillar` and `angle`. The remaining lines, trimmed, give `keyMessage`.
+- **A field mapped to its own column wins**, and the cell's part for it is ignored. If `keyMessage` is mapped, the remainder is added to `angle` after a blank line instead.
+- A cell with no such line is read as before.
+- Every value then passes the machine's field rule (63.23.5). A key message over 500 characters is `invalid_field` on `keyMessage`: the machine's rule is not loosened.
+
+**5. A tab of stories.**
+- The plan body gains `allStories?: boolean`. When true, every row's format is `story`, and `columns.format` must be absent (both: 400 `invalid_field`, `field: "allStories"`). A value that is not a boolean is the same 400.
+- The page turns "Every row is a story" on when the chosen tab's name holds "stor" (case ignored), and clears the format column. The person can switch it off.
+
+**6. A title when there is none.** The order is:
+1. the title column;
+2. the caption's first line (`title_from_caption`);
+3. the text on the design's first line (`title_from_on_asset_text`);
+4. the call to action's first line (`title_from_cta`);
+5. a generated `<Format> <d Mon>`, such as `Story 6 Nov` (`title_generated`). The word is `Feed`, `Carousel`, `Reel` or `Story`, and `Post` when the row has no format.
+- A line is cut at 80 characters.
+- A second, third and later generated title that is the same on the same client and date takes ` (2)`, ` (3)` in row order, so two stories of one day are two posts and a replay finds the same ids. The suffix is counted among the rows read, ticked or not.
+- `missing_title` is left for a row with no date to build the generated title from; that row is refused for its date first.
+
+**7. Formats.**
+- "Carousel video" (the words `carousel` and `video`, in either order, with the fillers of 63.23.4) reads as `carousel`. Every other cell that names two formats is still `invalid_field`.
+- "Photo" and "Foto" read as `feed`, with "Image" and "Static". The other forms of 63.23.4 are as before.
+
+**8. The header guess (page).** `HEADER_ALIASES` in `lib/sheetImport.ts` gains:
+- `angle`: "content angle", "content angles", "instagram content angles", "angles";
+- `onAssetText`: "text", "story text", "teks";
+- `caption`: "caption ig", "caption instagram", "ig caption" (so the Instagram caption wins over "CAPTION FB" in the exact pass);
+- `assetLinks`: "link footage", "footage", "link video", "video preview", "link video video preview", "link drive", "drive link", "asset links", "assets".
+- `HEADER_BLOCKERS` (same file) lists words that block a whole-word match, never an exact one. `client` is never guessed from a header holding "tag", "check", "checking", "approval", "status" or "feedback". `title` is never guessed from one holding "edited", "link", "footage", "angle", "angles", "notes", "type" or "types".
+- Pinned by `lib/sheetImport.test.ts` on the real header rows. CONTENT PLAN guesses `date` ← POST DATE, `format` ← TYPE OF POST, `assetLinks` ← LINK FOOTAGE, `angle` ← INSTAGRAM CONTENT ANGLES, `caption` ← CAPTION IG, and no client and no title. STORIES guesses `date` ← POSTING DATE, `format` ← TYPE STORIES (then cleared by "Every row is a story"), `assetLinks` ← LINK VIDEO/VIDEO PREVIEW, `onAssetText` ← TEXT, `cta` ← CTA LINK, and no client and no title.
+
+**9. Footage and asset links (`assetLinks`, a plan field).** The owner ruled (2026-10-31) that a post's images and videos come from Google Drive, so every link the sheet gives a post is kept.
+- Every `https://` URL in the cell becomes one item of the post's `raw_assets` list (63.1, 63.6), in cell order, as `{url, label, source: "unknown", aiNote: null}`.
+  - `label` is the text before the URL on its line, trimmed and without a trailing colon (`REEL`, `THUMBNAIL`), else empty.
+  - The URL is kept as written, `?usp=...` included.
+- The items go into the same INSERT as the other planning and copy fields (SCP-D10: the sheet's text is the post's starting text). `raw_assets` is allowed at create in `planned`: the machine's `contentFieldProblem("rawAssets", …)` is the rule, so nothing here restates it.
+- A joined row's links are added to its post's list.
+- A non-empty cell with no `https://` URL is the warning `asset_link_missing_url` on `assetLinks`. A `http://` URL, or more items than the field rule allows (10), is `invalid_field` on `assetLinks`.
+
+**10. The page.**
+- Columns step (plan): "Each row names its client" (the client column) or "The whole file is for one client", with a picker of the company's open social engagements (the list the page already reads for the names step). It is preselected when no client column is guessed.
+- "Every row is a story" is a checkbox beside the columns.
+- A joined row is drawn under its post as "Continues the post above", with no box to untick and no outcome of its own. The summary counts it apart. A row that follows a skipped or refused post is drawn the same way.
+- The new warnings are worded: `date_from_merged_cell` "Takes the date of the row above (a merged cell)."; `title_from_on_asset_text`, `title_from_cta`, `title_generated`; `asset_link_missing_url`.
+
+**New codes.** Outcome `joined`. Warnings: `date_from_merged_cell`, `title_from_on_asset_text`, `title_from_cta`, `title_generated`, `asset_link_missing_url`. 400 `invalid_field` fields: `engagementId`, `allStories`, `merges`, and `assetLinks` as a row refusal.
+
+**Proofs.** `sheet-parse.test.ts` (merges), `sheet-import.test.ts` (the readers, the body, merged pairs, the angle cell, stories, titles, links), `sheet-import.http.test.ts` (a synthetic two-tab workbook of this shape, parsed, previewed, applied and replayed, and the 400s), and in platform-ui `xlsxStrip.test.ts`, `sheetImport.test.ts` and `SheetImport.test.tsx`.
 
 ### 63.24 Periodic reports, "Generate with AI" and report automation (SCP-5b, SCP-Q37 to SCP-Q40; plan §8 SCP-5) — on 63.18's rows, routes, states and gates — **STATUS: BUILT (server: W5-A1 in release 472, W5-A2 in 473, W5-A3 in 475, W5-A5 in 476; pages: W5-A4 and W5-A6 in the wave-c car, 2026-10-31)**
 

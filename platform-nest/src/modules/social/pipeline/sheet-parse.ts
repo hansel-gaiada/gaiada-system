@@ -9,7 +9,7 @@
 // fields ARE what the sheet shows). An Excel time-only cell is a date on 1899-12-30, which is not a date the team meant: it becomes just `HH:MM`.
 // A number is its plain string (no thousands separator, no exponent). A formula is its cached result, rich text its plain text, a hyperlink its
 // text, an error its code (`#N/A`), a boolean `TRUE`/`FALSE`, an empty cell `""`. The slave cells of a merged range are `""`: the value sits in
-// the range's top-left cell only.
+// the range's top-left cell only, and each xlsx tab also answers `merges` (SCP-6b1, BFF §63.23.9) so the import can tell a slave from an empty cell.
 //
 // THE LIMITS (400 `sheet_too_large` with `field`; an .xlsx past 32 MiB unpacked is `file`, see THE ZIP BOMB): 20 tabs, 2,000 rows and 60 columns per tab (after trailing empty rows and columns are trimmed),
 // 5,000 characters per cell. A non-empty cell past row 2,000 or column 60 is refused while the sheet is read, so a huge sheet is never held whole.
@@ -25,9 +25,14 @@ import { parseCsvRows, UnterminatedQuoteError } from "../../../core/csv";
 export const MAX_SHEET_BYTES = 2 * 1024 * 1024;
 export const SHEET_LIMITS = { tabs: 20, rows: 2000, columns: 60, cell: 5000 } as const;
 
+/** A merged range as `[top, left, bottom, right]`: 0-based and inclusive, in the trimmed rows' coordinates (SCP-6b1, BFF §63.23.9). */
+export type MergeRange = [number, number, number, number];
+
 export interface SheetTab {
   name: string;
   rows: string[][];
+  /** An `.xlsx` tab only (absent for csv and pasted text): the merged ranges, clipped to the trimmed area. */
+  merges?: MergeRange[];
 }
 
 const invalid = (field: string): never => {
@@ -156,6 +161,30 @@ export function assertZipInflatesWithin(bytes: Buffer, max: number): void {
   }
 }
 
+/** `A1:B2` as `[top, left, bottom, right]`, 0-based; undefined for anything else. */
+function mergeOfRef(ref: string): MergeRange | undefined {
+  const m = /^\$?([A-Z]{1,3})\$?(\d+):\$?([A-Z]{1,3})\$?(\d+)$/.exec(ref.trim().toUpperCase());
+  if (!m) return undefined;
+  const col = (letters: string): number => [...letters].reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0) - 1;
+  const [l, r] = [col(m[1]), col(m[3])];
+  const [t, b] = [Number(m[2]) - 1, Number(m[4]) - 1];
+  return [Math.min(t, b), Math.min(l, r), Math.max(t, b), Math.max(l, r)];
+}
+
+/** The merged ranges of a worksheet that fall inside the trimmed rows x columns, clipped to them; a range outside it, or of one cell once clipped, is dropped. */
+export function clipMerges(refs: readonly string[], rowCount: number, colCount: number): MergeRange[] {
+  const out: MergeRange[] = [];
+  for (const ref of refs) {
+    const m = mergeOfRef(ref);
+    if (!m) continue;
+    const [top, left] = [m[0], m[1]];
+    const [bottom, right] = [Math.min(m[2], rowCount - 1), Math.min(m[3], colCount - 1)];
+    if (top > bottom || left > right || (top === bottom && left === right)) continue;
+    out.push([top, left, bottom, right]);
+  }
+  return out.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+}
+
 /** An `.xlsx` as one tab per visible worksheet, in workbook order. 400 `unreadable_sheet` when exceljs cannot open it. */
 export async function tabsFromXlsx(bytes: Buffer): Promise<SheetTab[]> {
   assertZipInflatesWithin(bytes, MAX_XLSX_INFLATED_BYTES);
@@ -185,7 +214,9 @@ export async function tabsFromXlsx(bytes: Buffer): Promise<SheetTab[]> {
       while (grid.length < rowNumber - 1) grid.push([]);
       grid[rowNumber - 1] = cells.map((c) => c ?? "");
     });
-    return shapeTab(ws.name, grid);
+    const tab = shapeTab(ws.name, grid);
+    const refs = (ws.model as { merges?: string[] }).merges ?? [];
+    return { ...tab, merges: clipMerges(refs, tab.rows.length, tab.rows[0]?.length ?? 0) };
   });
 }
 

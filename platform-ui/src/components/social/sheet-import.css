@@ -51,6 +51,7 @@
 .scp-import__table td { vertical-align: top; }
 .scp-import__table tr.scp-import__row--refused { box-shadow: inset 3px 0 0 var(--status-critical-fg); background: var(--tint-hover); }
 .scp-import__table tr.scp-import__row--skipped { color: var(--erp-ink-60); }
+.scp-import__table tr.scp-import__row--joined td { padding-top: 0; color: var(--erp-ink-60); }
 .scp-import__outcome { font: 700 11px var(--font-body); white-space: nowrap; }
 .scp-import__outcome--refused { color: var(--status-critical-fg); }
 .scp-import__outcome--ready { color: var(--status-ok-fg); }

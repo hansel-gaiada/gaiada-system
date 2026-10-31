@@ -16,9 +16,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { applyImport, parseSheet, previewImport } from "@/lib/socialImportActions";
 import { shiftMonth } from "@/lib/deptCalendar";
+import { stripXlsxMedia } from "@/lib/xlsxStrip";
 import {
-  DATE_ORDER_LABEL, IMPORT_KIND_LABEL, IMPORT_STEPS, MAX_IMPORT_ROWS, MAX_SHEET_BYTES, blankRowIndexes, buildImportBody, columnLetter, detectHeaderRow,
-  duplicateColumns, fieldLabel, fieldsFor, guessColumns, headerCandidates, headerRowLabel, templateCsv, templateFilename, type DateOrder, type ImportAnswer, type ImportDraft, type ImportKind, type SheetTab,
+  DATE_ORDER_LABEL, IMPORT_KIND_LABEL, IMPORT_STEPS, MAX_IMPORT_ROWS, MAX_RAW_XLSX_BYTES, MAX_SHEET_BYTES, blankRowIndexes, buildImportBody, columnLetter, detectHeaderRow,
+  duplicateColumns, fieldLabel, fieldsFor, guessColumns, headerCandidates, headerRowLabel, isStoriesTab, mergesForSent, templateCsv, templateFilename,
+  type DateOrder, type ImportAnswer, type ImportDraft, type ImportKind, type SheetTab,
   type UnmatchedClient, type UnmatchedOfficer,
 } from "@/lib/sheetImport";
 import { SheetImportPreview, previewCounts, summaryText } from "./SheetImportPreview";
@@ -46,6 +48,23 @@ function fileToBase64(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+/** A file's bytes, read in the browser. */
+function fileToBytes(file: File): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("The file could not be read."));
+    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/** Bytes as base64, in slices so a large array does not overflow the call stack. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
 }
 
 /** Saves the template as a file, client-side (a Blob), so the page needs no route for it. */
@@ -125,6 +144,11 @@ export function SheetImport({
   /** The index (into the tab's rows) of the row that holds the column names; null: the sheet has none. */
   const [headerIdx, setHeaderIdx] = useState<number | null>(0);
   const [mapping, setMapping] = useState<Record<string, string>>({});
+  /** A plan's client (SCP-6b1, BFF §63.23.9): each row names it (the client column), or the whole file is for one engagement. */
+  const [clientMode, setClientMode] = useState<"column" | "one">("column");
+  const [wholeEngagement, setWholeEngagement] = useState("");
+  /** Every row of the tab is a story: the format column is not used. */
+  const [allStories, setAllStories] = useState(false);
   const [dateOrder, setDateOrder] = useState<DateOrder>("dmy");
   const [skip, setSkip] = useState<ReadonlySet<number>>(new Set());
   const [previewedSkip, setPreviewedSkip] = useState<ReadonlySet<number>>(new Set());
@@ -159,8 +183,10 @@ export function SheetImport({
   const errId = `${uid}-error`;
   const rowLimit = MAX_IMPORT_ROWS[kind];
 
+  const oneClient = kind === "plan" && clientMode === "one";
   const draft = (over: Partial<ImportDraft> = {}): ImportDraft => ({
-    kind, rows: sentRows, headerRow, mapping, skip, clientMatches, officerMatches, month, dateOrder, timeZone: browserZone(), ...over,
+    kind, rows: sentRows, headerRow, mapping, skip, clientMatches, officerMatches, month, dateOrder, timeZone: browserZone(),
+    engagementId: oneClient ? wholeEngagement : "", allStories: kind === "plan" && allStories, merges: mergesForSent(tab?.merges, headerIdx), ...over,
   });
 
   /**
@@ -171,7 +197,11 @@ export function SheetImport({
     const idx = header !== undefined ? header : t ? detectHeaderRow(nextKind, t.rows) : null;
     setHeaderIdx(idx);
     const guess = idx !== null && t && t.rows[idx] ? guessColumns(nextKind, t.rows[idx]) : {};
-    setMapping(Object.fromEntries(fieldsFor(nextKind).map((x) => [x.key, x.key in guess ? String(guess[x.key]) : ""])));
+    const stories = nextKind === "plan" && t !== null && isStoriesTab(t.name);
+    setAllStories(stories);
+    setClientMode(nextKind === "plan" && !("client" in guess) ? "one" : "column");
+    setWholeEngagement("");
+    setMapping(Object.fromEntries(fieldsFor(nextKind).map((x) => [x.key, x.key in guess && !(stories && x.key === "format") ? String(guess[x.key]) : ""])));
     setSkip(new Set(t ? blankRowIndexes(idx === null ? t.rows : t.rows.slice(idx)) : []));
     setPreviewedSkip(new Set());
     setClientMatches({}); setOfficerMatches({});
@@ -195,8 +225,18 @@ export function SheetImport({
       let res;
       if (source === "file") {
         if (!file) { setProblem({ text: "Choose an .xlsx or .csv file first.", field: "file" }); return; }
-        if (file.size > MAX_SHEET_BYTES) { setProblem({ text: "The file is over 2 MB. Cut the sheet down, or paste the rows instead.", field: "file" }); return; }
-        res = await parseSheet({ filename: file.name, contentBase64: await fileToBase64(file) });
+        const isXlsx = /\.xlsx$/i.test(file.name.trim());
+        if (isXlsx && file.size > MAX_RAW_XLSX_BYTES) { setProblem({ text: "This file is too large to read here", field: "file" }); return; }
+        if (!isXlsx && file.size > MAX_SHEET_BYTES) { setProblem({ text: "The file is over 2 MB. Cut the sheet down, or paste the rows instead.", field: "file" }); return; }
+        let contentBase64: string;
+        if (isXlsx) {
+          // SCP-6b1: the pictures pasted over the cells are left out here, so only the text goes up.
+          let bytes: Uint8Array;
+          try { bytes = stripXlsxMedia(await fileToBytes(file)); } catch { setProblem({ text: "This file can't be read here. Save it again as .xlsx or .csv and try again.", field: "file" }); return; }
+          if (bytes.length > MAX_SHEET_BYTES) { setProblem({ text: "The file is over 2 MB even without its pictures. Cut the sheet down, or paste the rows instead.", field: "file" }); return; }
+          contentBase64 = bytesToBase64(bytes);
+        } else contentBase64 = await fileToBase64(file);
+        res = await parseSheet({ filename: file.name, contentBase64 });
       } else {
         if (pasted.trim() === "") { setProblem({ text: "Paste the rows first.", field: "text" }); return; }
         res = await parseSheet({ text: pasted });
@@ -283,8 +323,11 @@ export function SheetImport({
   const sheetProblem = !tab ? null : rowsToImport <= 0 ? "This tab has no rows to import." : tooManyRows ? `This tab has ${sentRows.length} rows${offset > 0 ? " from the header row on" : ""}; one import takes ${rowLimit} at most. Split the sheet.` : null;
 
   // ── Step 3's checks ────────────────────────────────────────────────────────────────────────────────────────
-  const missing = fields.filter((x) => x.required && (mapping[x.key] ?? "") === "").map((x) => x.label);
-  const dupes = duplicateColumns(mapping);
+  const missing = fields.filter((x) => x.required && !(oneClient && x.key === "client") && (mapping[x.key] ?? "") === "").map((x) => x.label);
+  if (oneClient && wholeEngagement === "") missing.push("the client the whole file is for");
+  // The client column (whole file for one client) and the format column (a tab of stories) are not sent, so they cannot clash with another field's.
+  const usedMapping = Object.fromEntries(Object.entries(mapping).filter(([k]) => !(oneClient && k === "client") && !(kind === "plan" && allStories && k === "format")));
+  const dupes = duplicateColumns(usedMapping);
   const dupeText = dupes.map((d) => `${columnLetter(d.column)} is given to ${d.fields.map((k) => fieldLabel(kind, k)).join(" and ")}`).join("; ");
   const columnsProblem = missing.length > 0 ? `Choose a column for: ${missing.join(", ")}.` : dupes.length > 0 ? `One column can hold one field only: ${dupeText}.` : null;
 
@@ -378,6 +421,7 @@ export function SheetImport({
                 id={`${uid}-file`} className="scp-input" type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 onChange={(e) => { setFile(e.target.files?.[0] ?? null); setProblem(null); }} {...describe("file")}
               />
+              <span className="scp-field__hint">Pictures in the file are left out: designs are added on each post.</span>
             </div>
           ) : (
             <div className="scp-field">
@@ -441,8 +485,44 @@ export function SheetImport({
             {headerRow ? "The page matched the header row to the fields; change any guess." : "There is no header row to guess from: choose the columns yourself."}
             {" "}A field left on &ldquo;Not in my sheet&rdquo; is not imported, and an empty cell never clears a value.
           </p>
+          {kind === "plan" && (
+            <fieldset className="scp-import__choices">
+              <legend>Who is the client?</legend>
+              <label className="scp-import__choice">
+                <input type="radio" name={`${uid}-clientmode`} checked={clientMode === "column"} onChange={() => setClientMode("column")} />
+                <span>Each row names its client<small>Choose the client column below.</small></span>
+              </label>
+              <label className="scp-import__choice">
+                <input type="radio" name={`${uid}-clientmode`} checked={clientMode === "one"} onChange={() => setClientMode("one")} />
+                <span>The whole file is for one client<small>Every row is a post of the client you pick.</small></span>
+              </label>
+              {clientMode === "one" && (
+                <div className="scp-field">
+                  <label htmlFor={`${uid}-whole`}>Client for the whole file</label>
+                  <select id={`${uid}-whole`} className="scp-input" value={wholeEngagement} onChange={(e) => setWholeEngagement(e.target.value)} {...describe("engagementId")}>
+                    <option value="">Choose a client</option>
+                    {engagements.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  </select>
+                </div>
+              )}
+            </fieldset>
+          )}
+          {kind === "plan" && (
+            <label className="scp-import__choice">
+              <input
+                type="checkbox" checked={allStories}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setAllStories(on);
+                  const guessed = headers.length > 0 ? guessColumns(kind, headers).format : undefined;
+                  setMapping((m) => ({ ...m, format: on ? "" : guessed !== undefined ? String(guessed) : m.format ?? "" }));
+                }}
+              />
+              <span>Every row is a story<small>The format column is not used: each row is read as a story.</small></span>
+            </label>
+          )}
           <ul className="scp-import__fields">
-            {fields.map((x) => {
+            {fields.filter((x) => !(oneClient && x.key === "client") && !(kind === "plan" && allStories && x.key === "format")).map((x) => {
               const id = `${uid}-col-${x.key}`;
               return (
                 <li key={x.key} className="scp-import__field">

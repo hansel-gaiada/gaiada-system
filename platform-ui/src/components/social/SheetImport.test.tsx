@@ -6,14 +6,17 @@ import { render, screen, within, fireEvent, waitFor } from "@testing-library/rea
 // links; a 409 `import_rows_refused` draws the returned preview again with the refused rows marked. Invented names only.
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("@/lib/socialImportActions", () => ({ parseSheet: vi.fn(), previewImport: vi.fn(), applyImport: vi.fn() }));
+vi.mock("@/lib/xlsxStrip", () => ({ stripXlsxMedia: vi.fn() }));
 
 import { applyImport, parseSheet, previewImport } from "@/lib/socialImportActions";
-import type { ImportAnswer, ImportRow } from "@/lib/sheetImport";
+import { stripXlsxMedia } from "@/lib/xlsxStrip";
+import type { ImportAnswer, ImportRow, Merge } from "@/lib/sheetImport";
 import { SheetImport } from "./SheetImport";
 
 const parse = vi.mocked(parseSheet);
 const preview = vi.mocked(previewImport);
 const apply = vi.mocked(applyImport);
+const strip = vi.mocked(stripXlsxMedia);
 
 const PLAN_ROWS = [
   ["Client", "Date", "Title"],
@@ -69,7 +72,7 @@ async function previewAgain() {
 }
 
 /** Step 1 to 3 on a pasted plan: leaves the wizard on the columns step. */
-async function toColumns(tabs = [{ name: "Pasted", rows: PLAN_ROWS }]) {
+async function toColumns(tabs: Array<{ name: string; rows: string[][]; merges?: Merge[] }> = [{ name: "Pasted", rows: PLAN_ROWS }]) {
   parse.mockResolvedValue({ ok: true, tabs });
   mount();
   pickPlan();
@@ -82,7 +85,7 @@ async function toColumns(tabs = [{ name: "Pasted", rows: PLAN_ROWS }]) {
   await screen.findByRole("heading", { name: /Which column is which/ });
 }
 
-beforeEach(() => { parse.mockReset(); preview.mockReset(); apply.mockReset(); });
+beforeEach(() => { parse.mockReset(); preview.mockReset(); apply.mockReset(); strip.mockReset(); });
 afterEach(() => vi.restoreAllMocks());
 
 describe("the steps", () => {
@@ -218,6 +221,8 @@ describe("the columns", () => {
     click("Back");
     fireEvent.change(screen.getByLabelText("Which row holds the column names?"), { target: { value: "none" } });
     click("Next: the columns");
+    // No client column is guessed, so the whole file is for one client by default (SCP-6b1): the person chooses the column route.
+    fireEvent.click(await screen.findByRole("radio", { name: /Each row names its client/ }));
     expect(await screen.findByLabelText(/^Client/)).toHaveValue("");
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
     expect(screen.getByText(/Choose a column for: Client, Posting date\./)).toBeInTheDocument();
@@ -322,6 +327,7 @@ describe("title rows above the header", () => {
     fireEvent.change(headerSelect(), { target: { value: "none" } });
     expect(headerSelect()).toHaveValue("none");
     click("Next: the columns");
+    fireEvent.click(await screen.findByRole("radio", { name: /Each row names its client/ }));
     expect(await screen.findByLabelText(/^Client/)).toHaveValue("");
     expect(screen.getByText(/There is no header row to guess from/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
@@ -551,5 +557,115 @@ describe("the CSV template", () => {
     expect(blobs[0].size).toBe("Client,Officer,Posts per month,Creative source,Batch,Report format,Report due day,Platforms,Formats,Default post time\r\n".length);
     expect(blobs[1].type).toContain("text/csv");
     expect(revoke).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── SCP-6b1: the team's real file (BFF §63.23.9) ────────────────────────────────────────────────────────────────────────────
+const STORY_ROWS = [
+  ["Client:", "Sample Resort"],
+  ["NUMBER", "POSTING DATE", "TYPE STORIES", "LINK VIDEO/VIDEO PREVIEW", "THUMBNAIL/PHOTO/VIDEO EDITED", "TEXT", "CTA LINK"],
+  ["1", "6/11/2026", "PHOTO", "https://drive.example/a", "", "", "Plan Your Stay\nhttps://example.test"],
+  ["2", "", "VIDEO", "https://drive.example/b", "", "", ""],
+  ["3", "7/11/2026", "VIDEO", "", "", "", ""],
+];
+
+describe("the team's real file", () => {
+  it("leaves the pictures out of an .xlsx before it goes up, and says so", async () => {
+    strip.mockReturnValue(new Uint8Array([1, 2, 3, 4]));
+    parse.mockResolvedValue({ ok: true, tabs: [{ name: "plan", rows: PLAN_ROWS }] });
+    mount();
+    click("Next: the sheet");
+    expect(screen.getByText("Pictures in the file are left out: designs are added on each post.")).toBeInTheDocument();
+    const file = new File([new Uint8Array([9, 9, 9, 9, 9, 9])], "monthly.xlsx");
+    fireEvent.change(screen.getByLabelText(/Sheet file/), { target: { files: [file] } });
+    click("Read the sheet");
+    await waitFor(() => expect(parse).toHaveBeenCalledWith({ filename: "monthly.xlsx", contentBase64: "AQIDBA==" }));
+    expect(strip).toHaveBeenCalledTimes(1);
+    expect(Array.from(strip.mock.calls[0][0])).toEqual([9, 9, 9, 9, 9, 9]);
+  });
+
+  it("refuses a file over 300 MB before reading it, and says it cannot read a file it cannot unzip", async () => {
+    mount();
+    click("Next: the sheet");
+    const big = new File(["x"], "huge.xlsx");
+    Object.defineProperty(big, "size", { value: 301 * 1024 * 1024 });
+    fireEvent.change(screen.getByLabelText(/Sheet file/), { target: { files: [big] } });
+    click("Read the sheet");
+    expect(await screen.findByRole("alert")).toHaveTextContent("This file is too large to read here");
+    expect(strip).not.toHaveBeenCalled();
+    expect(parse).not.toHaveBeenCalled();
+
+    strip.mockImplementation(() => { throw new Error("zip64"); });
+    fireEvent.change(screen.getByLabelText(/Sheet file/), { target: { files: [new File(["x"], "odd.xlsx")] } });
+    click("Read the sheet");
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("This file can't be read here"));
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("a tab of stories is all stories with the whole file for one client, and sends the merges in the rows' own coordinates", async () => {
+    preview.mockResolvedValue({ ok: true, answer: answer([rowOf({ row: 1, outcome: "ready", clientName: "Gamma Ltd", post: post("Story 6 Nov") })]) });
+    await toColumns([{ name: "STORIES", rows: STORY_ROWS, merges: [[2, 1, 3, 1]] }]);
+    expect(screen.getByRole("checkbox", { name: /Every row is a story/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /The whole file is for one client/ })).toBeChecked();
+    expect(screen.queryByLabelText(/^Format/)).toBeNull(); // the format column is not used
+    expect(screen.getByLabelText(/^Posting date/)).toHaveValue("1");
+    expect(screen.getByLabelText(/^Footage and asset links/)).toHaveValue("3");
+    expect(screen.getByLabelText(/^Text on the design/)).toHaveValue("5");
+    expect(screen.getByLabelText(/^Call to action/)).toHaveValue("6");
+    expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
+    expect(screen.getByText(/Choose a column for: the client the whole file is for\./)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Client for the whole file"), { target: { value: "e-gamma" } });
+    click("Preview");
+    await screen.findByRole("heading", { name: /5\. Preview/ });
+    const body = preview.mock.calls[0][1];
+    expect(body.engagementId).toBe("e-gamma");
+    expect(body.allStories).toBe(true);
+    expect(body.columns).toEqual({ date: 1, assetLinks: 3, onAssetText: 5, cta: 6 });
+    expect(body.rows).toEqual(STORY_ROWS.slice(1));
+    expect(body.merges).toEqual([[1, 1, 2, 1]]); // the header was row 1, so the range moves up by one
+  });
+
+  it("can be switched back to a format column, and keeps the client column when the rows name their client", async () => {
+    preview.mockResolvedValue({ ok: true, answer: answer([rowOf({ row: 1, outcome: "ready", clientName: "Gamma Ltd", post: post("x") })]) });
+    const rows = [["Client", "Date", "Type of post"], ["Gamma Ltd", "6/11/2026", "REELS"]];
+    await toColumns([{ name: "Stories 2", rows }]);
+    expect(screen.getByRole("radio", { name: /Each row names its client/ })).toBeChecked();
+    const every = screen.getByRole("checkbox", { name: /Every row is a story/ });
+    expect(every).toBeChecked();
+    fireEvent.click(every);
+    expect(await screen.findByLabelText(/^Format/)).toHaveValue("2"); // the guess comes back
+    click("Preview");
+    await screen.findByRole("heading", { name: /5\. Preview/ });
+    const body = preview.mock.calls[0][1];
+    expect(body.columns).toEqual({ client: 0, date: 1, format: 2 });
+    expect(body).not.toHaveProperty("allStories");
+    expect(body).not.toHaveProperty("engagementId");
+  });
+
+  it("shows a joined row under its post as 'Continues the post above', with nothing to untick, and counts it apart", async () => {
+    const joined = rowOf({ row: 2, outcome: "joined", joinedTo: 1, clientName: "Brand Alpha" });
+    preview.mockResolvedValue({ ok: true, answer: answer([alpha, joined, blank]) });
+    await toColumns();
+    click("Preview");
+    await screen.findByRole("heading", { name: /5\. Preview/ });
+    expect(screen.getByText(/2 rows: 1 ready, 0 already there, 0 refused, 1 skipped, 1 continues the post above\./)).toBeInTheDocument();
+    expect(screen.getByText("Continues the post above", { selector: "span" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Import row 3" })).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Import row 2" })).toBeChecked();
+  });
+
+  it("words the new warnings in the preview", async () => {
+    const warned = rowOf({
+      row: 1, outcome: "ready", clientName: "Brand Alpha", post: post("Story 6 Nov"),
+      warnings: [{ field: "date", code: "date_from_merged_cell" }, { field: "title", code: "title_generated" }, { field: "title", code: "title_from_cta" }, { field: "title", code: "title_from_on_asset_text" }],
+    });
+    preview.mockResolvedValue({ ok: true, answer: answer([warned]) });
+    await toColumns();
+    click("Preview");
+    await screen.findByRole("heading", { name: /5\. Preview/ });
+    expect(screen.getByText(/Takes the date of the row above \(a merged cell\)\./)).toBeInTheDocument();
+    expect(screen.getByText(/made from the format and the date/)).toBeInTheDocument();
+    expect(screen.getByText(/call to action's first line is used/)).toBeInTheDocument();
+    expect(screen.getByText(/first line of the text on the design is used/)).toBeInTheDocument();
   });
 });

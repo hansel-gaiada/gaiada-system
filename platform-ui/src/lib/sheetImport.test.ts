@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  ALLOCATION_FIELDS, HEADER_ALIASES, IMPORT_STEPS, PLAN_FIELDS, asImportAnswer, asParseAnswer, blankRowIndexes, buildImportBody, columnLetter, detectHeaderRow,
-  duplicateColumns, guessColumns, headerCandidates, headerRowLabel, importRefusalText, normalizeHeader, rowCodeText, scheduledText, templateCsv, templateHeaders, valueText, type ImportDraft,
+  ALLOCATION_FIELDS, HEADER_ALIASES, HEADER_BLOCKERS, IMPORT_STEPS, PLAN_FIELDS, asImportAnswer, asParseAnswer, blankRowIndexes, buildImportBody, columnLetter, detectHeaderRow,
+  duplicateColumns, guessColumns, headerCandidates, headerRowLabel, importRefusalText, isStoriesTab, mergesForSent, normalizeHeader, rowCodeText, scheduledText, templateCsv,
+  templateHeaders, valueText, type ImportDraft, type Merge,
 } from "./sheetImport";
 
 // SCP-6a (BFF §63.23): the sheet import's pure half: the header aliases and the guess, the CSV template, the request body, the answers' parsers and the
@@ -150,12 +151,12 @@ describe("the template", () => {
   it("has the contract's headers in the contract's field order, one line", () => {
     expect(templateCsv("allocation")).toBe("Client,Officer,Posts per month,Creative source,Batch,Report format,Report due day,Platforms,Formats,Default post time\r\n");
     expect(templateCsv("plan")).toBe(
-      "Client,Date,Time,Title,Format,Pillar,Platform,Extra,Angle,Objective,Key message,Visual direction,Caption,Text on design,CTA,Hashtags\r\n",
+      "Client,Date,Time,Title,Format,Pillar,Platform,Extra,Angle,Objective,Key message,Visual direction,Caption,Text on design,CTA,Hashtags,Asset links\r\n",
     );
   });
   it("carries the field order of 63.23.4 and 63.23.5", () => {
     expect(ALLOCATION_FIELDS.map((f) => f.key)).toEqual(["client", "officer", "postsPerCycle", "creativeSource", "deliveryBatch", "reportFormat", "reportDueDay", "platforms", "formats", "defaultPostTime"]);
-    expect(PLAN_FIELDS.map((f) => f.key)).toEqual(["client", "date", "time", "title", "format", "pillar", "placement", "isExtra", "angle", "objective", "keyMessage", "visualDirection", "caption", "onAssetText", "cta", "hashtags"]);
+    expect(PLAN_FIELDS.map((f) => f.key)).toEqual(["client", "date", "time", "title", "format", "pillar", "placement", "isExtra", "angle", "objective", "keyMessage", "visualDirection", "caption", "onAssetText", "cta", "hashtags", "assetLinks"]);
   });
   it("marks client (and the plan's date) as the only required fields", () => {
     expect(ALLOCATION_FIELDS.filter((f) => f.required).map((f) => f.key)).toEqual(["client"]);
@@ -294,5 +295,98 @@ describe("the words", () => {
     expect(importRefusalText("invalid_field", "clientMatches.Alpha")).toMatch(/engagement/);
     expect(importRefusalText("import_rows_refused")).toMatch(/nothing was written/i);
     expect(importRefusalText("something_else")).toBe("something_else");
+  });
+});
+
+// ── SCP-6b1: the team's real file (BFF §63.23.9) ────────────────────────────────────────────────────────────────────────────
+// The header rows below are the real file's, word for word (they are column names, not client content), so a change to the aliases or the blockers
+// that breaks the guess for the team's own sheet fails here.
+const CONTENT_PLAN_HEADER = [
+  "POST DATE", "TYPE OF POST", "LINK FOOTAGE", "EDITED IG & FB CONTENT", "EDITED IG & FB CONTENT", "EDITED IG & FB CONTENT", "EDITED IG & FB CONTENT",
+  "EDITED IG & FB CONTENT", "EDITED IG & FB CONTENT", "EDITED IG & FB CONTENT", "INSTAGRAM CONTENT ANGLES", "CAPTION IG", "CAPTION FB", "INTERNAL CHECKING",
+  "CLIENT CHECKING", "FEEDBACK", "STATUS POSTING", "TAG IG ACCOUNT", "LINK POST", "AI CHECK NOTES\n(flag only · SMM to edit)\nCRITICAL red · MAJOR orange · MINOR amber · CHECK green",
+];
+const STORIES_HEADER = [
+  "NUMBER", "POSTING DATE", "TYPE STORIES", "LINK VIDEO/VIDEO PREVIEW", "THUMBNAIL/PHOTO/VIDEO EDITED", "TEXT", "CTA LINK", "TAG IG ACCOUNT",
+  "STORY CONTENT TYPES", "INTERNAL CHECKING", "CLIENT APPROVAL", "FEEDBACK", "STATUS POST", "AI CHECK NOTES\n(flag only · SMM to edit)\nCRITICAL red · MAJOR orange · MINOR amber · CHECK green",
+];
+
+describe("the real file's headers (SCP-6b1)", () => {
+  it("CONTENT PLAN: date, format, angle, caption (the Instagram one) and the footage links; no client and no title", () => {
+    expect(guessColumns("plan", CONTENT_PLAN_HEADER)).toEqual({ date: 0, format: 1, assetLinks: 2, angle: 10, caption: 11 });
+  });
+  it("STORIES: date, format, the footage links, the text on the design and the call to action; no client and no title", () => {
+    expect(guessColumns("plan", STORIES_HEADER)).toEqual({ date: 1, format: 2, assetLinks: 3, onAssetText: 5, cta: 6 });
+  });
+  it("finds the header row among the title rows above it", () => {
+    const rows = [["PERIOD", "NOVEMBER"], ["OUTPUT", "12"], ["Client:", "Sample Resort"], [], ["Link Drive:", ""], CONTENT_PLAN_HEADER];
+    expect(detectHeaderRow("plan", rows)).toBe(5);
+  });
+  it("a blocker word stops a whole-word guess but never an exact one", () => {
+    expect(guessColumns("plan", ["Tag IG Account"])).toEqual({});
+    expect(guessColumns("plan", ["Client approval"])).toEqual({});
+    expect(guessColumns("plan", ["Account", "Edited content"])).toEqual({ client: 0 });
+    expect(guessColumns("plan", ["Content"])).toEqual({ title: 0 });
+    expect(guessColumns("plan", ["Client", "Title"])).toEqual({ client: 0, title: 1 });
+  });
+  it("guesses the asset links from the spellings the team may use", () => {
+    for (const h of ["Link Footage", "Footage", "Link Video", "Video Preview", "Link Drive", "Drive link", "Asset links", "Assets"]) {
+      expect(guessColumns("plan", ["Date", h]), h).toEqual({ date: 0, assetLinks: 1 });
+    }
+  });
+  it("has a blocker list per field that names only known fields", () => {
+    for (const k of Object.keys(HEADER_BLOCKERS.plan)) expect(PLAN_FIELDS.map((f) => f.key)).toContain(k);
+  });
+});
+
+describe("merged cells and the whole-file settings in the body (SCP-6b1)", () => {
+  const draft = (over: Partial<ImportDraft> = {}): ImportDraft => ({
+    kind: "plan", rows: [["h"], ["a"]], headerRow: true, mapping: { client: "0", date: "1", format: "2" }, skip: new Set(), clientMatches: {}, officerMatches: {},
+    month: "2026-11", dateOrder: "dmy", timeZone: "Asia/Jakarta", ...over,
+  });
+  it("sends no client column with an engagementId, and no format column with allStories", () => {
+    const b = buildImportBody(draft({ engagementId: "e-1", allStories: true }), true);
+    expect(b.columns).toEqual({ date: 1 });
+    expect(b.engagementId).toBe("e-1");
+    expect(b.allStories).toBe(true);
+    const plain = buildImportBody(draft(), true);
+    expect(plain.columns).toEqual({ client: 0, date: 1, format: 2 });
+    expect(plain).not.toHaveProperty("engagementId");
+    expect(plain).not.toHaveProperty("allStories");
+    expect(plain).not.toHaveProperty("merges");
+  });
+  it("sends the merges only for a plan, and only when there are some", () => {
+    expect(buildImportBody(draft({ merges: [[1, 0, 2, 0]] }), true).merges).toEqual([[1, 0, 2, 0]]);
+    expect(buildImportBody(draft({ merges: [] }), true)).not.toHaveProperty("merges");
+    expect(buildImportBody(draft({ kind: "allocation", merges: [[1, 0, 2, 0]], engagementId: "e", allStories: true }), true)).not.toHaveProperty("merges");
+  });
+  it("moves the merges into the coordinates of the rows sent, and leaves out a range that starts above the header", () => {
+    const merges: Merge[] = [[2, 0, 3, 0], [5, 1, 7, 4], [6, 0, 7, 0]];
+    expect(mergesForSent(merges, 5)).toEqual([[0, 1, 2, 4], [1, 0, 2, 0]]);
+    expect(mergesForSent(merges, null)).toEqual(merges);
+    expect(mergesForSent(undefined, 2)).toEqual([]);
+  });
+  it("keeps the merges an xlsx tab answers, and drops a malformed range", () => {
+    const a = asParseAnswer({ tabs: [{ name: "Plan", rows: [["a"]], merges: [[1, 0, 2, 0], [1, 2], "x", [3, 0, 1, 0]] }, { name: "Csv", rows: [["a"]] }] });
+    expect(a.tabs[0].merges).toEqual([[1, 0, 2, 0]]);
+    expect(a.tabs[1]).not.toHaveProperty("merges");
+  });
+  it("reads a joined row and the summary's joined count", () => {
+    const a = asImportAnswer({
+      dryRun: true, importId: null, summary: { rows: 2, ready: 1, unchanged: 0, refused: 0, skipped: 0, joined: 1 }, unmatched: { clients: [], officers: [] },
+      rows: [{ row: 0, outcome: "ready", refusals: [], warnings: [] }, { row: 1, outcome: "joined", joinedTo: 0, refusals: [], warnings: [] }],
+    });
+    expect(a.rows[1]).toMatchObject({ outcome: "joined", joinedTo: 0 });
+    expect(a.rows[0].joinedTo).toBeNull();
+    expect(a.summary.joined).toBe(1);
+  });
+  it("words the new warnings and the new refusals", () => {
+    expect(rowCodeText("date_from_merged_cell")).toBe("Takes the date of the row above (a merged cell).");
+    for (const c of ["title_from_on_asset_text", "title_from_cta", "title_generated", "asset_link_missing_url"]) expect(rowCodeText(c), c).not.toBe(c);
+    for (const f of ["engagementId", "allStories", "merges"]) expect(importRefusalText("invalid_field", f), f).not.toBe(`${f} is not valid.`);
+  });
+  it("names a tab of stories by 'stor', case ignored", () => {
+    expect(["STORIES", "Stories", "story", "IG Stories 2"].every(isStoriesTab)).toBe(true);
+    expect(["CONTENT PLAN", "Plan"].some(isStoriesTab)).toBe(false);
   });
 });

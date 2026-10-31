@@ -7,10 +7,12 @@
 
 export type ImportKind = "allocation" | "plan";
 export type DateOrder = "dmy" | "mdy" | "ymd";
-export type Outcome = "ready" | "unchanged" | "refused" | "skipped";
+export type Outcome = "ready" | "unchanged" | "refused" | "skipped" | "joined";
 
 /** BFF §63.23.1 and §63.23.2: the limits the routes enforce, mirrored so the page says so before it sends. */
 export const MAX_SHEET_BYTES = 2 * 1024 * 1024;
+/** SCP-6b1 (BFF §63.23.9): the biggest .xlsx the page opens in the browser, before its pictures are left out. */
+export const MAX_RAW_XLSX_BYTES = 300 * 1024 * 1024;
 export const MAX_IMPORT_ROWS: Readonly<Record<ImportKind, number>> = { allocation: 300, plan: 1000 };
 
 export const IMPORT_KIND_LABEL: Readonly<Record<ImportKind, string>> = { allocation: "The allocation", plan: "A month's plan" };
@@ -79,6 +81,7 @@ export const PLAN_FIELDS: readonly FieldSpec[] = [
   f("onAssetText", "Text on the design", "Text on design", "The words that sit on the image."),
   f("cta", "Call to action", "CTA", "The call to action."),
   f("hashtags", "Hashtags", "Hashtags", "Split on spaces, commas and new lines."),
+  f("assetLinks", "Footage and asset links", "Asset links", "Drive or other https links to the post's footage and designs, one per line. A label before a link, such as REEL:, is kept."),
 ];
 
 export const fieldsFor = (kind: ImportKind): readonly FieldSpec[] => (kind === "allocation" ? ALLOCATION_FIELDS : PLAN_FIELDS);
@@ -122,22 +125,41 @@ export const HEADER_ALIASES: Readonly<Record<ImportKind, Readonly<Record<string,
     pillar: ["pillar", "pilar", "content pillar", "pilar konten"],
     placement: ["platform", "platforms", "placement", "channel", "channels", "network", "networks"],
     isExtra: ["extra", "tambahan", "extra post", "post tambahan"],
-    angle: ["angle", "sudut pandang"],
+    angle: ["angle", "sudut pandang", "content angle", "content angles", "instagram content angles", "angles"],
     objective: ["objective", "tujuan", "goal", "objective post"],
     keyMessage: ["key message", "pesan utama", "pesan kunci", "main message"],
     visualDirection: ["visual direction", "brief visual", "visual brief", "referensi", "reference", "visual reference", "visual"],
-    caption: ["caption", "copy", "copywriting", "caption copy", "teks caption"],
-    onAssetText: ["on asset text", "text on asset", "text on design", "teks desain", "teks di desain", "teks pada desain", "headline", "design text"],
+    caption: ["caption", "copy", "copywriting", "caption copy", "teks caption", "caption ig", "caption instagram", "ig caption"],
+    onAssetText: [
+      "on asset text", "text on asset", "text on design", "teks desain", "teks di desain", "teks pada desain", "headline", "design text",
+      "text", "story text", "teks",
+    ],
     cta: ["cta", "call to action"],
     hashtags: ["hashtags", "hashtag", "tagar", "tags"],
+    // SCP-6b1: the footage and design links the team keeps in Drive (the real file's "LINK FOOTAGE" and "LINK VIDEO/VIDEO PREVIEW").
+    assetLinks: ["link footage", "footage", "link video", "video preview", "link video video preview", "link drive", "drive link", "asset links", "assets"],
   },
 };
 
-const NORMALIZED: Record<ImportKind, Array<{ field: string; aliases: string[] }>> = {
+/**
+ * SCP-6b1: words that block a pass-2 (whole-word) match of a field, so the real file's "TAG IG ACCOUNT" is not the client and "EDITED IG & FB CONTENT" is not
+ * the title. An exact match (pass 1) is never blocked. Data like `HEADER_ALIASES`: add a word here and nowhere else.
+ */
+export const HEADER_BLOCKERS: Readonly<Record<ImportKind, Readonly<Record<string, readonly string[]>>>> = {
+  allocation: {},
+  plan: {
+    client: ["tag", "check", "checking", "approval", "status", "feedback"],
+    title: ["edited", "link", "footage", "angle", "angles", "notes", "type", "types"],
+  },
+};
+
+const NORMALIZED: Record<ImportKind, Array<{ field: string; aliases: string[]; blockers: string[] }>> = {
   allocation: [], plan: [],
 };
 for (const kind of ["allocation", "plan"] as const) {
-  NORMALIZED[kind] = fieldsFor(kind).map((x) => ({ field: x.key, aliases: (HEADER_ALIASES[kind][x.key] ?? []).map(normalizeHeader) }));
+  NORMALIZED[kind] = fieldsFor(kind).map((x) => ({
+    field: x.key, aliases: (HEADER_ALIASES[kind][x.key] ?? []).map(normalizeHeader), blockers: (HEADER_BLOCKERS[kind][x.key] ?? []).map(normalizeHeader),
+  }));
 }
 
 const containsWords = (header: string, alias: string): boolean => ` ${header} `.includes(` ${alias} `);
@@ -155,11 +177,12 @@ export function guessColumns(kind: ImportKind, headers: readonly string[]): Reco
     const i = heads.findIndex((h, c) => h !== "" && !used.has(c) && aliases.includes(h));
     if (i >= 0) { out[field] = i; used.add(i); }
   }
-  for (const { field, aliases } of NORMALIZED[kind]) {
+  for (const { field, aliases, blockers } of NORMALIZED[kind]) {
     if (field in out) continue;
     let best: { col: number; len: number } | null = null;
     heads.forEach((h, c) => {
       if (h === "" || used.has(c)) return;
+      if (blockers.some((w) => containsWords(h, w))) return;
       for (const a of aliases) if (a.length >= 3 && containsWords(h, a) && (!best || a.length > best.len)) best = { col: c, len: a.length };
     });
     if (best) { out[field] = (best as { col: number }).col; used.add((best as { col: number }).col); }
@@ -220,7 +243,23 @@ export const templateFilename = (kind: ImportKind): string => `social-${kind}-im
 
 // ── Rows of the sheet ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export interface SheetTab { name: string; rows: string[][] }
+/** A merged range `[top, left, bottom, right]`, 0-based and inclusive (BFF §63.23.9). */
+export type Merge = [number, number, number, number];
+
+/** `merges` is an .xlsx tab's only: the ranges the server read, in the tab's rows. */
+export interface SheetTab { name: string; rows: string[][]; merges?: Merge[] }
+
+/**
+ * The tab's merged ranges in the coordinates of the rows that are sent (the rows from the header on): shifted up by the header's index, and a range that
+ * starts above the header left out (its slave rows are then plain rows).
+ */
+export function mergesForSent(merges: readonly Merge[] | undefined, headerIdx: number | null): Merge[] {
+  const shift = headerIdx ?? 0;
+  return (merges ?? []).filter((m) => m[0] >= shift).map((m): Merge => [m[0] - shift, m[1], m[2] - shift, m[3]]);
+}
+
+/** A tab whose name holds "stor" (Stories, Story, Storie) is a tab of stories: every row of it is one (BFF §63.23.9). */
+export const isStoriesTab = (name: string): boolean => /stor/i.test(name);
 
 /** The rows with no cell holding anything: the wizard unticks them, so a gap in the sheet does not refuse the whole import. */
 export function blankRowIndexes(rows: readonly (readonly string[])[]): number[] {
@@ -254,6 +293,10 @@ export interface ImportBody {
   month?: string;
   dateOrder?: DateOrder;
   timeZone?: string;
+  /** Plan only (SCP-6b1, BFF §63.23.9). */
+  engagementId?: string;
+  allStories?: boolean;
+  merges?: Merge[];
 }
 
 export interface ImportDraft {
@@ -267,6 +310,12 @@ export interface ImportDraft {
   month: string;
   dateOrder: DateOrder;
   timeZone: string;
+  /** Plan only. The engagement the whole file is for ("" or absent: each row names its client). */
+  engagementId?: string;
+  /** Plan only. Every row is a story. */
+  allStories?: boolean;
+  /** Plan only. The merged ranges, in the coordinates of `rows`. */
+  merges?: readonly Merge[];
 }
 
 const nonEmpty = (o: Readonly<Record<string, string>>): Record<string, string> | undefined => {
@@ -277,7 +326,10 @@ const nonEmpty = (o: Readonly<Record<string, string>>): Record<string, string> |
 /** The body of `POST import/allocation` or `import/plan`. A field left on "not in my sheet" is left out; the empty picks are left out. */
 export function buildImportBody(d: ImportDraft, dryRun: boolean): ImportBody {
   const columns: Record<string, number> = {};
+  const oneClient = d.kind === "plan" && !!d.engagementId;
+  const stories = d.kind === "plan" && d.allStories === true;
   for (const x of fieldsFor(d.kind)) {
+    if ((oneClient && x.key === "client") || (stories && x.key === "format")) continue; // the route refuses each beside its whole-file setting
     const v = d.mapping[x.key];
     if (v !== undefined && v !== "") columns[x.key] = Number(v);
   }
@@ -288,6 +340,9 @@ export function buildImportBody(d: ImportDraft, dryRun: boolean): ImportBody {
     ...(nonEmpty(d.clientMatches) ? { clientMatches: nonEmpty(d.clientMatches) } : {}),
     ...(d.kind === "allocation" && nonEmpty(d.officerMatches) ? { officerMatches: nonEmpty(d.officerMatches) } : {}),
     ...(d.kind === "plan" ? { month: d.month, dateOrder: d.dateOrder, timeZone: d.timeZone } : {}),
+    ...(oneClient ? { engagementId: d.engagementId } : {}),
+    ...(stories ? { allStories: true } : {}),
+    ...(d.kind === "plan" && d.merges && d.merges.length > 0 ? { merges: d.merges.map((m): Merge => [m[0], m[1], m[2], m[3]]) } : {}),
   };
 }
 
@@ -308,6 +363,8 @@ export interface ImportRow {
   /** A plan row: the cycle it lands in, and the post. */
   cycle: { cycleId: string | null; deadline: string | null; created: boolean } | null;
   post: { id: string | null; title: string | null; format: string | null; scheduledAt: string | null; isExtra: boolean; placement: string[] } | null;
+  /** SCP-6b1: set on a row that continues the post of that row (the row's index, as `row`). */
+  joinedTo?: number | null;
 }
 
 export interface UnmatchedClient { sheetName: string; rows: number[]; suggestions: Array<{ engagementId: string; clientName: string }> }
@@ -316,7 +373,7 @@ export interface UnmatchedOfficer { sheetName: string; rows: number[] }
 export interface ImportAnswer {
   dryRun: boolean;
   importId: string | null;
-  summary: { rows: number; ready: number; unchanged: number; refused: number; skipped: number };
+  summary: { rows: number; ready: number; unchanged: number; refused: number; skipped: number; joined?: number };
   unmatched: { clients: UnmatchedClient[]; officers: UnmatchedOfficer[] };
   rows: ImportRow[];
 }
@@ -326,7 +383,14 @@ const str = (v: unknown): string | null => (typeof v === "string" && v ? v : nul
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const nums = (v: unknown): number[] => (Array.isArray(v) ? v.filter((x): x is number => typeof x === "number" && Number.isFinite(x)) : []);
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
-const OUTCOMES: readonly string[] = ["ready", "unchanged", "refused", "skipped"];
+const OUTCOMES: readonly string[] = ["ready", "unchanged", "refused", "skipped", "joined"];
+
+/** An .xlsx tab's merged ranges as the server answered them; anything that is not four whole numbers is left out. */
+function asMerges(v: unknown): Merge[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  return v.filter((m): m is Merge => Array.isArray(m) && m.length === 4 && m.every((n) => Number.isInteger(n) && n >= 0) && m[0] <= m[2] && m[1] <= m[3])
+    .map((m): Merge => [m[0], m[1], m[2], m[3]]);
+}
 
 /** `POST import/parse`'s answer. Throws on a body that is not one (the action turns that into a refusal the page words). */
 export function asParseAnswer(raw: unknown): { tabs: SheetTab[] } {
@@ -335,7 +399,8 @@ export function asParseAnswer(raw: unknown): { tabs: SheetTab[] } {
   for (const t of raw.tabs) {
     if (!isObj(t) || !Array.isArray(t.rows)) continue;
     const rows = t.rows.filter(Array.isArray).map((r: unknown[]) => r.map((c) => (typeof c === "string" ? c : c == null ? "" : String(c))));
-    tabs.push({ name: str(t.name) ?? `Tab ${tabs.length + 1}`, rows });
+    const merges = asMerges(t.merges);
+    tabs.push({ name: str(t.name) ?? `Tab ${tabs.length + 1}`, rows, ...(merges ? { merges } : {}) });
   }
   return { tabs };
 }
@@ -352,7 +417,7 @@ function asImportRow(raw: unknown): ImportRow | null {
     : null;
   return {
     row: raw.row as number, outcome: raw.outcome as Outcome, refusals: issues(raw.refusals), warnings: issues(raw.warnings),
-    engagementId: str(raw.engagementId), clientName: str(raw.clientName), changes, cycle,
+    engagementId: str(raw.engagementId), clientName: str(raw.clientName), changes, cycle, joinedTo: num(raw.joinedTo),
     post: p ? {
       id: str(p.id), title: str(p.title), format: str(p.format), scheduledAt: str(p.scheduledAt), isExtra: p.isExtra === true,
       placement: Array.isArray(p.placement) ? strings(p.placement) : (str(p.placement) ? [p.placement as string] : []),
@@ -379,6 +444,7 @@ export function asImportAnswer(raw: unknown): ImportAnswer {
     summary: {
       rows: num(s.rows) ?? rows.length, ready: num(s.ready) ?? count("ready"), unchanged: num(s.unchanged) ?? count("unchanged"),
       refused: num(s.refused) ?? count("refused"), skipped: num(s.skipped) ?? count("skipped"),
+      ...(num(s.joined) !== null && (num(s.joined) as number) > 0 ? { joined: num(s.joined) as number } : count("joined") > 0 ? { joined: count("joined") } : {}),
     },
     unmatched: { clients, officers }, rows,
   };
@@ -387,7 +453,7 @@ export function asImportAnswer(raw: unknown): ImportAnswer {
 // ── The words ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const OUTCOME_LABEL: Readonly<Record<Outcome, string>> = {
-  ready: "Ready", unchanged: "Already there", refused: "Refused", skipped: "Skipped",
+  ready: "Ready", unchanged: "Already there", refused: "Refused", skipped: "Skipped", joined: "Continues the post above",
 };
 
 /** BFF §63.23.3's row codes, each as a sentence. `field` is the field's label, when the code names one. */
@@ -408,6 +474,11 @@ export function rowCodeText(code: string, field?: string): string {
     case "no_cycle_deadline": return "This client has no deadline for the month and no batch to work one out from. Set its batch in the Allocation, or its deadline in Settings, first.";
     // warnings
     case "title_from_caption": return "There is no title, so the first line of the caption is used.";
+    case "title_from_on_asset_text": return "There is no title or caption, so the first line of the text on the design is used.";
+    case "title_from_cta": return "There is no title, caption or text on the design, so the call to action's first line is used.";
+    case "title_generated": return "There is nothing to take a title from, so one was made from the format and the date.";
+    case "date_from_merged_cell": return "Takes the date of the row above (a merged cell).";
+    case "asset_link_missing_url": return "The footage cell has text but no https link, so no link is kept.";
     case "default_time_used": return "There is no time, so the client's default time (or 09:00) is used.";
     case "same_title_in_cycle": return "Another post of this month has the same title.";
     case "discarded_since": return "This post was imported before and discarded since. It is not brought back.";
@@ -433,6 +504,9 @@ export function importRefusalText(code: string, field?: string): string {
       if (field === "month") return "The month must be this month or later.";
       if (field === "timeZone") return "The browser's time zone is not one the ERP knows.";
       if (field === "dateOrder") return "The date order is not one the ERP knows.";
+      if (field === "engagementId") return "The client you chose for the whole file is not an open engagement of this company any more. Reload and choose again.";
+      if (field === "allStories") return "A file of stories cannot also have a format column. Switch one of them off.";
+      if (field === "merges") return "The merged cells of this tab could not be read. Read the sheet again.";
       if (field === "rows") return "There are more rows than one import takes. Split the sheet.";
       if (field && /^columns\b/.test(field)) return "The columns are not valid: a required field is missing, or one column is given to two fields.";
       if (field && /^clientMatches\./.test(field)) return "A client you picked is not an open engagement of this company any more. Reload and pick again.";

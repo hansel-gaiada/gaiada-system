@@ -4,9 +4,9 @@ import { describe, it, expect } from "vitest";
 import { BadRequestException } from "@nestjs/common";
 import { instantInTz } from "../../../core/activity-kinds";
 import {
-  DEFAULT_POST_TIME, cyclesToCreate, finishPlan, importPostId, isKnownTimeZone, matchClient, matchOfficer, normalizeName, parseImportBody,
+  DEFAULT_POST_TIME, cyclesToCreate, finishPlan, generatedTitle, importPostId, isHashtagsOnly, isKnownTimeZone, matchClient, matchOfficer, normalizeName, parseImportBody,
   previewAllocation, readBatch, readCreativeSource, readDate, readFormat, readFormats, readHashtags, readNetworks, readReportFormat, readTime,
-  readWholeNumber, readYesNo, stagePlanRows, suggestNames, titleFromCaption,
+  readAssetLinks, readWholeNumber, readYesNo, splitAngleCell, stagePlanRows, suggestNames, titleFromCaption,
   type AllocationEngagement, type ImportBody, type Member, type PlanEngagement, type PlanLookups,
 } from "./sheet-import";
 
@@ -308,7 +308,7 @@ describe("parseImportBody", () => {
     expect(a.clientMatches.get("mock bakery")).toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     expect(a.officerMatches.get("ayu")).toBe("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
     const p = parseImportBody("plan", plan(), TODAY);
-    expect(p.plan).toEqual({ month: "2026-11", dateOrder: "dmy", timeZone: "Asia/Jakarta" });
+    expect(p.plan).toEqual({ month: "2026-11", dateOrder: "dmy", timeZone: "Asia/Jakarta", engagementId: null, allStories: false, merges: [] });
   });
 
   it("400 invalid_field names the field: the body, the two booleans, the columns", () => {
@@ -647,11 +647,15 @@ describe("the plan preview", () => {
     expect(answer.rows[0].warnings).toEqual([{ field: "time", code: "default_time_used" }]);
   });
 
-  it("the title: the sheet's, else the caption's first line (cut at 80) with a warning, else missing_title", () => {
-    const at = (title: string, caption: string) => run(planBody([PLAN_HEADER, full({ title, caption })])).answer.rows[0];
+  it("the title: the sheet's, else the caption's first line (cut at 80), the text on the design's, the call to action's, else one made from the format and the date", () => {
+    const at = (title: string, caption: string, o: Partial<Record<keyof typeof PLAN_COLUMNS, string>> = {}) => run(planBody([PLAN_HEADER, full({ title, caption, ...o })])).answer.rows[0];
     expect(at("", "A great caption\nmore")).toMatchObject({ outcome: "ready", post: { title: "A great caption" }, warnings: [{ field: "title", code: "title_from_caption" }] });
     expect(at("", "y".repeat(150)).post?.title).toBe("y".repeat(80));
-    expect(at("", "")).toMatchObject({ outcome: "refused", refusals: [{ field: "title", code: "missing_title" }] });
+    expect(at("", "")).toMatchObject({ outcome: "ready", post: { title: "Open daily" } });
+    expect(at("", "").warnings).toContainEqual({ field: "title", code: "title_from_on_asset_text" });
+    expect(at("", "", { onAssetText: "" })).toMatchObject({ outcome: "ready", post: { title: "Visit us" } });
+    expect(at("", "", { onAssetText: "", cta: "" })).toMatchObject({ outcome: "ready", post: { title: "Carousel 3 Nov" } });
+    expect(at("", "", { onAssetText: "", cta: "" }).warnings).toContainEqual({ field: "title", code: "title_generated" });
     expect(at("t".repeat(201), "")).toMatchObject({ outcome: "refused", refusals: [{ field: "title", code: "invalid_field" }] });
     expect(at("Plain", "caption").warnings.filter((w) => w.code === "title_from_caption")).toEqual([]);
   });
@@ -766,15 +770,347 @@ describe("the plan preview", () => {
     expect(answer.rows.map((r) => [r.row, r.outcome])).toEqual([[0, "ready"], [1, "ready"]]);
   });
 
-  it("only the mapped columns are read: a client and a date alone make a post whose title can only come from the caption", () => {
+  it("only the mapped columns are read: a client and a date alone make a post with a generated title", () => {
     const body = planBody([["Mock Bakery", "3 Nov"]], { headerRow: false, columns: { client: 0, date: 1 } });
-    expect(run(body).answer.rows[0]).toMatchObject({ outcome: "refused", refusals: [{ field: "title", code: "missing_title" }] });
+    expect(run(body).answer.rows[0]).toMatchObject({ outcome: "ready", post: { title: "Post 3 Nov" }, warnings: [{ field: "time", code: "default_time_used" }, { field: "title", code: "title_generated" }] });
+    // missing_title is left for a row with no date, which is refused for the date first.
+    expect(run(planBody([["Mock Bakery", ""]], { headerRow: false, columns: { client: 0, date: 1 } })).answer.rows[0].refusals).toEqual([
+      { field: "date", code: "missing_value" }, { field: "title", code: "missing_title" },
+    ]);
   });
 
   it("every problem of a row is listed at once", () => {
     const { answer } = run(planBody([PLAN_HEADER, full({ client: "", date: "", title: "", caption: "", time: "soon", format: "poster" })]));
     expect(answer.rows[0].refusals.map((r) => `${r.field}:${r.code}`).sort()).toEqual([
-      "client:missing_value", "date:missing_value", "format:invalid_field", "time:invalid_field", "title:missing_title",
+      "client:missing_value", "date:missing_value", "format:invalid_field", "time:invalid_field",
+    ]); // the text on the design gives the title, so there is no title problem
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════ SCP-6b1: the team's real file (BFF §63.23.9)
+
+describe("the formats the real file writes", () => {
+  it("reads 'Carousel video' as a carousel, and every other two-format cell as unreadable", () => {
+    expect(readFormat("CAROUSEL VIDEO")).toBe("carousel");
+    expect(readFormat("Video Carousel")).toBe("carousel");
+    expect(readFormat("Carousel Video Post")).toBe("carousel");
+    expect(readFormat("Reel Carousel")).toBeUndefined();
+    expect(readFormat("Story Feed")).toBeUndefined();
+    expect(readFormat("Feed, Reel")).toBeUndefined();
+    expect(readFormats("Single Post, Carousel Video")).toEqual(["feed", "carousel"]);
+  });
+  it("keeps Video Reels a reel, and reads Photo, Foto, Image and Static as the feed", () => {
+    expect(readFormat("Video Reels")).toBe("reel");
+    for (const f of ["Photo", "FOTO", "Image", "Static", "SINGLE POST"]) expect(readFormat(f), f).toBe("feed");
+    expect(readFormat("REELS")).toBe("reel");
+  });
+});
+
+describe("splitAngleCell", () => {
+  const cell = "Content Pillar: Exclusive Offers & Package\nContent Angle: Black Friday\n\nHighlight the added experiences available when booking direct...";
+  it("takes the pillar line, the angle line and the rest, trimmed", () => {
+    expect(splitAngleCell(cell)).toEqual({ found: true, pillar: "Exclusive Offers & Package", angle: "Black Friday", rest: "Highlight the added experiences available when booking direct..." });
+  });
+  it("reads the other spellings, in any case, with spaces around the colon", () => {
+    expect(splitAngleCell("PILLAR : Culture\nangle:Local craft")).toMatchObject({ pillar: "Culture", angle: "Local craft", rest: "" });
+    expect(splitAngleCell("Pilar Konten: Budaya\nSudut Pandang : Kerajinan\nPesan")).toEqual({ found: true, pillar: "Budaya", angle: "Kerajinan", rest: "Pesan" });
+  });
+  it("finds nothing in a cell with no such line, and keeps a lone angle line's text apart", () => {
+    expect(splitAngleCell("Just an angle")).toEqual({ found: false, pillar: undefined, angle: undefined, rest: "Just an angle" });
+    expect(splitAngleCell("Angle: Only this\nand more")).toMatchObject({ found: true, pillar: undefined, angle: "Only this", rest: "and more" });
+  });
+});
+
+describe("isHashtagsOnly and readAssetLinks", () => {
+  it("a text is hashtags only when every token starts with #", () => {
+    expect(isHashtagsOnly("#Brand #Black Friday")).toBe(false);
+    expect(isHashtagsOnly("#Brand #BlackFriday\n#LuxuryStay")).toBe(true);
+    expect(isHashtagsOnly("  ")).toBe(false);
+    expect(isHashtagsOnly("A caption #tag")).toBe(false);
+  });
+  it("each https URL is an asset with the text before it on its line as the label, without a trailing colon", () => {
+    const a = readAssetLinks("REEL: https://drive.example/file/d/abc/view?usp=sharing\n\nTHUMBNAIL : https://drive.example/file/d/def");
+    expect(a.badScheme).toBe(false);
+    expect(a.assets).toEqual([
+      { url: "https://drive.example/file/d/abc/view?usp=sharing", label: "REEL", source: "unknown", aiNote: null },
+      { url: "https://drive.example/file/d/def", label: "THUMBNAIL", source: "unknown", aiNote: null },
     ]);
+    expect(readAssetLinks("https://drive.example/folders/xyz").assets[0]).toMatchObject({ label: "" });
+    expect(readAssetLinks("two https://a.example/1 and https://a.example/2").assets.map((x) => x.label)).toEqual(["two", "and"]);
+  });
+  it("a cell with no URL has no assets, and an http:// link is flagged", () => {
+    expect(readAssetLinks("coming soon")).toEqual({ assets: [], badScheme: false });
+    expect(readAssetLinks("http://insecure.example/x").badScheme).toBe(true);
+  });
+});
+
+describe("generatedTitle", () => {
+  it("is the format and the day: Story 6 Nov", () => {
+    expect(generatedTitle("story", "2026-11-06")).toBe("Story 6 Nov");
+    expect(generatedTitle("carousel", "2026-12-30")).toBe("Carousel 30 Dec");
+    expect(generatedTitle(undefined, "2026-11-01")).toBe("Post 1 Nov");
+  });
+});
+
+describe("the plan body's whole-file settings (SCP-6b1)", () => {
+  const ENG = "AAAAAAAA-0000-4000-8000-000000000001";
+  const base = (o: Record<string, unknown> = {}) => ({
+    dryRun: true, headerRow: false, columns: { date: 0 }, rows: [["3 Nov"], [""], [""]], month: "2026-11", dateOrder: "dmy", timeZone: "Asia/Jakarta", ...o,
+  });
+  const field = (body: unknown) => refusal(() => parseImportBody("plan", body, TODAY));
+
+  it("an engagementId stands for the client column, lower-cased; the plan carries the defaults when it is not given", () => {
+    const p = parseImportBody("plan", base({ engagementId: ENG }), TODAY);
+    expect(p.plan).toMatchObject({ engagementId: ENG.toLowerCase(), allStories: false, merges: [] });
+    const q = parseImportBody("plan", base({ columns: { client: 0, date: 1 } }), TODAY);
+    expect(q.plan).toMatchObject({ engagementId: null, allStories: false, merges: [] });
+  });
+  it("400 invalid_field engagementId: beside a client column, or not a uuid", () => {
+    expect(field(base({ engagementId: ENG, columns: { client: 1, date: 0 } }))).toEqual({ message: "invalid_field", field: "engagementId" });
+    expect(field(base({ engagementId: "nope" }))).toMatchObject({ field: "engagementId" });
+    expect(field(base({ engagementId: 7 }))).toMatchObject({ field: "engagementId" });
+    expect(field(base({ engagementId: null }))).toMatchObject({ field: "engagementId" });
+  });
+  it("still needs a client column when there is no engagementId", () => {
+    expect(field(base())).toMatchObject({ field: "columns.client" });
+  });
+  it("400 invalid_field allStories: not a boolean, or beside a format column; a format column is fine without it", () => {
+    expect(field(base({ engagementId: ENG, allStories: true, columns: { date: 0, format: 1 } }))).toEqual({ message: "invalid_field", field: "allStories" });
+    expect(field(base({ engagementId: ENG, allStories: "yes" }))).toMatchObject({ field: "allStories" });
+    expect(parseImportBody("plan", base({ engagementId: ENG, allStories: false, columns: { date: 0, format: 1 } }), TODAY).plan!.allStories).toBe(false);
+    expect(parseImportBody("plan", base({ engagementId: ENG, allStories: true }), TODAY).plan!.allStories).toBe(true);
+  });
+  it("the settings are the plan's alone: an allocation ignores them", () => {
+    const a = parseImportBody("allocation", { dryRun: true, headerRow: false, columns: { client: 0 }, rows: [["Mock Bakery"]], engagementId: "nope", allStories: 3, merges: "x" }, TODAY);
+    expect(a.plan).toBeUndefined();
+  });
+  it("400 invalid_field merges: not a list, too many, not four whole numbers, outside the rows or the 60 columns, backwards, or overlapping", () => {
+    const m = (merges: unknown) => field(base({ engagementId: ENG, merges }));
+    expect(parseImportBody("plan", base({ engagementId: ENG, merges: [[0, 0, 2, 0], [0, 1, 1, 59]] }), TODAY).plan!.merges).toEqual([[0, 0, 2, 0], [0, 1, 1, 59]]);
+    expect(m("x")).toEqual({ message: "invalid_field", field: "merges" });
+    expect(m({})).toMatchObject({ field: "merges" });
+    expect(m(Array.from({ length: 5001 }, () => [0, 0, 0, 0]))).toMatchObject({ field: "merges" });
+    expect(m([[0, 0, 2]])).toMatchObject({ field: "merges" });
+    expect(m([[0, 0, 2, "1"]])).toMatchObject({ field: "merges" });
+    expect(m([[0, 0, 1.5, 1]])).toMatchObject({ field: "merges" });
+    expect(m([[-1, 0, 1, 1]])).toMatchObject({ field: "merges" });
+    expect(m([[0, 0, 3, 0]])).toMatchObject({ field: "merges" }); // 3 rows sent: the last index is 2
+    expect(m([[0, 0, 1, 60]])).toMatchObject({ field: "merges" });
+    expect(m([[2, 0, 1, 0]])).toMatchObject({ field: "merges" });
+    expect(m([[0, 0, 1, 1], [1, 1, 2, 2]])).toMatchObject({ field: "merges" });
+  });
+  it("takes the maximum of 5,000 ranges", () => {
+    const rows = Array.from({ length: 1000 }, () => ["x"]);
+    const merges = Array.from({ length: 5000 }, (_, i) => [i % 1000, 1 + Math.floor(i / 1000), i % 1000, 1 + Math.floor(i / 1000)]);
+    expect(parseImportBody("plan", base({ engagementId: ENG, rows, merges }), TODAY).plan!.merges).toHaveLength(5000);
+  });
+});
+
+// The real file's shape, built synthetically: each post spans two rows, and the date, the type, the footage links and the angle are merged down over the pair.
+describe("merged pairs and the angle cell (a CONTENT PLAN)", () => {
+  const COLS = { date: 0, format: 1, assetLinks: 2, angle: 3, caption: 4 };
+  const ANGLE = "Content Pillar: Exclusive Offers & Package\nContent Angle: Black Friday\n\nHighlight the added experiences available when booking direct...";
+  const HEAD = ["POST DATE", "TYPE OF POST", "LINK FOOTAGE", "INSTAGRAM CONTENT ANGLES", "CAPTION IG"];
+  const ROWS = [
+    HEAD,
+    ["3 Nov", "CAROUSEL VIDEO", "REEL: https://drive.example/a\n\nTHUMBNAIL: https://drive.example/b", ANGLE, "Sample Resort Black Friday offer.\nBook direct."],
+    ["", "", "", "", "#SampleResort #BlackFriday #LuxuryStay"],
+    ["5 Nov", "SINGLE POST", "https://drive.example/folder", "Pillar: Rooms\nAngle: Quiet mornings", "Wake up slowly."],
+    ["", "", "", "", "#Rooms #Calm"],
+    ["", "", "", "", ""],
+  ];
+  const MERGES = [[1, 0, 2, 0], [1, 1, 2, 1], [1, 2, 2, 2], [1, 3, 2, 3], [3, 0, 4, 0], [3, 1, 4, 1], [3, 2, 4, 2], [3, 3, 4, 3]];
+  const ENG = E.bakery;
+  const body = (o: Record<string, unknown> = {}) => planBody(ROWS, { columns: COLS, engagementId: ENG, merges: MERGES, skip: [5], ...o } as never);
+
+  it("the second row of a pair is joined, never written and never refused; its hashtags go to the post above", () => {
+    const { answer, writes } = run(body());
+    expect(answer.summary).toEqual({ rows: 5, ready: 2, unchanged: 0, refused: 0, skipped: 1, joined: 2 });
+    expect(answer.rows.map((r) => r.outcome)).toEqual(["ready", "joined", "ready", "joined", "skipped"]);
+    expect(answer.rows[1]).toMatchObject({ joinedTo: 1, refusals: [], engagementId: ENG, clientName: "Mock Bakery", cycle: null, post: null });
+    expect(writes).toHaveLength(2);
+    expect(writes.map((w) => w.row)).toEqual([1, 3]);
+  });
+
+  it("the post has the pillar, the angle and the key message from the angle cell, the Instagram caption and the hashtags from row 2", () => {
+    const { writes } = run(body());
+    expect(writes[0].params).toMatchObject({ pillar: "Exclusive Offers & Package", format: "carousel", title: "Sample Resort Black Friday offer." });
+    expect(writes[0].extra).toEqual({
+      angle: "Black Friday", key_message: "Highlight the added experiences available when booking direct...",
+      caption: "Sample Resort Black Friday offer.\nBook direct.", hashtags: ["SampleResort", "BlackFriday", "LuxuryStay"],
+      raw_assets: [
+        { url: "https://drive.example/a", label: "REEL", source: "unknown", aiNote: null },
+        { url: "https://drive.example/b", label: "THUMBNAIL", source: "unknown", aiNote: null },
+      ],
+    });
+    expect(writes[1].params).toMatchObject({ pillar: "Rooms", format: "feed" });
+    expect(writes[1].extra).toMatchObject({ angle: "Quiet mornings", hashtags: ["Rooms", "Calm"] });
+    expect(writes[1].extra).not.toHaveProperty("key_message");
+  });
+
+  it("the client is the engagementId's, whatever a client column holds, and the post id is the day and title's", () => {
+    const { answer } = run(body());
+    expect(answer.rows[0].post!.id).toBe(importPostId(TENANT, ENG, "2026-11", "2026-11-03", "Sample Resort Black Friday offer."));
+  });
+
+  it("without the merges the second row is a row of its own: refused for its missing date (what the team met first)", () => {
+    const { answer } = run(body({ merges: [] }));
+    expect(answer.rows[1]).toMatchObject({ outcome: "refused" });
+    expect(answer.rows[1].refusals).toContainEqual({ field: "date", code: "missing_value" });
+  });
+
+  it("a joined row follows the post above when it is unticked or refused", () => {
+    const skipped = run(body({ skip: [1, 5] }));
+    expect(skipped.answer.rows.map((r) => r.outcome)).toEqual(["skipped", "skipped", "ready", "joined", "skipped"]);
+    expect(skipped.answer.rows[1]).toMatchObject({ joinedTo: 1 });
+    const bad = rows2(ROWS, 1, 0, "99 Nov"); // an unreadable date refuses the post above
+    const refused = run(planBody(bad, { columns: COLS, engagementId: ENG, merges: MERGES, skip: [5] } as never));
+    expect(refused.answer.rows.map((r) => r.outcome)).toEqual(["refused", "refused", "ready", "joined", "skipped"]);
+    expect(refused.answer.rows[1]).toMatchObject({ joinedTo: 1, refusals: [{ field: "date", code: "invalid_field" }] });
+    expect(refused.writes).toHaveLength(1);
+  });
+
+  it("several joined rows chain to the same post, and a caption that is not only hashtags is added after a blank line", () => {
+    const rows = [HEAD, ["3 Nov", "REELS", "", ANGLE, "Main caption."], ["", "", "", "", "#One #Two"], ["", "", "", "", "A second caption line."], ["", "", "", "", "#Three"]];
+    const merges = [[1, 0, 3, 0], [1, 1, 3, 1], [1, 2, 3, 2], [1, 3, 3, 3]];
+    const { answer, writes } = run(planBody(rows, { columns: COLS, engagementId: ENG, merges } as never));
+    // Rows 2 and 3 are slaves of row 1; row 4 is in no merge, so it is a row of its own with no date.
+    expect(answer.rows.map((r) => r.outcome)).toEqual(["ready", "joined", "joined", "refused"]);
+    expect(writes[0].extra.hashtags).toEqual(["One", "Two"]);
+    expect(writes[0].extra.caption).toBe("Main caption.\n\nA second caption line.");
+  });
+
+  it("a field mapped to its own column wins over the angle cell; the rest then goes to the angle when the key message has its own column", () => {
+    const wide = ROWS.map((r, i) => (i === 0 ? [...r, "PILLAR", "KEY MESSAGE"] : i === 1 ? [...r, "Product", "My own message"] : [...r, "", ""]));
+    const cols = { ...COLS, pillar: 5, keyMessage: 6 };
+    const { writes } = run(planBody(wide, { columns: cols, engagementId: ENG, merges: MERGES, skip: [5] } as never));
+    expect(writes[0].params.pillar).toBe("Product");
+    expect(writes[0].extra.key_message).toBe("My own message");
+    expect(writes[0].extra.angle).toBe("Black Friday\n\nHighlight the added experiences available when booking direct...");
+  });
+
+  it("reads the angle cell from the pillar column when only that is mapped; a cell with no such lines is read as before", () => {
+    const rows = [["Date", "Pillar"], ["3 Nov", "Content Pillar: Culture\nAngle: Craft\nA message"], ["4 Nov", "Plain pillar"]];
+    const { writes } = run(planBody(rows, { columns: { date: 0, pillar: 1 }, engagementId: ENG } as never));
+    expect(writes[0].params.pillar).toBe("Culture");
+    expect(writes[0].extra).toMatchObject({ angle: "Craft", key_message: "A message" });
+    expect(writes[1].params.pillar).toBe("Plain pillar");
+    expect(writes[1].extra).not.toHaveProperty("angle");
+  });
+
+  it("a long key message the machine would refuse is a refusal on keyMessage", () => {
+    const rows = [["Date", "Angle"], ["3 Nov", `Pillar: P\nAngle: A\n${"x".repeat(501)}`]];
+    const { answer } = run(planBody(rows, { columns: { date: 0, angle: 1 }, engagementId: ENG } as never));
+    expect(answer.rows[0].refusals).toEqual([{ field: "keyMessage", code: "invalid_field" }]);
+  });
+});
+
+/** The rows with one cell replaced. */
+function rows2(rows: string[][], r: number, c: number, v: string): string[][] {
+  return rows.map((row, i) => (i === r ? row.map((x, j) => (j === c ? v : x)) : row));
+}
+
+describe("a tab of stories (SCP-6b1)", () => {
+  const COLS = { date: 0, onAssetText: 1, cta: 2, assetLinks: 3 };
+  const HEAD = ["POSTING DATE", "TEXT", "CTA LINK", "LINK VIDEO"];
+  const ENG = E.studio;
+  const ROWS = [
+    HEAD,
+    ["6 Nov", "", "Plan Your Stay\nhttps://stay.example", "https://drive.example/s1"],
+    ["", "", "", "https://drive.example/s2"], // the second story of the day: only the date is merged
+    ["7 Nov", "Last rooms left\nBook now", "", ""],
+    ["", "", "", ""], // nothing at all: a spacer row, skipped
+    ["", "", "Plan Your Stay\nhttps://stay.example", ""], // a date that is blank and NOT merged: a team mistake that stays refused
+    ["8 Nov", "", "", ""],
+    ["", "", "", ""],
+    ["8 Nov", "", "", ""],
+  ];
+  const MERGES = [[1, 0, 2, 0]];
+  const body = (o: Record<string, unknown> = {}) => planBody(ROWS, { columns: COLS, engagementId: ENG, allStories: true, merges: MERGES, ...o } as never);
+
+  it("every row is a story; a row that only shares a merged date takes it, with the warning, and is its own post", () => {
+    const { answer, writes } = run(body({ skip: [4] }));
+    expect(answer.rows[0]).toMatchObject({ row: 1, outcome: "ready", post: { format: "story", scheduledAt: "2026-11-06T11:15:00.000Z" } }); // the engagement's 18:15 in Jakarta
+    expect(answer.rows[1]).toMatchObject({ row: 2, outcome: "ready", post: { format: "story", scheduledAt: "2026-11-06T11:15:00.000Z" } });
+    expect(answer.rows[1].warnings).toContainEqual({ field: "date", code: "date_from_merged_cell" });
+    expect(answer.rows[0].warnings).not.toContainEqual({ field: "date", code: "date_from_merged_cell" });
+    expect(writes.every((w) => w.params.format === "story")).toBe(true);
+  });
+
+  it("titles: the call to action's first line, the text on the design, and a generated one, with (2) for a second on the same client and day", () => {
+    const { answer } = run(body({ skip: [4] }));
+    const byRow = (n: number) => answer.rows.find((r) => r.row === n)!;
+    expect(byRow(1).post!.title).toBe("Plan Your Stay");
+    expect(byRow(1).warnings).toContainEqual({ field: "title", code: "title_from_cta" });
+    expect(byRow(2).post!.title).toBe("Story 6 Nov");
+    expect(byRow(2).warnings).toContainEqual({ field: "title", code: "title_generated" });
+    expect(byRow(3).post!.title).toBe("Last rooms left");
+    expect(byRow(3).warnings).toContainEqual({ field: "title", code: "title_from_on_asset_text" });
+    expect(byRow(6).post!.title).toBe("Story 8 Nov");
+    expect(byRow(8).post!.title).toBe("Story 8 Nov (2)");
+    expect(byRow(6).post!.id).not.toBe(byRow(8).post!.id);
+  });
+
+  it("two stories on one day are two posts with two ids, even when both are generated", () => {
+    const rows = [HEAD, ["6 Nov", "", "", ""], ["", "", "", "x"]];
+    const { answer, writes } = run(planBody(rows, { columns: COLS, engagementId: ENG, allStories: true, merges: [[1, 0, 2, 0]] } as never));
+    expect(answer.rows.map((r) => r.outcome)).toEqual(["ready", "ready"]);
+    expect(answer.rows.map((r) => r.post!.title)).toEqual(["Story 6 Nov", "Story 6 Nov (2)"]);
+    expect(new Set(writes.map((w) => w.params.id)).size).toBe(2);
+  });
+
+  it("a blank date that is not merged stays missing_value, and the unreadable asset link is a note, not a refusal", () => {
+    const { answer } = run(body({ skip: [4] }));
+    const mistake = answer.rows.find((r) => r.row === 5)!;
+    expect(mistake.outcome).toBe("refused");
+    expect(mistake.refusals).toContainEqual({ field: "date", code: "missing_value" });
+    const rows = [HEAD, ["6 Nov", "", "", "see the drive"], ["7 Nov", "", "", "http://old.example/x"]];
+    const r = run(planBody(rows, { columns: COLS, engagementId: ENG, allStories: true } as never)).answer.rows;
+    expect(r[0].outcome).toBe("ready");
+    expect(r[0].warnings).toContainEqual({ field: "assetLinks", code: "asset_link_missing_url" });
+    expect(r[1]).toMatchObject({ outcome: "refused", refusals: [{ field: "assetLinks", code: "invalid_field" }] });
+  });
+
+  it("the footage links become the post's raw assets, in cell order", () => {
+    const { writes } = run(body({ skip: [4] }));
+    expect(writes[0].extra.raw_assets).toEqual([{ url: "https://drive.example/s1", label: "", source: "unknown", aiNote: null }]);
+    expect(writes[1].extra.raw_assets).toEqual([{ url: "https://drive.example/s2", label: "", source: "unknown", aiNote: null }]);
+  });
+
+  it("more links than the post's field rule allows is invalid_field on assetLinks", () => {
+    const many = Array.from({ length: 11 }, (_, i) => `https://drive.example/${i}`).join("\n");
+    const { answer } = run(planBody([HEAD, ["6 Nov", "", "", many]], { columns: COLS, engagementId: ENG, allStories: true } as never));
+    expect(answer.rows[0].refusals).toEqual([{ field: "assetLinks", code: "invalid_field" }]);
+  });
+
+  it("the replay is stable: the same rows give the same ids", () => {
+    const a = run(body({ skip: [4] })).writes.map((w) => w.params.id);
+    const b = run(body({ skip: [4] })).writes.map((w) => w.params.id);
+    expect(a).toEqual(b);
+  });
+
+  it("a date outside the month is still refused for a story (the 1 and 2 of the next month)", () => {
+    const { answer } = run(planBody([HEAD, ["1 Dec", "", "", ""]], { columns: COLS, engagementId: ENG, allStories: true } as never));
+    expect(answer.rows[0].refusals).toEqual([{ field: "date", code: "date_outside_month" }]);
+  });
+
+  it("without allStories the format column is read as before, and a title still falls back through the caption first", () => {
+    const rows = [["Client", "Date", "Caption", "Format"], ["Mock Bakery", "3 Nov", "A caption line", "Reels"]];
+    const { answer } = run(planBody(rows, { columns: { client: 0, date: 1, caption: 2, format: 3 } }));
+    expect(answer.rows[0]).toMatchObject({ outcome: "ready", post: { title: "A caption line", format: "reel" } });
+  });
+});
+
+describe("the merged date shared with the row above when the top row is not a post", () => {
+  it("a date shared with a blank or unticked top row still gives the row its date", () => {
+    const rows = [["Date", "Title"], ["3 Nov", "First"], ["", "Second"]];
+    const { answer } = run(planBody(rows, { columns: { date: 0, title: 1 }, engagementId: E.bakery, merges: [[1, 0, 2, 0]], skip: [1] } as never));
+    expect(answer.rows[1]).toMatchObject({ outcome: "ready" });
+    expect(answer.rows[1].warnings).toContainEqual({ field: "date", code: "date_from_merged_cell" });
+  });
+  it("a merged range that starts at the header does not make its rows joined", () => {
+    const rows = [["Date", "Title"], ["", "Second"]];
+    const { answer } = run(planBody(rows, { columns: { date: 0, title: 1 }, engagementId: E.bakery, merges: [[0, 0, 1, 0]] } as never));
+    expect(answer.rows[0]).toMatchObject({ outcome: "refused" });
   });
 });
