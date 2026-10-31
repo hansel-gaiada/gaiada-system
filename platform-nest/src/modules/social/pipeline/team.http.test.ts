@@ -823,11 +823,15 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
   // ── 6. the cost ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
   it("costs the same statements for 5 posts and for 35: nothing is read per post or per person", async () => {
     config.socialSimulationEnabled = false;
-    // Each measured read follows an unmeasured one. The request hook's security caches (core/security, `TtlLoader`, 10 s) re-read on
-    // the first request after they go stale, so a measured read must never be that request: otherwise the count depends on how long
-    // the test before it, or the seeding between the two reads, took.
+    // Each measured read follows an unmeasured one, and the two side effects of the request hook are spent on that one:
+    //   * the security caches (core/security, `TtlLoader`, 10 s) re-read on the first request after they go stale;
+    //   * the access recorder (core/security/access-recorder.ts) writes once a minute per key, NOT awaited (about four
+    //     statements), so the write the unmeasured read starts would land inside the measured window. It is given time to
+    //     finish first; the measured read, inside the same minute, is then throttled and writes nothing.
+    // Without both, the count depends on how long the test before it, or the seeding between the two reads, took.
     const run = async () => {
       expect((await team("platformAdmin")).statusCode).toBe(200);
+      await new Promise((r) => setTimeout(r, 500));
       return statementsOf(async () => { expect((await team("platformAdmin")).statusCode).toBe(200); });
     };
     const few = await run();
