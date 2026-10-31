@@ -17,6 +17,8 @@ import { demoFeedPreviewRoute } from "./demoSocialFeedPreview";
 import { demoAccountsSummaryRoute } from "./demoSocialAccountsSummary";
 import { demoBoostsRoute } from "./demoSocialBoosts";
 import { demoReportsRoute } from "./demoSocialReports";
+import { demoReportRunsRoute } from "./demoSocialReportRuns";
+import { demoIdeasRoute } from "./demoSocialIdeas";
 import { demoSavedRoute } from "./demoSocialSaved";
 import { demoAuditRoute } from "./demoSocialAudit";
 import { demoOnboardingRoute } from "./demoSocialOnboarding";
@@ -1001,6 +1003,10 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   // ── SCP-5d: the Team dashboard (BFF §63.19), in demoSocialTeam.ts ──────────────────────────────────────────
   if (tail === "team" && m === "GET") return demoTeamRoute(params, userId);
   // ── SCP-5a: the monthly report (BFF §63.18), in demoSocialReports.ts ───────────────────────────────────────────────────────────
+  // ── SCP-5 W5-A4: "Generate with AI" runs and the company's rules (BFF §63.24.5, §63.30.4), in demoSocialReportRuns.ts; asked first, as `reports/generate` would read as a report id ──
+  { const runs = demoReportRunsRoute(m, tail, params, body, userId); if (runs) return runs; }
+  // ── SCP-5 W5-A4: ideas for next month (BFF §63.25), in demoSocialIdeas.ts ──
+  { const ideas = demoIdeasRoute(m, tail, params, body, userId); if (ideas) return ideas; }
   { const reports = demoReportsRoute(m, tail, params, body, userId); if (reports) return reports; }
   // ── SCP-5e: Saved, the content bank (BFF §63.26), in demoSocialSaved.ts ─────────────────────────────────────────────────────────
   { const saved = demoSavedRoute(m, tail, params, body, userId); if (saved) return saved; }

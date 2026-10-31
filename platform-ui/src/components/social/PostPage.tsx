@@ -120,6 +120,16 @@ export function PostPage({ deptId, post: initial, comments, assets, metrics, vie
         </div>
       </header>
 
+      {/* SCP-5c (BFF §63.25.4): a post planned from an idea of a monthly report says so, with the idea's three parts. */}
+      {post.idea && (
+        <section className="scp-post__idea" aria-labelledby="scp-post-idea">
+          <h3 className="scp-post__section-title" id="scp-post-idea">From an idea</h3>
+          <p className="scp-note" style={{ margin: 0 }}>
+            <strong>What we saw:</strong> {post.idea.saw}{post.idea.metric ? <> <strong>The metric:</strong> {post.idea.metric}.</> : null} <strong>What we suggested:</strong> {post.idea.suggestion}
+          </p>
+        </section>
+      )}
+
       <PostStepper post={post} />
 
       {notice && (

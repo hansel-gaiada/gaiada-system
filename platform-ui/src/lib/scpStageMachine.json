@@ -677,11 +677,11 @@
       { "status": "delivered", "label": "Sent" }
     ],
     "actions": [
-      { "action": "draft_report", "route": "POST engagements/:engagementId/reports", "cerbosAction": "social_report:create", "actors": ["officer", "seat_approver"], "to": "draft", "refusals": ["invalid_kind", "internal_client_no_reports"] },
+      { "action": "draft_report", "route": "POST engagements/:engagementId/reports", "cerbosAction": "social_report:create", "actors": ["officer", "seat_approver"], "to": "draft", "refusals": ["invalid_kind", "internal_client_no_reports", "period_not_over", "report_kind_off"] },
       { "action": "edit_report", "route": "PATCH reports/:id", "cerbosAction": "social_report:update", "actors": ["officer", "seat_approver"], "from": ["draft", "in_review"], "to": null, "refusals": ["report_not_editable", "status_changed_concurrently"] },
-      { "action": "submit_report", "route": "PATCH reports/:id {status: 'in_review'}", "cerbosAction": "social_report:update", "actors": ["officer"], "from": ["draft"], "to": "in_review", "refusals": ["cannot_submit_from_this_status", "status_changed_concurrently"] },
+      { "action": "submit_report", "route": "PATCH reports/:id {status: 'in_review'}", "cerbosAction": "social_report:update", "actors": ["officer"], "from": ["draft"], "to": "in_review", "refusals": ["cannot_submit_from_this_status", "status_changed_concurrently", "summary_numbers_changed"] },
       { "action": "send_back_report", "route": "PATCH reports/:id {status: 'draft'}", "cerbosAction": "social_report:approve", "actors": ["approver"], "from": ["in_review"], "to": "draft", "refusals": ["cannot_send_back_from_this_status", "status_changed_concurrently"] },
-      { "action": "approve_report", "route": "POST reports/:id/approve", "cerbosAction": "social_report:approve", "actors": ["approver"], "from": ["in_review"], "to": "approved", "refusals": ["cannot_approve_from_this_status", "notes_incomplete"] },
+      { "action": "approve_report", "route": "POST reports/:id/approve", "cerbosAction": "social_report:approve", "actors": ["approver"], "from": ["in_review"], "to": "approved", "refusals": ["cannot_approve_from_this_status", "summary_missing", "notes_incomplete", "action_plan_missing", "next_period_missing"] },
       { "action": "deliver_report", "route": "POST reports/:id/deliver", "cerbosAction": "social_report:deliver", "actors": ["approver"], "from": ["approved"], "to": "delivered", "refusals": ["cannot_deliver_from_this_status", "internal_client_not_deliverable", "pdf_render_not_configured", "pdf_render_failed", "status_changed_concurrently"] }
     ],
     "refusals": {
@@ -697,7 +697,16 @@
       "cannot_deliver_from_this_status": { "http": 400 },
       "internal_client_not_deliverable": { "http": 400 },
       "pdf_render_not_configured": { "http": 503 },
-      "pdf_render_failed": { "http": 503 }
+      "pdf_render_failed": { "http": 503 },
+      "summary_missing": { "http": 400 },
+      "summary_numbers_changed": { "http": 400, "with": "detail {numbers}" },
+      "period_not_over": { "http": 400 },
+      "action_plan_missing": { "http": 400 },
+      "next_period_missing": { "http": 400 },
+      "report_kind_off": { "http": 409 },
+      "ai_drafting_off": { "http": 409 },
+      "generation_running": { "http": 409, "with": "detail {runId}" },
+      "run_not_found": { "http": 404 }
     }
   },
   "refusals": {
@@ -771,7 +780,10 @@
     "audit_not_found": { "http": 404 },
     "audit_final": { "http": 409 },
     "audit_attached": { "http": 409 },
-    "not_a_prospect_audit": { "http": 409 }
+    "not_a_prospect_audit": { "http": 409 },
+    "idea_not_found": { "http": 404 },
+    "idea_planned": { "http": 409 },
+    "cycle_closed": { "http": 409 }
   },
   "scenarioPersonas": {
     "approver": "the HoD: the Social Media unit's lead seat",
