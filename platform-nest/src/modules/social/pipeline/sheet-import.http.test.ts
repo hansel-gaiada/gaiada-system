@@ -263,7 +263,7 @@ describe.skipIf(!TEST_URL)("social sheet import (SCP-6a)", () => {
     wb.addWorksheet("Hidden", { state: "hidden" }).getCell("A1").value = "secret";
     const xlsx = await imp(U.smHead, "parse", { filename: "plan.xlsx", contentBase64: Buffer.from(await wb.xlsx.writeBuffer()).toString("base64") });
     expect(xlsx.statusCode, xlsx.body).toBe(200);
-    expect(xlsx.json()).toEqual({ tabs: [{ name: "Plan", rows: [["Date", ""], ["2026-12-03 09:30", "3"]] }] });
+    expect(xlsx.json()).toEqual({ tabs: [{ name: "Plan", rows: [["Date", ""], ["2026-12-03 09:30", "3"]], merges: [] }] });
   });
 
   it("parse: the 400 codes", async () => {
