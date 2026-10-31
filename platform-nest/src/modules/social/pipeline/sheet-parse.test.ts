@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import { BadRequestException } from "@nestjs/common";
 import ExcelJS from "exceljs";
 import {
-  MAX_SHEET_BYTES, MAX_XLSX_INFLATED_BYTES, SHEET_LIMITS, assertZipInflatesWithin, dateCellText, numberCellText, parseSheetBody, tabsFromCsv,
+  MAX_SHEET_BYTES, MAX_XLSX_INFLATED_BYTES, SHEET_LIMITS, assertZipInflatesWithin, clipMerges, dateCellText, numberCellText, parseSheetBody, tabsFromCsv,
   tabsFromPaste, valueText,
 } from "./sheet-parse";
 
@@ -118,7 +118,7 @@ describe("an .xlsx", () => {
   it("a sheet with nothing in it is one tab with no rows", async () => {
     const bytes = await xlsx((wb) => { wb.addWorksheet("Blank"); });
     const { tabs } = await parseSheetBody(file("blank.xlsx", bytes));
-    expect(tabs).toEqual([{ name: "Blank", rows: [] }]);
+    expect(tabs).toEqual([{ name: "Blank", rows: [], merges: [] }]);
   });
 
   it("the slave cells of a merged range are empty: the value sits in the top-left cell", async () => {
@@ -358,5 +358,59 @@ describe("the body", () => {
     expect(await refusal(() => parseSheetBody({ text: "\u20ac".repeat(700_000) }))).toEqual({ message: "invalid_field", field: "text" });
     expect(await refusal(() => parseSheetBody({ text: 5 }))).toEqual({ message: "invalid_field", field: "text" });
     expect((await parseSheetBody({ text: "" })).tabs).toEqual([{ name: "Pasted", rows: [] }]);
+  });
+});
+
+// ── SCP-6b1: the merged ranges (BFF §63.23.9) ────────────────────────────────────────────────────────────────────────────────
+describe("the merged ranges of an .xlsx tab", () => {
+  it("answers [top, left, bottom, right], 0-based and inclusive, in the trimmed rows; the slave cells stay empty", async () => {
+    const bytes = await xlsx((wb) => {
+      const ws = wb.addWorksheet("CONTENT PLAN");
+      ws.getCell("A1").value = "Date";
+      ws.getCell("B1").value = "Type";
+      ws.getCell("D1").value = "Caption";
+      ws.getCell("A2").value = "3 Nov";
+      ws.getCell("B2").value = "CAROUSEL";
+      ws.getCell("D3").value = "#Tags";
+      ws.mergeCells("A2:A3");
+      ws.mergeCells("B2:B3");
+      wb.addWorksheet("Other").getCell("A1").value = "x";
+    });
+    const out = await parseSheetBody(file("plan.xlsx", bytes));
+    expect(out.tabs[0].rows).toEqual([["Date", "Type", "", "Caption"], ["3 Nov", "CAROUSEL", "", ""], ["", "", "", "#Tags"]]);
+    expect(out.tabs[0].merges).toEqual([[1, 0, 2, 0], [1, 1, 2, 1]]);
+    expect(out.tabs[1].merges).toEqual([]);
+  });
+
+  it("a range that reaches past the trimmed area is clipped, and one wholly outside it is dropped", async () => {
+    const bytes = await xlsx((wb) => {
+      const ws = wb.addWorksheet("Plan");
+      ws.getCell("A1").value = "Date";
+      ws.getCell("A2").value = "3 Nov";
+      ws.mergeCells("A2:A9"); // eight rows, but the data ends at row 2
+      ws.mergeCells("A1:C1"); // wider than the data
+      ws.mergeCells("F10:G12"); // all empty cells, past the trimmed area
+    });
+    const out = await parseSheetBody(file("plan.xlsx", bytes));
+    expect(out.tabs[0].rows).toEqual([["Date"], ["3 Nov"]]);
+    expect(out.tabs[0].merges).toEqual([]); // A2:A9 clipped to one cell, A1:C1 clipped to one cell, the third outside
+  });
+
+  it("is absent for a csv and for pasted text", async () => {
+    expect(tabsFromCsv("a,b\n1,2", "x")[0]).not.toHaveProperty("merges");
+    expect(tabsFromPaste("a\tb\n1\t2")[0]).not.toHaveProperty("merges");
+    expect(await parseSheetBody({ text: "a\tb" })).toEqual({ tabs: [{ name: "Pasted", rows: [["a", "b"]] }] });
+  });
+});
+
+describe("clipMerges", () => {
+  it("reads A1 references of any width, in any corner order, and skips what is not a range", () => {
+    expect(clipMerges(["B2:C4", "AA1:AB2", "D5:D5", "nonsense", "$A$1:$B$2"], 10, 40)).toEqual([[0, 0, 1, 1], [0, 26, 1, 27], [1, 1, 3, 2]]);
+    expect(clipMerges(["C4:B2"], 10, 10)).toEqual([[1, 1, 3, 2]]);
+  });
+  it("clips to the rows and columns, and drops a range that is empty once clipped", () => {
+    expect(clipMerges(["A2:D20"], 4, 2)).toEqual([[1, 0, 3, 1]]);
+    expect(clipMerges(["A5:B6"], 4, 2)).toEqual([]);
+    expect(clipMerges(["C1:D2"], 4, 2)).toEqual([]);
   });
 });

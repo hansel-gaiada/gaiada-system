@@ -8,25 +8,32 @@ import {
   type ImportAnswer, type ImportKind, type ImportRow, type RowIssue,
 } from "@/lib/sheetImport";
 
-export type ShownOutcome = ImportRow["outcome"] | "unchecked";
+export type ShownOutcome = Exclude<ImportRow["outcome"], "joined"> | "unchecked";
 
-export interface PreviewCounts { rows: number; ready: number; unchanged: number; refused: number; skipped: number; unchecked: number }
+/** `joined` (SCP-6b1) counts the rows that continue the post above; it is present only when there are some, and they are not in `rows`. */
+export interface PreviewCounts { rows: number; ready: number; unchanged: number; refused: number; skipped: number; unchecked: number; joined?: number }
+
+/** A row that continues the post above (BFF §63.23.9), whatever that post's outcome: shown under it, with nothing of its own to untick. */
+export const continuesAbove = (r: ImportRow): boolean => typeof r.joinedTo === "number";
 
 /** What a row shows now: skipped when unticked, "unchecked" when it was skipped in the preview but is ticked back in, else the server's outcome. */
 export function shownOutcome(r: ImportRow, skip: ReadonlySet<number>, previewedSkip: ReadonlySet<number>): ShownOutcome {
   if (skip.has(r.row)) return "skipped";
-  return previewedSkip.has(r.row) ? "unchecked" : r.outcome;
+  return previewedSkip.has(r.row) ? "unchecked" : (r.outcome as ShownOutcome);
 }
 
 export function previewCounts(answer: ImportAnswer, skip: ReadonlySet<number>, previewedSkip: ReadonlySet<number>): PreviewCounts {
-  const c: PreviewCounts = { rows: answer.rows.length, ready: 0, unchanged: 0, refused: 0, skipped: 0, unchecked: 0 };
-  for (const r of answer.rows) c[shownOutcome(r, skip, previewedSkip)] += 1;
-  return c;
+  const posts = answer.rows.filter((r) => !continuesAbove(r));
+  const c: PreviewCounts = { rows: posts.length, ready: 0, unchanged: 0, refused: 0, skipped: 0, unchecked: 0 };
+  for (const r of posts) c[shownOutcome(r, skip, previewedSkip)] += 1;
+  const joined = answer.rows.length - posts.length;
+  return joined > 0 ? { ...c, joined } : c;
 }
 
 export function summaryText(c: PreviewCounts): string {
   const parts = [`${c.ready} ready`, `${c.unchanged} already there`, `${c.refused} refused`, `${c.skipped} skipped`];
   if (c.unchecked > 0) parts.push(`${c.unchecked} not checked yet`);
+  if (c.joined) parts.push(`${c.joined} continue${c.joined === 1 ? "s" : ""} the post above`);
   return `${c.rows} ${c.rows === 1 ? "row" : "rows"}: ${parts.join(", ")}.`;
 }
 
@@ -101,6 +108,15 @@ export function SheetImportPreview({
         </thead>
         <tbody>
           {answer.rows.map((r) => {
+            if (continuesAbove(r)) {
+              return (
+                <tr key={r.row} className="scp-import__row--joined">
+                  <td />
+                  <td className="scp-table__num">{r.row + 1 + offset}</td>
+                  <td colSpan={4}><span className="scp-table__sub">Continues the post above</span></td>
+                </tr>
+              );
+            }
             const shown = shownOutcome(r, skip, previewedSkip);
             const label = shown === "unchecked" ? "Not checked yet" : OUTCOME_LABEL[shown];
             const included = !skip.has(r.row);

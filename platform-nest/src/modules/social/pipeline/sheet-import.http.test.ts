@@ -13,6 +13,9 @@
 //      ready-by and its content-month PM task, each post is `planned` with its copy, the activity carries the importId, the replay is `unchanged`, a
 //      discarded post is not brought back, and one refused row refuses the whole apply with NO cycle left behind (the transaction rolled back).
 //   6. The three routes take bodies far past Fastify's 1 MiB default (`upload-body-limits.ts`) and refuse past their own cap.
+//   7. SCP-6b1 (BFF §63.23.9), the team's real file: a synthetic two-tab workbook (posts of two merged rows, an angle cell, "CAROUSEL VIDEO", a story
+//      date merged over two stories, one blank date that is not merged), read by `parse` (with the merges), previewed and applied for one engagement
+//      (`engagementId`, `allStories`), the replay `unchanged`, and the 400s for `engagementId`, `allStories` and `merges`.
 //
 // THE DAY. "Today" is the report day in `REPORTS_TZ`; the suite asks the same function and picks the plan's month from it, so it holds on any date.
 // Expected deadlines come from a plain Monday-to-Friday walk written here (the company has no holiday calendar), never from the code under test.
@@ -614,7 +617,8 @@ describe.skipIf(!TEST_URL)("social sheet import (SCP-6a)", () => {
     expect((await one({ caption: "c".repeat(5001) })).refusals).toEqual([{ field: "caption", code: "invalid_field" }]);
     expect((await one({ pillar: "p".repeat(61) })).refusals).toEqual([{ field: "pillar", code: "invalid_field" }]);
     expect((await one({ placement: "IG, Snapchat" })).refusals).toEqual([{ field: "placement", code: "invalid_field" }]);
-    expect((await one({ title: "", caption: "" })).refusals).toEqual([{ field: "title", code: "missing_title" }]);
+    // SCP-6b1: with nothing to take a title from, one is made from the format and the date, so this row is no longer refused.
+    expect((await one({ title: "", caption: "" })).refusals).toEqual([]);
     if (Number(today.slice(8, 10)) > 1) {
       const past = await one({ date: `1 ${monthAbbr(thisMonth)}` }, { month: thisMonth });
       expect(past.refusals).toEqual([{ field: "date", code: "date_in_past" }]);
@@ -636,6 +640,191 @@ describe.skipIf(!TEST_URL)("social sheet import (SCP-6a)", () => {
       expect(r.statusCode, `${order}: ${r.body}`).toBe(200);
       expect(r.json().rows[0].post.scheduledAt, order).toBe(`${isoDay(3)}T10:00:00.000Z`);
     }
+  });
+
+  // ── 4b. the team's real file (SCP-6b1, BFF §63.23.9) ─────────────────────────────────────────────────────────────────────────
+  // A synthetic workbook of the real file's shape (made-up names): a CONTENT PLAN whose posts each span two rows with the date, type, links and angle merged
+  // down over the pair, and a STORIES tab with one row per story, a merged date shared by two stories of one day, and one blank date that is NOT merged.
+  describe("the team's real file", () => {
+    const ANGLE = "Content Pillar: Exclusive Offers & Package\nContent Angle: Black Friday\n\nHighlight the added experiences available when booking direct...";
+    const HEAD_PLAN = ["POST DATE", "TYPE OF POST", "LINK FOOTAGE", "EDITED IG & FB CONTENT", "INSTAGRAM CONTENT ANGLES", "CAPTION IG", "CAPTION FB"];
+    const HEAD_STORIES = ["NUMBER", "POSTING DATE", "TYPE STORIES", "LINK VIDEO/VIDEO PREVIEW", "TEXT", "CTA LINK"];
+    let resort: { id: string; clientId: string };
+    let tabs: Array<{ name: string; rows: string[][]; merges: number[][] }>;
+
+    /** The rows from the header on, and the merges moved up with them: what the page sends. */
+    const fromTab = (tab: { rows: string[][]; merges: number[][] }, headerIdx: number) => ({
+      rows: tab.rows.slice(headerIdx),
+      merges: tab.merges.filter((m) => m[0] >= headerIdx).map((m) => [m[0] - headerIdx, m[1], m[2] - headerIdx, m[3]]),
+    });
+    const planCols = { date: 0, format: 1, assetLinks: 2, angle: 4, caption: 5 };
+    const storyCols = { date: 1, assetLinks: 3, onAssetText: 4, cta: 5 };
+    const storyTitle = (d: number, n = 1) => `Story ${d} ${monthAbbr(planMonth)}${n > 1 ? ` (${n})` : ""}`;
+    const readPost = async (id: string) => (await adminPool().query(
+      `SELECT title, pipeline_status, format, pillar, angle, key_message, caption, hashtags, raw_assets, scheduled_at, cycle_id::text AS cycle_id
+         FROM social_posts WHERE id = $1`, [id])).rows[0];
+
+    it("parse answers the merged ranges of each tab, and the slave cells stay empty", async () => {
+      resort = await makeEngagement(A, "Sample Resort", { batch: "A", project: true, source: "in_team" });
+      const wb = new ExcelJS.Workbook();
+      const cp = wb.addWorksheet("CONTENT PLAN");
+      cp.getCell("A1").value = "PERIOD";
+      cp.getCell("A2").value = "OUTPUT";
+      cp.getCell("A3").value = "FOOTAGE";
+      HEAD_PLAN.forEach((h, i) => { cp.getRow(6).getCell(i + 1).value = h; });
+      cp.getCell("A7").value = sheetDay(3);
+      cp.getCell("B7").value = "CAROUSEL VIDEO";
+      cp.getCell("C7").value = "REEL: https://drive.example/a\n\nTHUMBNAIL: https://drive.example/b";
+      cp.getCell("E7").value = ANGLE;
+      cp.getCell("F7").value = "Sample Resort caption one.\nBook direct.";
+      cp.getCell("G7").value = "A caption for the other network.";
+      cp.getCell("F8").value = "#SampleResort #BlackFriday";
+      cp.getCell("G8").value = "#OtherNetwork";
+      cp.getCell("D8").value = "Image description, plain text";
+      cp.getCell("A9").value = sheetDay(5);
+      cp.getCell("B9").value = "SINGLE POST";
+      cp.getCell("E9").value = "Pillar: Rooms\nAngle: Quiet mornings";
+      cp.getCell("F9").value = "Wake up slowly.";
+      cp.getCell("F10").value = "#Rooms #Calm";
+      for (const col of ["A", "B", "C", "E"]) { cp.mergeCells(`${col}7:${col}8`); cp.mergeCells(`${col}9:${col}10`); }
+      const st = wb.addWorksheet("STORIES");
+      st.getCell("A1").value = "Client:";
+      st.getCell("A2").value = "Period:";
+      st.getCell("A3").value = "Link Drive:";
+      HEAD_STORIES.forEach((h, i) => { st.getRow(7).getCell(i + 1).value = h; });
+      st.getCell("A8").value = 1; st.getCell("B8").value = sheetDay(6); st.getCell("C8").value = "PHOTO";
+      st.getCell("D8").value = "https://drive.example/s1"; st.getCell("F8").value = "Plan Your Stay\nhttps://stay.example";
+      st.getCell("A9").value = 2; st.getCell("B9").value = sheetDay(7); st.getCell("C9").value = "VIDEO"; st.getCell("D9").value = "https://drive.example/s2";
+      st.getCell("A10").value = 3; st.getCell("C10").value = "VIDEO"; st.getCell("D10").value = "https://drive.example/s3";
+      st.mergeCells("B9:B10"); // the shared day: only the date is merged
+      st.getCell("A11").value = 4; st.getCell("C11").value = "VIDEO"; st.getCell("F11").value = "Sample call to action"; // a blank date, NOT merged
+      const bytes = Buffer.from(await wb.xlsx.writeBuffer());
+
+      const r = await imp(U.smHead, "parse", { filename: "Sample_ContentPlan.xlsx", contentBase64: bytes.toString("base64") });
+      expect(r.statusCode, r.body).toBe(200);
+      tabs = r.json().tabs;
+      expect(tabs.map((t) => t.name)).toEqual(["CONTENT PLAN", "STORIES"]);
+      expect(tabs[0].merges).toEqual([[6, 0, 7, 0], [8, 0, 9, 0], [6, 1, 7, 1], [8, 1, 9, 1], [6, 2, 7, 2], [8, 2, 9, 2], [6, 4, 7, 4], [8, 4, 9, 4]].sort((a, b) => a[0] - b[0] || a[1] - b[1]));
+      expect(tabs[0].rows[7][0]).toBe(""); // the slave cell of the date
+      expect(tabs[1].merges).toEqual([[8, 1, 9, 1]]);
+      // csv and pasted text carry no merges at all.
+      expect((await imp(U.smHead, "parse", { text: "a\tb" })).json().tabs[0]).not.toHaveProperty("merges");
+    });
+
+    it("the plan: previewed (nothing written), then applied: the posts with pillar, angle, key message, the Instagram caption, the hashtags of row 2 and the links; the joined rows are not written", async () => {
+      const { rows, merges } = fromTab(tabs[0], 5);
+      const body = (o: Record<string, unknown> = {}) => planBody(rows, { columns: planCols, engagementId: resort.id, merges, ...o });
+      const pv = await imp(U.smHead, "plan", body());
+      expect(pv.statusCode, pv.body).toBe(200);
+      const a = pv.json();
+      expect(a.importId).toBeNull();
+      expect(a.summary).toEqual({ rows: 4, ready: 2, unchanged: 0, refused: 0, skipped: 0, joined: 2 });
+      expect(a.rows.map((x: { outcome: string }) => x.outcome)).toEqual(["ready", "joined", "ready", "joined"]);
+      expect(a.rows[1]).toMatchObject({ joinedTo: 1, clientName: "Sample Resort" });
+      expect(await postsOf(resort.id)).toBe(0);
+
+      const ap = await imp(U.smHead, "plan", body({ dryRun: false }));
+      expect(ap.statusCode, ap.body).toBe(200);
+      expect(ap.json().summary).toEqual({ rows: 4, ready: 2, unchanged: 0, refused: 0, skipped: 0, joined: 2 });
+      expect(await postsOf(resort.id)).toBe(2);
+      const one = await readPost(importPostId(A, resort.id, planMonth, isoDay(3), "Sample Resort caption one."));
+      expect(one).toMatchObject({
+        pipeline_status: "planned", format: "carousel", pillar: "Exclusive Offers & Package", angle: "Black Friday",
+        key_message: "Highlight the added experiences available when booking direct...", caption: "Sample Resort caption one.\nBook direct.",
+        hashtags: ["SampleResort", "BlackFriday"],
+        raw_assets: [
+          { url: "https://drive.example/a", label: "REEL", source: "unknown", aiNote: null },
+          { url: "https://drive.example/b", label: "THUMBNAIL", source: "unknown", aiNote: null },
+        ],
+      });
+      const two = await readPost(importPostId(A, resort.id, planMonth, isoDay(5), "Wake up slowly."));
+      expect(two).toMatchObject({ format: "feed", pillar: "Rooms", angle: "Quiet mornings", caption: "Wake up slowly.", hashtags: ["Rooms", "Calm"], raw_assets: [] });
+      expect(two.key_message).toBeNull();
+    });
+
+    it("the stories: every row a story, the shared day's two stories both written with the shared date and distinct titles, the unmerged blank date refused", async () => {
+      const { rows, merges } = fromTab(tabs[1], 6);
+      const body = (o: Record<string, unknown> = {}) => planBody(rows, { columns: storyCols, engagementId: resort.id, allStories: true, merges, ...o });
+      const pv = await imp(U.smHead, "plan", body());
+      expect(pv.statusCode, pv.body).toBe(200);
+      const a = pv.json();
+      expect(a.summary).toEqual({ rows: 4, ready: 3, unchanged: 0, refused: 1, skipped: 0 });
+      const blankDate = a.rows.find((x: { outcome: string }) => x.outcome === "refused");
+      expect(blankDate.refusals).toEqual([{ field: "date", code: "missing_value" }]);
+      expect(blankDate.row).toBe(4);
+      const shared = a.rows.find((x: { row: number }) => x.row === 3);
+      expect(shared.warnings).toContainEqual({ field: "date", code: "date_from_merged_cell" });
+
+      // The refused row stops the whole apply; unticking it lets the rest through.
+      const stopped = await imp(U.smHead, "plan", body({ dryRun: false }));
+      expect(stopped.statusCode, stopped.body).toBe(409);
+      expect(stopped.json().error).toBe("import_rows_refused");
+      expect(await postsOf(resort.id)).toBe(2);
+      const ap = await imp(U.smHead, "plan", body({ dryRun: false, skip: [4] }));
+      expect(ap.statusCode, ap.body).toBe(200);
+      expect(ap.json().summary).toEqual({ rows: 4, ready: 3, unchanged: 0, refused: 0, skipped: 1 });
+      expect(await postsOf(resort.id)).toBe(5);
+
+      const s1 = await readPost(importPostId(A, resort.id, planMonth, isoDay(6), "Plan Your Stay"));
+      expect(s1).toMatchObject({ format: "story", pipeline_status: "planned", raw_assets: [{ url: "https://drive.example/s1", label: "", source: "unknown", aiNote: null }] });
+      const s2 = await readPost(importPostId(A, resort.id, planMonth, isoDay(7), storyTitle(7)));
+      const s3 = await readPost(importPostId(A, resort.id, planMonth, isoDay(7), storyTitle(7, 2)));
+      expect(s2).toMatchObject({ format: "story", title: storyTitle(7), raw_assets: [{ url: "https://drive.example/s2", label: "", source: "unknown", aiNote: null }] });
+      expect(s3).toMatchObject({ format: "story", title: storyTitle(7, 2), raw_assets: [{ url: "https://drive.example/s3", label: "", source: "unknown", aiNote: null }] });
+      // The shared date: the same day for both (the time is the engagement's default, 09:00 in Jakarta).
+      expect(new Date(s2.scheduled_at).toISOString()).toBe(`${isoDay(7)}T02:00:00.000Z`);
+      expect(new Date(s3.scheduled_at).toISOString()).toBe(`${isoDay(7)}T02:00:00.000Z`);
+      expect(s2.cycle_id).toBe(s1.cycle_id); // the stories land in the one cycle of the month
+    });
+
+    it("the replay of both tabs: every post is unchanged, the joined rows stay joined, nothing new is written", async () => {
+      const p = fromTab(tabs[0], 5);
+      const s = fromTab(tabs[1], 6);
+      const rp = await imp(U.smHead, "plan", planBody(p.rows, { dryRun: false, columns: planCols, engagementId: resort.id, merges: p.merges }));
+      expect(rp.statusCode, rp.body).toBe(200);
+      expect(rp.json().summary).toEqual({ rows: 4, ready: 0, unchanged: 2, refused: 0, skipped: 0, joined: 2 });
+      const rs = await imp(U.smHead, "plan", planBody(s.rows, { dryRun: false, columns: storyCols, engagementId: resort.id, allStories: true, merges: s.merges, skip: [4] }));
+      expect(rs.statusCode, rs.body).toBe(200);
+      expect(rs.json().summary).toEqual({ rows: 4, ready: 0, unchanged: 3, refused: 0, skipped: 1 });
+      expect(await postsOf(resort.id)).toBe(5);
+      expect(await cyclesOf(resort.id)).toBe(1);
+    });
+
+    it("the 400s: engagementId beside a client column, a foreign or a closed engagement, allStories beside a format column, bad merges", async () => {
+      const p = fromTab(tabs[0], 5);
+      const base = { columns: planCols, engagementId: resort.id, merges: p.merges };
+      const bad = async (o: Record<string, unknown>, field: string) => {
+        const r = await imp(U.smHead, "plan", planBody(p.rows, { ...base, ...o }));
+        expect(r.statusCode, `${field}: ${r.body}`).toBe(400);
+        expect(r.json()).toMatchObject({ error: "invalid_field", field });
+      };
+      await bad({ columns: { ...planCols, client: 6 } }, "engagementId");
+      await bad({ engagementId: foreign.id }, "engagementId");
+      await bad({ engagementId: closed.id }, "engagementId");
+      await bad({ engagementId: newId() }, "engagementId");
+      await bad({ engagementId: "not-a-uuid" }, "engagementId");
+      await bad({ allStories: true }, "allStories"); // planCols has a format column
+      await bad({ merges: [[0, 0, 99, 0]] }, "merges");
+      await bad({ merges: [[0, 0, 1, 0], [1, 0, 2, 0]] }, "merges");
+      await bad({ merges: [[0, 0, 0, 60]] }, "merges");
+      await bad({ merges: "x" }, "merges");
+      // A dry run asks the same questions, and nothing was written by any of them.
+      expect(await postsOf(resort.id)).toBe(5);
+    });
+
+    it("a footage cell with text and no link is a note, and an http link or eleven links is refused on assetLinks", async () => {
+      const cols = { date: 0, title: 1, assetLinks: 2 };
+      const eleven = Array.from({ length: 11 }, (_, i) => `https://drive.example/many/${i}`).join("\n");
+      const r = await imp(U.smHead, "plan", planBody([
+        ["Date", "Title", "Links"], [sheetDay(20), "No link", "to come"], [sheetDay(21), "Plain http", "http://old.example/x"], [sheetDay(22), "Many links", eleven],
+      ], { columns: cols, engagementId: resort.id }));
+      expect(r.statusCode, r.body).toBe(200);
+      const a = r.json();
+      expect(a.rows[0]).toMatchObject({ outcome: "ready" });
+      expect(a.rows[0].warnings).toContainEqual({ field: "assetLinks", code: "asset_link_missing_url" });
+      expect(a.rows[1]).toMatchObject({ outcome: "refused", refusals: [{ field: "assetLinks", code: "invalid_field" }] });
+      expect(a.rows[2]).toMatchObject({ outcome: "refused", refusals: [{ field: "assetLinks", code: "invalid_field" }] });
+    });
   });
 
   // ── 5. the body limits ──────────────────────────────────────────────────────────────────────────────────────────────────────

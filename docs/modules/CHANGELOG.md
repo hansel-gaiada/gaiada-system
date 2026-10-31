@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.213.0` + platform-ui `0.231.0` - SCP-6b1: the sheet import reads the team's real monthly file - PROTOTYPED
+
+- **What changed (BFF §63.23.9).** The one-off sheet import of SCP-6a reads the team's real file: one file per client per month, two tabs (CONTENT PLAN with two-row posts, STORIES with one row per story). Every addition is optional, so a body without them reads as before.
+  - **Pictures left out in the browser (platform-ui).** New pure `lib/xlsxStrip.ts` (`stripXlsxMedia`): drops the `xl/media/` entries from the zip without inflating anything, copying each kept entry byte for byte and writing a new central directory. The page runs it on every `.xlsx`, refuses a file over 300 MB, and says "Pictures in the file are left out: designs are added on each post." The server's 2 MiB cap and zip-bomb check are unchanged.
+  - **One client for the whole file (both).** The plan body gains `engagementId` (an open engagement of this company, else 400 `invalid_field` `engagementId`; not beside `columns.client`). The columns step offers "Each row names its client" or "The whole file is for one client" with a picker.
+  - **Merged cells (both).** `import/parse` answers `merges` per xlsx tab; the plan body takes them. A row whose date and another non-copy column are slaves of the row above is `joined` (never written, never refused for its own cells; its text and its `#hashtag` captions are added to the post above); a row that only shares a merged date takes it with `date_from_merged_cell`. `summary.joined` is present when above zero.
+  - **The angle cell, a tab of stories, titles, formats (platform-nest).** `Content Pillar:` / `Content Angle:` lines give the pillar and angle, the rest the key message (a field with its own column wins). `allStories` makes every row a story. A title falls back to the text on the design, the call to action, then a generated `Story 6 Nov` (with ` (2)` for a second on the same day). "Carousel video" is a carousel; "Photo" and "Foto" are the feed.
+  - **Footage and asset links (both).** New plan field `assetLinks`: each `https://` URL of the cell becomes one `raw_assets` item `{url, label, source: "unknown", aiNote: null}`, written in the same INSERT as the other starting text. `asset_link_missing_url` is the note for a cell with no link.
+  - **Header guesses (platform-ui).** New aliases and a data-driven `HEADER_BLOCKERS`, pinned on the real file's two header rows: no client and no title are guessed from "TAG IG ACCOUNT", "EDITED IG & FB CONTENT" and the like.
+  - **Preview page (platform-ui).** A joined row is drawn under its post as "Continues the post above"; the new warnings are in plain words.
+- **Behaviour change.** A plan row with nothing to take a title from is no longer `missing_title`: it gets a generated title (the existing http and pure tests were updated). `missing_title` is left for a row with no date.
+- **Proofs.** platform-nest pure: `sheet-parse.test.ts`, `sheet-import.test.ts`; `sheet-import.http.test.ts` gains a synthetic two-tab workbook case (Postgres and Cerbos, CI only). platform-ui: `xlsxStrip.test.ts`, `sheetImport.test.ts`, `SheetImport.test.tsx`.
+- **Deploy.** No migration, no Cerbos, IAM, compose or `.env` change, no server step. Status PROTOTYPED until the CI gate and a live check on the mock seed.
+
 ### platform-nest `0.212.0` + platform-ui `0.230.0` - shared train 20261031-3: SCP-5 wave 5 (client audits, Saved and audit pages, cycle-step reads, report automation, client onboarding); M6-P6p the "Domain and DNS" card; SCP-5, AIP and WDV docs - PROTOTYPED
 
 - **SCP-5 W5-B4 (platform-nest; BFF §63.28).** The social audit: the scorecard from the company's rules, the pure scoring with its golden table, the routes (list, read, create, edit, Draft with AI, finalize, attach, delete) and their tools. A client's audit is written by its officer or one of the four, the owner and the superadmin included (SCP-Q43).

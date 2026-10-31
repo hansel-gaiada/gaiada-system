@@ -43,8 +43,8 @@ import { authorizePlan } from "./plan-authz";
 import { authorizeStage, cerbosDecisionsFor, createPostInTx, isAutomationPrincipal } from "./pipeline.service";
 import { prefillDeadline, previousMonth, readyByFor } from "./schedule-health";
 import {
-  cyclesToCreate, finishPlan, parseImportBody, previewAllocation, stagePlanRows,
-  type AllocationEngagement, type AllocationRowAnswer, type ImportAnswer, type ImportBody, type Member, type PlanEngagement, type PlanLookups,
+  cyclesToCreate, finishPlan, parseImportBody, previewAllocation, stagePlanRows, summarize,
+  type AllocationEngagement, type AllocationRowAnswer, type ImportAnswer, type ImportBody, type Member, type Outcome, type PlanEngagement, type PlanLookups,
   type PlanRowAnswer, type PlanWrite, type Summary,
 } from "./sheet-import";
 import { parseSheetBody } from "./sheet-parse";
@@ -80,6 +80,8 @@ async function readMembers(c: PoolClient, tenantId: string): Promise<Member[]> {
 
 /** The person's picks must be this company's: a client pick an open engagement, an officer pick an active employee member (400 `<map>.<sheetName>`). */
 function checkPicks(body: ImportBody, engagementIds: ReadonlySet<string>, members: readonly Member[] | null): void {
+  // SCP-6b1: the one client of the whole file must be an open engagement of this company too (400 `invalid_field` `engagementId`).
+  if (body.plan?.engagementId && !engagementIds.has(body.plan.engagementId)) throw new BadRequestException({ message: "invalid_field", field: "engagementId" });
   for (const [name, id] of body.clientPicks) {
     if (!engagementIds.has(id)) throw new BadRequestException({ message: "invalid_field", field: `clientMatches.${name}` });
   }
@@ -98,11 +100,7 @@ function refused(answer: object): ConflictException {
 
 const hasRefused = (rows: ReadonlyArray<{ outcome: string }>): boolean => rows.some((r) => r.outcome === "refused");
 
-function resummarize(rows: ReadonlyArray<{ outcome: string }>): Summary {
-  const s: Summary = { rows: rows.length, ready: 0, unchanged: 0, refused: 0, skipped: 0 };
-  for (const r of rows) s[r.outcome as keyof Omit<Summary, "rows">] += 1;
-  return s;
-}
+const resummarize = (rows: ReadonlyArray<{ outcome: Outcome }>): Summary => summarize(rows);
 
 @Controller("api/:tenantId/modules/social")
 @UseGuards(AuthGuard, ModuleEnabledGuard("social"))

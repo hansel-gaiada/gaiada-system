@@ -186,7 +186,7 @@ export function readNetworks(cell: string): string[] | undefined {
 }
 
 const FORMAT_ALIASES: Record<string, string> = {
-  feed: "feed", post: "feed", single: "feed", image: "feed", static: "feed",
+  feed: "feed", post: "feed", single: "feed", image: "feed", static: "feed", photo: "feed", foto: "feed",
   carousel: "carousel", slide: "carousel", slides: "carousel", album: "carousel",
   reel: "reel", reels: "reel", video: "reel",
   story: "story", stories: "story", igs: "story",
@@ -199,6 +199,8 @@ function readFormatItem(item: string): string[] | undefined {
   const kept = words.filter((w) => !FILLER_WORDS.has(w));
   // "IG Post": only a network and a filler are left, and a post on its own is the feed.
   if (kept.length === 0) return words.some((w) => w === "post" || w === "posts") ? ["feed"] : undefined;
+  // SCP-6b1: "Carousel Video" (a carousel whose slides are video) is a carousel. Every other cell naming two formats stays unreadable.
+  if (kept.length === 2 && kept.includes("carousel") && kept.includes("video")) return ["carousel"];
   return wordValues(kept, FORMAT_ALIASES);
 }
 
@@ -325,13 +327,16 @@ export const ALLOCATION_FIELDS = [
 ] as const;
 export const PLAN_FIELDS = [
   "client", "date", "time", "title", "format", "pillar", "placement", "isExtra", "angle", "objective", "keyMessage", "visualDirection", "caption",
-  "onAssetText", "cta", "hashtags",
+  "onAssetText", "cta", "hashtags", "assetLinks",
 ] as const;
 export const MAX_ALLOCATION_ROWS = 300;
 export const MAX_PLAN_ROWS = 1000;
 export const MAX_COLUMN_INDEX = 59;
 
 export type ImportKind = "allocation" | "plan";
+
+/** A merged range `[top, left, bottom, right]`, 0-based and inclusive, in the coordinates of the `rows` sent (BFF §63.23.9). */
+export type Merge = [number, number, number, number];
 
 export interface ImportBody {
   dryRun: boolean;
@@ -345,8 +350,10 @@ export interface ImportBody {
   /** The raw picks by sheet name, for the controller's `clientMatches.<sheetName>` refusals. */
   clientPicks: Array<[string, string]>;
   officerPicks: Array<[string, string]>;
-  plan?: { month: string; dateOrder: DateOrder; timeZone: string };
+  plan?: { month: string; dateOrder: DateOrder; timeZone: string; engagementId: string | null; allStories: boolean; merges: Merge[] };
 }
+
+export const MAX_MERGES = 5000;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const invalid = (field: string): never => {
@@ -374,6 +381,26 @@ export function isKnownTimeZone(tz: unknown): tz is string {
   }
 }
 
+/** The plan's `merges`: at most 5,000 ranges of four integers, inside the rows sent and the 60 columns, none overlapping another (400 `invalid_field` `merges`). */
+function parseMerges(v: unknown, rowCount: number): Merge[] {
+  if (!Array.isArray(v) || v.length > MAX_MERGES) return invalid("merges");
+  const claimed = new Set<number>();
+  const out: Merge[] = [];
+  for (const m of v as unknown[]) {
+    if (!Array.isArray(m) || m.length !== 4 || !m.every((n) => typeof n === "number" && Number.isInteger(n))) return invalid("merges");
+    const [t, l, b, r] = m as number[];
+    if (t < 0 || l < 0 || t > b || l > r || b >= rowCount || r > MAX_COLUMN_INDEX) return invalid("merges");
+    // An overlap is no merge Excel can hold; refusing it also bounds the work below by rows x 60 cells.
+    for (let row = t; row <= b; row++) for (let col = l; col <= r; col++) {
+      const key = row * 64 + col;
+      if (claimed.has(key)) return invalid("merges");
+      claimed.add(key);
+    }
+    out.push([t, l, b, r]);
+  }
+  return out;
+}
+
 /** Validates the body of the two writing routes, after authorization (BFF §63.23.2). 400 `invalid_field` with `field`. `today` is the report day. */
 export function parseImportBody(kind: ImportKind, body: unknown, today: string): ImportBody {
   if (!isObject(body)) return invalid("body");
@@ -391,7 +418,22 @@ export function parseImportBody(kind: ImportKind, body: unknown, today: string):
     used.set(idx, name);
     columns[name] = idx;
   }
-  for (const req of kind === "allocation" ? ["client"] : ["client", "date"]) if (columns[req] === undefined) return invalid(`columns.${req}`);
+  // SCP-6b1 (BFF §63.23.9): one client for the whole file (`engagementId`) replaces the client column, and cannot be given beside it.
+  let engagementId: string | null = null;
+  let allStories = false;
+  if (kind === "plan") {
+    if (body.engagementId !== undefined) {
+      if (typeof body.engagementId !== "string" || !UUID_RE.test(body.engagementId) || columns.client !== undefined) return invalid("engagementId");
+      engagementId = body.engagementId.toLowerCase();
+    }
+    if (body.allStories !== undefined) {
+      if (typeof body.allStories !== "boolean" || (body.allStories && columns.format !== undefined)) return invalid("allStories");
+      allStories = body.allStories;
+    }
+  }
+  for (const req of kind === "allocation" ? ["client"] : ["client", "date"]) {
+    if (columns[req] === undefined && !(req === "client" && engagementId !== null)) return invalid(`columns.${req}`);
+  }
 
   const max = kind === "allocation" ? MAX_ALLOCATION_ROWS : MAX_PLAN_ROWS;
   if (!Array.isArray(body.rows) || body.rows.length > max) return invalid("rows");
@@ -410,6 +452,9 @@ export function parseImportBody(kind: ImportKind, body: unknown, today: string):
     }
   }
 
+  let merges: Merge[] = [];
+  if (kind === "plan" && body.merges !== undefined) merges = parseMerges(body.merges, rows.length);
+
   const clientPicks = picksOf(body.clientMatches, "clientMatches");
   const officerPicks = kind === "allocation" ? picksOf(body.officerMatches, "officerMatches") : [];
   const out: ImportBody = {
@@ -424,7 +469,7 @@ export function parseImportBody(kind: ImportKind, body: unknown, today: string):
     if (typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month < today.slice(0, 7)) return invalid("month");
     if (typeof body.dateOrder !== "string" || !(DATE_ORDERS as readonly string[]).includes(body.dateOrder)) return invalid("dateOrder");
     if (!isKnownTimeZone(body.timeZone)) return invalid("timeZone");
-    out.plan = { month, dateOrder: body.dateOrder as DateOrder, timeZone: body.timeZone };
+    out.plan = { month, dateOrder: body.dateOrder as DateOrder, timeZone: body.timeZone, engagementId, allStories, merges };
   }
   return out;
 }
@@ -433,9 +478,10 @@ export function parseImportBody(kind: ImportKind, body: unknown, today: string):
 // The answer (BFF §63.23.3)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-export type Outcome = "ready" | "unchanged" | "refused" | "skipped";
+export type Outcome = "ready" | "unchanged" | "refused" | "skipped" | "joined";
 export interface RowNote { field: string; code: string }
-export interface Summary { rows: number; ready: number; unchanged: number; refused: number; skipped: number }
+/** `joined` (SCP-6b1) is present only when at least one plan row continued the post above, so every earlier answer reads the same. */
+export interface Summary { rows: number; ready: number; unchanged: number; refused: number; skipped: number; joined?: number }
 export interface UnmatchedClient { sheetName: string; rows: number[]; suggestions: Array<{ engagementId: string; clientName: string }> }
 export interface UnmatchedOfficer { sheetName: string; rows: number[] }
 
@@ -449,9 +495,14 @@ export interface ImportAnswer<R extends RowBase> {
   rows: R[];
 }
 
-function summarize(rows: ReadonlyArray<RowBase>): Summary {
+export function summarize(rows: ReadonlyArray<{ outcome: Outcome }>): Summary {
   const s: Summary = { rows: rows.length, ready: 0, unchanged: 0, refused: 0, skipped: 0 };
-  for (const r of rows) s[r.outcome] += 1;
+  let joined = 0;
+  for (const r of rows) {
+    if (r.outcome === "joined") joined += 1;
+    else s[r.outcome] += 1;
+  }
+  if (joined > 0) s.joined = joined;
   return s;
 }
 
@@ -689,6 +740,8 @@ export interface PlanDraft {
   /** The extra `social_posts` columns (snake_case). */
   extra: Record<string, unknown>;
   scheduledAt: string | null;
+  /** SCP-6b1: the row this one continues (a joined row is never written on its own); null for a post of its own. */
+  joinedTo: number | null;
 }
 
 export interface PlanStage {
@@ -697,6 +750,94 @@ export interface PlanStage {
   clientBook: UnmatchedClient[];
   /** The ids the rows would write, for the controller to look up. */
   postIds: string[];
+}
+
+// ── SCP-6b1: the team's real file (BFF §63.23.9) ─────────────────────────────────────────────────────────────────────────
+
+/** The copy fields: a slave cell in one of these never makes a row part of the post above (the caption of row 2 is the hashtags, not a new post). */
+const COPY_FIELDS: ReadonlySet<string> = new Set(["caption", "onAssetText", "cta", "hashtags"]);
+
+const PILLAR_LINE = /^\s*(?:content\s+pillar|pillar|pilar\s+konten)\s*:\s*(.*)$/i;
+const ANGLE_LINE = /^\s*(?:content\s+angle|angle|sudut\s+pandang)\s*:\s*(.*)$/i;
+
+/**
+ * The angle cell as the team writes it (`Content Pillar: ...`, `Content Angle: ...`, then the message): the pillar line, the angle line and what is left,
+ * trimmed. `found` is false when the cell holds neither line, which is the cell read as today.
+ */
+export function splitAngleCell(text: string): { found: boolean; pillar?: string; angle?: string; rest: string } {
+  let pillar: string | undefined;
+  let angle: string | undefined;
+  const rest: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const p = PILLAR_LINE.exec(line);
+    if (p && pillar === undefined) { pillar = p[1].trim(); continue; }
+    const a = ANGLE_LINE.exec(line);
+    if (a && angle === undefined) { angle = a[1].trim(); continue; }
+    rest.push(line);
+  }
+  return { found: pillar !== undefined || angle !== undefined, pillar, angle, rest: rest.join("\n").trim() };
+}
+
+/** Text made only of `#words`: every whitespace-separated token starts with `#`. */
+export const isHashtagsOnly = (t: string): boolean => {
+  const tokens = t.trim().split(/\s+/).filter((x) => x !== "");
+  return tokens.length > 0 && tokens.every((x) => x.startsWith("#"));
+};
+
+const appendText = (a: string | undefined, b: string): string => (a ? `${a}\n\n${b}` : b);
+
+/** Applies the angle cell's lines to the row's effective text, by the precedence of BFF §63.23.9: a field mapped to its own column wins. */
+function applyAngleCell(vals: Record<string, string>, columns: Record<string, number>): void {
+  const source = columns.angle !== undefined ? "angle" : columns.pillar !== undefined ? "pillar" : null;
+  if (!source) return;
+  const sp = splitAngleCell(vals[source] ?? "");
+  if (!sp.found) return;
+  if (source === "pillar") vals.pillar = sp.pillar ?? "";
+  else if (columns.pillar === undefined && sp.pillar !== undefined) vals.pillar = sp.pillar;
+  vals.angle = sp.angle ?? "";
+  if (sp.rest !== "") {
+    if (columns.keyMessage === undefined) vals.keyMessage = sp.rest;
+    else vals.angle = appendText(vals.angle || undefined, sp.rest);
+  }
+}
+
+export interface RawAssetLink { url: string; label: string; source: "unknown"; aiNote: null }
+
+/** Every `https://` URL of the cell as a raw asset: the label is the text before it on its line (no trailing colon). A `http://` link is not a value. */
+export function readAssetLinks(cell: string): { assets: RawAssetLink[]; badScheme: boolean } {
+  const assets: RawAssetLink[] = [];
+  let badScheme = false;
+  for (const line of cell.split(/\r?\n/)) {
+    const re = /(https?:\/\/\S+)/gi;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line))) {
+      const end = m.index + m[1].length;
+      if (!/^https:\/\//i.test(m[1])) {
+        badScheme = true;
+        last = end;
+        continue;
+      }
+      const label = line.slice(last, m.index).trim().replace(/:\s*$/, "").trim();
+      assets.push({ url: m[1], label, source: "unknown", aiNote: null });
+      last = end;
+    }
+  }
+  return { assets, badScheme };
+}
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const FORMAT_WORD: Record<string, string> = { feed: "Feed", carousel: "Carousel", reel: "Reel", story: "Story" };
+/** `Story 6 Nov`: the title a post gets when the sheet gives nothing to take one from (BFF §63.23.9). */
+export function generatedTitle(format: string | undefined, date: string): string {
+  return `${(format && FORMAT_WORD[format]) || "Post"} ${Number(date.slice(8, 10))} ${MONTH_ABBR[Number(date.slice(5, 7)) - 1]}`;
+}
+
+/** Row → merged-range top, for every cell below the top row of a range: key `row * 64 + column`. */
+function slaveMap(merges: readonly Merge[]): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const [t, l, b, r] of merges) for (let row = t + 1; row <= b; row++) for (let col = l; col <= r; col++) out.set(row * 64 + col, t);
+  return out;
 }
 
 export function stagePlanRows(
@@ -709,20 +850,63 @@ export function stagePlanRows(
   const book = new UnmatchedBook<UnmatchedClient>((sheetName) => ({ sheetName, rows: [], suggestions: [] }));
   const drafts: PlanDraft[] = [];
 
+  // Merged cells (63.23.9): which rows continue the post above, which only share its date, and what the joined rows add to their post.
+  const slaves = slaveMap(plan.merges);
+  const slaveTop = (row: number, col: number): number | undefined => slaves.get(row * 64 + col);
+  const firstData = body.headerRow ? 1 : 0;
+  const original = new Map<number, Record<string, string | undefined>>();
+  for (const row of dataRowIndexes(body)) original.set(row, cellsOf(body.rows[row], body.columns));
+  const link = new Map<number, { kind: "joined" | "dateOnly"; top: number }>();
+  const dateCol = body.columns.date;
+  if (dateCol !== undefined) {
+    for (const row of dataRowIndexes(body)) {
+      const m = slaveTop(row, dateCol);
+      if (m === undefined || m < firstData) continue;
+      const withM = Object.entries(body.columns).some(([f, c]) => f !== "date" && !COPY_FIELDS.has(f) && slaveTop(row, c) === m);
+      link.set(row, { kind: withM ? "joined" : "dateOnly", top: m });
+    }
+  }
+  const effective = new Map<number, Record<string, string | undefined>>();
+  for (const [row, cells] of original) effective.set(row, { ...cells });
+  for (const [row, j] of link) {
+    if (j.kind !== "joined" || body.skip.has(row) || body.skip.has(j.top)) continue;
+    const mine = original.get(row)!;
+    const top = original.get(j.top);
+    if (!top || emptyRow(mine) || emptyRow(top)) continue;
+    const into = effective.get(j.top)!;
+    for (const [field, col] of Object.entries(body.columns)) {
+      const t = mine[field] ?? "";
+      if (t === "" || slaveTop(row, col) === j.top) continue;
+      const target = field === "caption" && isHashtagsOnly(t) ? "hashtags" : field;
+      into[target] = appendText(into[target], t);
+    }
+  }
+  /** Generated titles taken so far, so a second one on the same client and date gets ` (2)`. */
+  const generated = new Map<string, number>();
+
   for (const row of dataRowIndexes(body)) {
-    const cells = cellsOf(body.rows[row], body.columns);
+    const cells = effective.get(row)!;
     const d: PlanDraft = {
       row, skipped: body.skip.has(row), blank: false, refusals: [], warnings: [], engagement: null, date: null, title: null, postId: null,
-      params: {}, extra: {}, scheduledAt: null,
+      params: {}, extra: {}, scheduledAt: null, joinedTo: null,
     };
     drafts.push(d);
     if (d.skipped) continue;
-    d.blank = emptyRow(cells);
+    d.blank = emptyRow(original.get(row)!);
     if (d.blank) continue;
-    const text = (f: string): string => cells[f] ?? "";
+    const lk = link.get(row);
+    if (lk?.kind === "joined") { d.joinedTo = lk.top; continue; } // never written on its own, never refused for its own cells
 
-    // The client.
-    if (text("client") === "") d.refusals.push({ field: "client", code: "missing_value" });
+    const vals: Record<string, string> = {};
+    for (const [k, v] of Object.entries(cells)) vals[k] = v ?? "";
+    applyAngleCell(vals, body.columns);
+    const text = (f: string): string => vals[f] ?? "";
+
+    // The client: one for the whole file, or the row's own.
+    if (plan.engagementId !== null) {
+      d.engagement = byId.get(plan.engagementId) ?? null;
+      if (!d.engagement) d.refusals.push({ field: "client", code: "client_not_found" });
+    } else if (text("client") === "") d.refusals.push({ field: "client", code: "missing_value" });
     else {
       const m = matchClient(text("client"), names.map((n) => ({ id: n.id, clientName: n.name })), body.clientMatches);
       if (m.kind === "matched" && byId.has(m.id)) d.engagement = byId.get(m.id)!;
@@ -733,10 +917,15 @@ export function stagePlanRows(
       }
     }
 
-    // The date.
-    if (text("date") === "") d.refusals.push({ field: "date", code: "missing_value" });
+    // The date: the row's own, else (a merged date shared with the row above) the top row's.
+    let dateText = text("date");
+    if (dateText === "" && lk?.kind === "dateOnly") {
+      dateText = original.get(lk.top)?.date ?? "";
+      if (dateText !== "") d.warnings.push({ field: "date", code: "date_from_merged_cell" });
+    }
+    if (dateText === "") d.refusals.push({ field: "date", code: "missing_value" });
     else {
-      const date = readDate(text("date"), plan.dateOrder, year);
+      const date = readDate(dateText, plan.dateOrder, year);
       if (!date) d.refusals.push({ field: "date", code: "invalid_field" });
       else {
         d.date = date;
@@ -764,11 +953,36 @@ export function stagePlanRows(
       } else d.refusals.push({ field: "time", code: "invalid_field" });
     }
 
-    // The title: the sheet's, else the caption's first line.
+    // The format (before the title: a generated title names it). A tab of stories is all stories.
+    let format: string | undefined;
+    if (plan.allStories) {
+      format = "story";
+      d.params.format = format;
+    } else if (text("format") !== "") {
+      const v = readFormat(text("format"));
+      if (v === undefined || contentFieldProblem("format", v)) d.refusals.push({ field: "format", code: "invalid_field" });
+      else {
+        format = v;
+        d.params.format = v;
+      }
+    }
+
+    // The title: the sheet's, else the first line of the caption, of the text on the design, of the call to action, else `Story 6 Nov`.
     let title = text("title");
-    if (title === "" && text("caption") !== "") {
-      title = titleFromCaption(text("caption"));
-      if (title !== "") d.warnings.push({ field: "title", code: "title_from_caption" });
+    if (title === "") {
+      const sources: Array<[string, string]> = [["caption", "title_from_caption"], ["onAssetText", "title_from_on_asset_text"], ["cta", "title_from_cta"]];
+      for (const [field, code] of sources) {
+        const t = titleFromCaption(text(field));
+        if (t !== "") { title = t; d.warnings.push({ field: "title", code }); break; }
+      }
+    }
+    if (title === "" && d.date) {
+      const base = generatedTitle(format, d.date);
+      const key = `${d.engagement?.engagementId ?? normalizeName(text("client"))}|${d.date}|${base}`;
+      const n = (generated.get(key) ?? 0) + 1;
+      generated.set(key, n);
+      title = n > 1 ? `${base} (${n})` : base;
+      d.warnings.push({ field: "title", code: "title_generated" });
     }
     if (title === "") d.refusals.push({ field: "title", code: "missing_title" });
     else if (contentFieldProblem("title", title)) d.refusals.push({ field: "title", code: "invalid_field" });
@@ -777,17 +991,12 @@ export function stagePlanRows(
       d.params.title = title;
     }
 
-    // isExtra, format, placement.
+    // isExtra, placement.
     if (text("isExtra") !== "") {
       const v = readYesNo(text("isExtra"));
       if (v === undefined) d.refusals.push({ field: "isExtra", code: "invalid_field" });
       else d.params.isExtra = v;
     } else d.params.isExtra = false;
-    if (text("format") !== "") {
-      const v = readFormat(text("format"));
-      if (v === undefined || contentFieldProblem("format", v)) d.refusals.push({ field: "format", code: "invalid_field" });
-      else d.params.format = v;
-    }
     if (text("placement") !== "") {
       const v = readNetworks(text("placement"));
       if (v === undefined || contentFieldProblem("placement", v)) d.refusals.push({ field: "placement", code: "invalid_field" });
@@ -806,6 +1015,13 @@ export function stagePlanRows(
       const tags = readHashtags(text("hashtags"));
       if (tags.length === 0 || contentFieldProblem("hashtags", tags)) d.refusals.push({ field: "hashtags", code: "invalid_field" });
       else d.extra[columnOf("hashtags")] = tags;
+    }
+    // The links the sheet gives the post's footage and designs (SCP-6b1): each https URL is one raw asset.
+    if (text("assetLinks") !== "") {
+      const { assets, badScheme } = readAssetLinks(text("assetLinks"));
+      if (badScheme || contentFieldProblem("rawAssets", assets)) d.refusals.push({ field: "assetLinks", code: "invalid_field" });
+      else if (assets.length === 0) d.warnings.push({ field: "assetLinks", code: "asset_link_missing_url" });
+      else d.extra[columnOf("rawAssets")] = assets;
     }
 
     if (d.engagement && d.date && d.title) {
@@ -833,6 +1049,8 @@ export interface PlanRowAnswer extends RowBase {
   clientName: string | null;
   cycle: { cycleId: string | null; deadline: string | null; created: boolean } | null;
   post: { id: string | null; title: string | null; format: string | null; scheduledAt: string | null; isExtra: boolean; placement: string[] } | null;
+  /** SCP-6b1: set on a row that continues the post of that row (outcome `joined`, or that post's `skipped` / `refused` followed). */
+  joinedTo?: number;
 }
 
 /** What apply writes for one ready row. `cycle.create` is true when the month has no cycle yet (the first ready row of the client makes it). */
@@ -854,11 +1072,28 @@ export function finishPlan(stage: PlanStage, lookups: PlanLookups): {
   /** The normalized titles of this import's earlier rows, per engagement, with the id of each. */
   const titlesInImport = new Map<string, Array<{ id: string; norm: string }>>();
 
+  /** Each row's final outcome and refusals, so a joined row can follow the post it continues. */
+  const finalOf = new Map<number, PlanRowAnswer>();
+
   for (const d of stage.drafts) {
     const e = d.engagement;
     const base = { row: d.row, refusals: d.refusals, warnings: d.warnings, engagementId: e?.engagementId ?? null, clientName: e?.clientName ?? null };
+    if (d.joinedTo !== null) {
+      // BFF §63.23.9: a joined row is never written on its own. It shows the post it continues, and follows that post when it is skipped or refused.
+      const top = finalOf.get(d.joinedTo);
+      const outcome: Outcome = top?.outcome === "skipped" ? "skipped" : top?.outcome === "refused" ? "refused" : "joined";
+      const row: PlanRowAnswer = {
+        row: d.row, outcome, refusals: outcome === "refused" ? [...top!.refusals] : [], warnings: [], engagementId: top?.engagementId ?? null,
+        clientName: top?.clientName ?? null, cycle: null, post: null, joinedTo: d.joinedTo,
+      };
+      rows.push(row);
+      finalOf.set(d.row, row);
+      continue;
+    }
     if (d.skipped || (d.blank && d.refusals.length === 0)) {
-      rows.push({ ...base, outcome: "skipped", cycle: null, post: null });
+      const row: PlanRowAnswer = { ...base, outcome: "skipped", cycle: null, post: null };
+      rows.push(row);
+      finalOf.set(d.row, row);
       continue;
     }
     const existing = d.postId ? lookups.existing.get(d.postId) : undefined;
@@ -903,7 +1138,9 @@ export function finishPlan(stage: PlanStage, lookups: PlanLookups): {
         writes.push({ row: d.row, engagementId: e.engagementId, cycle: { cycleId: cyc?.cycleId ?? null, deadline: cycle!.deadline! }, params: d.params, extra: d.extra });
       } else takenIds.add(d.postId);
     }
-    rows.push({ ...base, outcome, cycle, post });
+    const row: PlanRowAnswer = { ...base, outcome, cycle, post };
+    rows.push(row);
+    finalOf.set(d.row, row);
   }
   return { answer: { summary: summarize(rows), unmatched: { clients: stage.clientBook, officers: [] }, rows }, writes };
 }
