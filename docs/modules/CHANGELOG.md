@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.213.0` + infra `0.15.0` - M5-P5b2: the ERP PULLS AI-crawler logs over SSH (replaces the rejected push sketch) - PROTOTYPED
+
+- **Why.** The push sketch needed a token on the web host, and the only non-personal credential the ERP accepts is the master service token, which must never sit on a web host. Owner decision 2026-10-31: the ERP pulls, every 15 minutes, from every site we host (production and staging); bot verification stays off for now.
+- **platform-nest.** `src/seed/ai-crawler-ingest.ts`, run as `node dist/seed/ai-crawler-ingest.js --tenant <uuid> --property <uuid>` with the filtered log on stdin: it splits into chunks under `MAX_CHUNK_CHARS` on line boundaries, calls `ingestAiCrawlerChunk` (verifier from `verifierFromEnv()`), writes ONE `ai_crawler_ingest` activity (actor null) per non-empty run and prints one JSON line of counts, never a log line. Exit 0 ok (empty stdin included), 2 bad arguments, 3 no property, 1 other. `--grep-pattern` prints every UA token of `ai-crawler-bots.ts` as one `grep -E` alternation, so the host-side filter and the parser share one list. Unit tests (no database), a `*.db.test.ts` (rows stored; the same input twice is `duplicate`) and `ai-crawler-pull.script.test.ts`, which runs the pull script with stubbed ssh and ingest.
+- **infra.** `scripts/ai-crawler-pull.sh` (flock, `sources.json` via jq, one ssh call per log path with `StrictHostKeyChecking=yes` and the job's own key, host-side grep, inode+size offsets, the offset moves only when the ingest exits 0, one failure line per source, non-zero exit if any failed), `systemd/ai-crawler-pull.service` + `.timer` (`OnCalendar=*:0/15`, `Persistent=true`), and the rewritten runbook `runbooks/ai-crawler-log.md` (host-key pinning, adding a source, install, undo).
+- **Status.** PROTOTYPED. The script is tested against stubs only: no real ssh, no pinned host key, no jump host, no timer has run. Not DEV-VERIFIED until a run stores rows from a real log.
+- **Deploy.** No migration, Cerbos, IAM, compose or `.env` change. Nothing is installed by the release: the key, `sources.json`, the pinned host keys, the web hosts' authorised key (the owner's panel step) and the timer are the runbook's steps.
+
 ### platform-nest `0.212.0` + platform-ui `0.230.0` - shared train 20261031-3: SCP-5 wave 5 (client audits, Saved and audit pages, cycle-step reads, report automation, client onboarding); M6-P6p the "Domain and DNS" card; SCP-5, AIP and WDV docs - PROTOTYPED
 
 - **SCP-5 W5-B4 (platform-nest; BFF §63.28).** The social audit: the scorecard from the company's rules, the pure scoring with its golden table, the routes (list, read, create, edit, Draft with AI, finalize, attach, delete) and their tools. A client's audit is written by its officer or one of the four, the owner and the superadmin included (SCP-Q43).
