@@ -17,7 +17,7 @@ ExecStart=/usr/local/sbin/ai-crawler-pull.sh
 # One run is bounded; a hung ssh must not pile up behind the timer.
 TimeoutStartSec=20min
 Nice=10
-# The script reads and writes only these. (Docker's socket is reached through the docker CLI.)
+# Hardening that costs nothing: no home directory, a private /tmp, no new privileges.
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true

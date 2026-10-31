@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.212.0` | IN PROGRESS | WS1 | 2026-10-31 |
+| platform-nest | `0.213.0` | IN PROGRESS | WS1 | 2026-10-31 |
 | platform-ui | `0.230.0` | IN PROGRESS | WS5 | 2026-10-31 |
 | ai-gateway-go | `0.20.0` | PROTOTYPED | WS3 | 2026-10-30 |
 | mcp-hub | `0.19.0` | PROTOTYPED | WS2 | 2026-10-28 |
@@ -42,7 +42,7 @@ versions below; the running build reports it at `GET /health`.
 | insights-collector | `0.3.2` | PROTOTYPED | SEO | 2026-10-13 |
 | automation (n8n) | `0.9.0` | PROTOTYPED | WS4 | 2026-10-28 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
-| infra | `0.14.0` | PROTOTYPED | WS10 | 2026-10-30 |
+| infra | `0.15.0` | PROTOTYPED | WS10 | 2026-10-31 |
 | wa-chat-bot | `0.14.0` | PROTOTYPED | WS5 | 2026-10-28 |
 | ai-agents | `0.21.0` | PROTOTYPED | WS8 | 2026-10-29 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
