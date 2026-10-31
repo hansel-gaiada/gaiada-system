@@ -11,7 +11,7 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.213.0` + platform-ui `0.231.0` - M5-P4g: Google Ads tag ids and conversions, set per client from the SEO workspace - PROTOTYPED
+### platform-nest `0.214.0` + platform-ui `0.232.0` - M5-P4g: Google Ads tag ids and conversions, set per client from the SEO workspace - PROTOTYPED
 
 - **M5-P4g (platform-nest + platform-ui; BFF §28h.2; owner 2026-10-31: "Google ads should be setable in SEO department UI for each of the clients").** It extends M5-P4u (the LinkedIn partner id): two more repository variables on the site's staging build repository, `PUBLIC_GOOGLE_ADS_IDS` and `PUBLIC_GOOGLE_ADS_CONVERSIONS`, in the contract shared with the website.
   - **platform-nest.** `PUT properties/:id/tracking-tags/google-ads` (`manage_tags`, then `github_repo · push` at the org tenant; body exactly `{ webdeskTenant, site, ids, conversions }`) writes the canonical form: 1 to 5 `AW-` ids, conversions `lead`, `whatsapp`, `phone`, `email` in that order, the conversions variable deleted (never written empty) when none is set, both deleted when there are no ids. Set writes ids then conversions, clear writes conversions then ids; only a variable that differs is written; one audit row per variable that changed (`tag: "google_ads"`), and a first write that landed before a second failed is still audited. New refusals `ads_body_invalid`, `ads_id_invalid`, `ads_conversion_invalid` (400, in words). `GET tracking-tags` gains `googleAds` (read with the site's own rule: invalid and unmatched entries dropped, first valid entry of a key wins), additive. The allow-list in `repo-variables.ts` holds exactly three names.
