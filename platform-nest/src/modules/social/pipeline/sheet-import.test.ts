@@ -1051,6 +1051,20 @@ describe("a tab of stories (SCP-6b1)", () => {
     expect(byRow(6).post!.id).not.toBe(byRow(8).post!.id);
   });
 
+  it("two stories on one day with the same call to action are two posts: the second title gets (2); a caption keeps 6a's same-title rule", () => {
+    const rows = [HEAD, ["9 Nov", "", "Discover more\nhttps://a.example", ""], ["", "", "Discover more\nhttps://b.example", ""]];
+    const { answer, writes } = run(planBody(rows, { columns: COLS, engagementId: ENG, allStories: true, merges: [[1, 0, 2, 0]] } as never));
+    expect(answer.rows.map((r) => r.outcome)).toEqual(["ready", "ready"]);
+    expect(answer.rows.map((r) => r.post!.title)).toEqual(["Discover more", "Discover more (2)"]);
+    expect(new Set(writes.map((w) => w.params.id)).size).toBe(2);
+
+    const capRows = [["Date", "Caption"], ["9 Nov", "Same first line\nA"], ["9 Nov", "Same first line\nB"]];
+    const cap = run(planBody(capRows, { columns: { date: 0, caption: 1 }, engagementId: ENG } as never)).answer;
+    expect(cap.rows.map((r) => r.post!.title)).toEqual(["Same first line", "Same first line"]);
+    expect(cap.rows[1]).toMatchObject({ outcome: "unchanged" });
+    expect(cap.rows[1].warnings).toContainEqual({ field: "title", code: "same_title_in_cycle" });
+  });
+
   it("two stories on one day are two posts with two ids, even when both are generated", () => {
     const rows = [HEAD, ["6 Nov", "", "", ""], ["", "", "", "x"]];
     const { answer, writes } = run(planBody(rows, { columns: COLS, engagementId: ENG, allStories: true, merges: [[1, 0, 2, 0]] } as never));

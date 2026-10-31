@@ -881,8 +881,11 @@ export function stagePlanRows(
       into[target] = appendText(into[target], t);
     }
   }
-  /** Generated titles taken so far, so a second one on the same client and date gets ` (2)`. */
-  const generated = new Map<string, number>();
+  /**
+   * Titles taken so far from the text on the design, the call to action or the generator, per client and date, so a second one gets ` (2)`: two stories
+   * on one day that both say "Discover more" are two posts, not one. A title column or the caption keeps 6a's rule (the same title is the same post).
+   */
+  const derived = new Map<string, number>();
 
   for (const row of dataRowIndexes(body)) {
     const cells = effective.get(row)!;
@@ -969,20 +972,24 @@ export function stagePlanRows(
 
     // The title: the sheet's, else the first line of the caption, of the text on the design, of the call to action, else `Story 6 Nov`.
     let title = text("title");
+    let numbered = false;
     if (title === "") {
       const sources: Array<[string, string]> = [["caption", "title_from_caption"], ["onAssetText", "title_from_on_asset_text"], ["cta", "title_from_cta"]];
       for (const [field, code] of sources) {
         const t = titleFromCaption(text(field));
-        if (t !== "") { title = t; d.warnings.push({ field: "title", code }); break; }
+        if (t !== "") { title = t; numbered = field !== "caption"; d.warnings.push({ field: "title", code }); break; }
       }
     }
     if (title === "" && d.date) {
-      const base = generatedTitle(format, d.date);
-      const key = `${d.engagement?.engagementId ?? normalizeName(text("client"))}|${d.date}|${base}`;
-      const n = (generated.get(key) ?? 0) + 1;
-      generated.set(key, n);
-      title = n > 1 ? `${base} (${n})` : base;
+      title = generatedTitle(format, d.date);
+      numbered = true;
       d.warnings.push({ field: "title", code: "title_generated" });
+    }
+    if (numbered && d.date) {
+      const key = `${d.engagement?.engagementId ?? normalizeName(text("client"))}|${d.date}|${normalizeName(title)}`;
+      const n = (derived.get(key) ?? 0) + 1;
+      derived.set(key, n);
+      if (n > 1) title = `${title} (${n})`;
     }
     if (title === "") d.refusals.push({ field: "title", code: "missing_title" });
     else if (contentFieldProblem("title", title)) d.refusals.push({ field: "title", code: "invalid_field" });
