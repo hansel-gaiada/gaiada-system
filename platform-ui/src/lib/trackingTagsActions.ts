@@ -7,7 +7,8 @@ import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { can } from "./rbac";
 import {
-  TrackingTagsShapeError, checkPartnerId, parsePutResponse, savedSentence, trackingRefusalSentence, type PutResult,
+  TrackingTagsShapeError, adsSavedSentence, checkGoogleAds, checkPartnerId, parseAdsPutResponse, parsePutResponse, savedSentence,
+  trackingRefusalSentence, type AdsConversionKey, type GoogleAds, type PutResult,
 } from "./trackingTagsModel";
 
 export type SaveTagResult =
@@ -46,6 +47,58 @@ export async function saveLinkedinPartnerIdAction(a: { propertyId: string; webde
     );
     const out = parsePutResponse(body);
     return { ok: true, partnerId: out.partnerId, result: out.result, message: savedSentence(out.result, out.partnerId, out.repo) };
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      const reason = e.reason ?? (e.body && typeof e.body === "object" && typeof (e.body as { reason?: unknown }).reason === "string" ? (e.body as { reason: string }).reason : null);
+      return { ok: false, message: trackingRefusalSentence(e.status, reason) };
+    }
+    if (e instanceof TrackingTagsShapeError) return { ok: false, message: "The change was sent, but the answer did not match what the ERP expects. Reload the page to see what is stored." };
+    return { ok: false, message: trackingRefusalSentence(0, null) };
+  }
+}
+
+export type SaveAdsResult =
+  | { ok: true; googleAds: GoogleAds; result: PutResult; message: string }
+  | { ok: false; message: string };
+
+/**
+ * M5-P4g: the Google Ads section's write, PUT properties/:id/tracking-tags/google-ads. `ids` and `conversions` are the text as typed (trimmed
+ * and checked here with the server's rules); empty ids with no conversions clears. Same guards and same refusals-as-sentences as above.
+ */
+export async function saveGoogleAdsAction(
+  a: { propertyId: string; webdeskTenant: string; site: string; ids: string; conversions: Record<AdsConversionKey, string> },
+): Promise<SaveAdsResult> {
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, message: trackingRefusalSentence(401, null) };
+  const me = await getMe(userId);
+  const company = await getActiveTenant(me);
+  if (!company) return { ok: false, message: "No company is selected, so nothing was saved." };
+  if (!can(me, "search.tags.manage", company)) return { ok: false, message: trackingRefusalSentence(403, null) };
+  if (typeof a?.propertyId !== "string" || !UUID_RE.test(a.propertyId)) return { ok: false, message: trackingRefusalSentence(404, "property_not_found") };
+  if (typeof a.webdeskTenant !== "string" || !SLUG_RE.test(a.webdeskTenant) || typeof a.site !== "string" || !UUID_RE.test(a.site)) {
+    return { ok: false, message: trackingRefusalSentence(400, "tracking_query_invalid") };
+  }
+  const v = checkGoogleAds({
+    ids: typeof a.ids === "string" ? a.ids : "",
+    conversions: {
+      lead: typeof a.conversions?.lead === "string" ? a.conversions.lead : "",
+      whatsapp: typeof a.conversions?.whatsapp === "string" ? a.conversions.whatsapp : "",
+      phone: typeof a.conversions?.phone === "string" ? a.conversions.phone : "",
+      email: typeof a.conversions?.email === "string" ? a.conversions.email : "",
+    },
+  });
+  if (!v.ok) return { ok: false, message: v.message };
+  try {
+    const body = await platformFetch<unknown>(
+      `/api/${encodeURIComponent(company)}/modules/search/properties/${encodeURIComponent(a.propertyId)}/tracking-tags/google-ads`,
+      userId,
+      {
+        method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ webdeskTenant: a.webdeskTenant, site: a.site, ids: v.ids.length ? v.ids : null, conversions: v.conversions }),
+      },
+    );
+    const out = parseAdsPutResponse(body);
+    return { ok: true, googleAds: out.googleAds, result: out.result, message: adsSavedSentence(out.result, out.googleAds, out.repo) };
   } catch (e) {
     if (e instanceof PlatformError) {
       const reason = e.reason ?? (e.body && typeof e.body === "object" && typeof (e.body as { reason?: unknown }).reason === "string" ? (e.body as { reason: string }).reason : null);

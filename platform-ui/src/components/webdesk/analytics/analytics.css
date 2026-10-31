@@ -26,4 +26,8 @@
 .wa-tags__form { display: flex; flex-wrap: wrap; gap: var(--space-12); align-items: flex-end; }
 .wa-tags__form .lux-field { width: 220px; }
 .wa-tags__actions { display: flex; gap: var(--space-8); }
+.wa-tags__ads { display: flex; flex-direction: column; gap: var(--space-8); border-top: 0.5px solid var(--hairline, currentColor); padding-top: var(--space-12); }
+.wa-tags__sub { margin: 0; font: 600 14px var(--font-body); color: var(--ink-strong); }
+.wa-tags__adsform { display: flex; flex-direction: column; gap: var(--space-12); max-width: 420px; }
+.wa-tags__adsform .lux-field { width: 100%; }
 .wa-tags__ok { color: var(--status-ok-fg); font: 400 13px var(--font-body); margin: 0; }

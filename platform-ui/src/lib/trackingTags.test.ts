@@ -17,9 +17,10 @@ beforeEach(() => { vi.mocked(platformFetch).mockReset(); });
 
 describe("readTrackingTags", () => {
   it("asks the property's tracking-tags route with the site, and returns the parsed view", async () => {
-    vi.mocked(platformFetch).mockResolvedValue({ linkedin: { partnerId: "42" }, target, canManage: true, state: "ok" });
+    const googleAds = { ids: ["AW-123456789"], conversions: { lead: "AW-123456789/abc" } };
+    vi.mocked(platformFetch).mockResolvedValue({ linkedin: { partnerId: "42" }, googleAds, target, canManage: true, state: "ok" });
     const r = await readTrackingTags("u", "co-1", "p-1", "gaiada", "site-1");
-    expect(r).toEqual({ state: "ok", data: { linkedin: { partnerId: "42" }, target, canManage: true, state: "ok", reason: null } });
+    expect(r).toEqual({ state: "ok", data: { linkedin: { partnerId: "42" }, googleAds, target, canManage: true, state: "ok", reason: null } });
     expect(vi.mocked(platformFetch).mock.calls[0][0]).toBe("/api/co-1/modules/search/properties/p-1/tracking-tags?webdeskTenant=gaiada&site=site-1");
     expect(vi.mocked(platformFetch).mock.calls[0][1]).toBe("u");
   });

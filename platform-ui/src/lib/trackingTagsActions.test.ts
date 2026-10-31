@@ -15,7 +15,7 @@ vi.mock("./platform", () => {
 import { getSessionUserId } from "./session-server";
 import { getActiveTenant } from "./tenant";
 import { PlatformError, getMe, platformFetch } from "./platform";
-import { saveLinkedinPartnerIdAction } from "./trackingTagsActions";
+import { saveGoogleAdsAction, saveLinkedinPartnerIdAction } from "./trackingTagsActions";
 
 const P = "0194a3b2-aaaa-7000-8000-00000000000a";
 const SITE = "0194a3b2-bbbb-7000-8000-00000000000b";
@@ -114,5 +114,71 @@ describe("saveLinkedinPartnerIdAction", () => {
     const r = await saveLinkedinPartnerIdAction(args("42"));
     expect(r.ok).toBe(false);
     expect((r as { message: string }).message).toContain("Nothing was changed");
+  });
+});
+
+describe("saveGoogleAdsAction (M5-P4g)", () => {
+  const adsTarget = { repo: "gaiadabali/gaiada-web-revamp", variables: ["PUBLIC_GOOGLE_ADS_IDS", "PUBLIC_GOOGLE_ADS_CONVERSIONS"] };
+  const adsOk = (result: string, ids: string[], conversions: Record<string, string>) => ({ googleAds: { ids, conversions }, target: adsTarget, result, takesEffect: "next_rebuild" });
+  const conv = (over: Record<string, string> = {}) => ({ lead: "", whatsapp: "", phone: "", email: "", ...over });
+  const a = (ids: string, conversions = conv()) => ({ propertyId: P, webdeskTenant: "gaiada", site: SITE, ids, conversions });
+  const sent = () => JSON.parse((vi.mocked(platformFetch).mock.calls[0][2] as RequestInit).body as string);
+
+  it("PUTs exactly {webdeskTenant, site, ids, conversions} to the google-ads route: ids split and trimmed, empty conversions left out", async () => {
+    vi.mocked(platformFetch).mockResolvedValue(adsOk("set", ["AW-123456789", "AW-987654321"], { lead: "AW-123456789/abc" }));
+    const r = await saveGoogleAdsAction(a(" AW-123456789,\nAW-987654321 ", conv({ lead: " AW-123456789/abc ", phone: "  " })));
+    expect(r).toMatchObject({ ok: true, result: "set", googleAds: { ids: ["AW-123456789", "AW-987654321"], conversions: { lead: "AW-123456789/abc" } } });
+    expect((r as { message: string }).message).toMatch(/next rebuild/);
+    const [path, userId, init] = vi.mocked(platformFetch).mock.calls[0];
+    expect(path).toBe(`/api/co-1/modules/search/properties/${P}/tracking-tags/google-ads`);
+    expect(userId).toBe("u");
+    expect((init as RequestInit).method).toBe("PUT");
+    expect(sent()).toEqual({ webdeskTenant: "gaiada", site: SITE, ids: ["AW-123456789", "AW-987654321"], conversions: { lead: "AW-123456789/abc" } });
+  });
+
+  it("no ids and no conversions clears: ids null, conversions {}", async () => {
+    vi.mocked(platformFetch).mockResolvedValue(adsOk("cleared", [], {}));
+    expect(await saveGoogleAdsAction(a("  "))).toMatchObject({ ok: true, result: "cleared" });
+    expect(sent()).toEqual({ webdeskTenant: "gaiada", site: SITE, ids: null, conversions: {} });
+  });
+
+  it("a viewer without search.tags.manage is refused in words and nothing is sent", async () => {
+    vi.mocked(getMe).mockResolvedValue(meOf("search_staff") as never);
+    expect(await saveGoogleAdsAction(a("AW-123456789"))).toEqual({ ok: false, message: expect.stringMatching(/not allowed to change tracking tags/) });
+    expect(platformFetch).not.toHaveBeenCalled();
+  });
+
+  it("bad input is refused in words before any request", async () => {
+    for (const bad of [a("AW-12"), a("AW-123456789 AW-123456789"), a("AW-123456789", conv({ lead: "AW-999999999/x" })), a("", conv({ lead: "AW-123456789/x" }))]) {
+      const r = await saveGoogleAdsAction(bad);
+      expect(r.ok).toBe(false);
+      expect((r as { message: string }).message).toMatch(/Nothing was saved/);
+    }
+    expect(platformFetch).not.toHaveBeenCalled();
+  });
+
+  it("a malformed property or site never reaches the server", async () => {
+    expect((await saveGoogleAdsAction({ ...a("AW-123456789"), propertyId: "nope" })).ok).toBe(false);
+    expect((await saveGoogleAdsAction({ ...a("AW-123456789"), site: "nope" })).ok).toBe(false);
+    expect(platformFetch).not.toHaveBeenCalled();
+  });
+
+  it("every server refusal is a sentence", async () => {
+    for (const [status, reason, re] of [
+      [400, "ads_id_invalid", /tag id was not accepted/],
+      [400, "ads_conversion_invalid", /conversion was not accepted/],
+      [409, "tracking_site_mismatch", /not the one for this website/],
+      [503, "github_permission_missing", /actions_variables/],
+      [403, undefined, /not allowed/],
+    ] as const) {
+      vi.mocked(platformFetch).mockReset().mockRejectedValue(new PlatformError(status, "x", undefined, undefined, reason));
+      const r = await saveGoogleAdsAction(a("AW-123456789"));
+      expect(r).toEqual({ ok: false, message: expect.stringMatching(re) });
+    }
+  });
+
+  it("an off-contract answer says the change was sent but the answer is not understood", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ result: "set" });
+    expect(await saveGoogleAdsAction(a("AW-123456789"))).toEqual({ ok: false, message: expect.stringMatching(/did not match/) });
   });
 });
