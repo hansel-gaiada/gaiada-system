@@ -3482,3 +3482,89 @@ OWNER_EXTENSION, DIRECT and the seed's pairs; the live matrix, every action agai
 bundle, platform_admin, the head of the unit, of an enclosing unit, of a sibling and below, the same node id in another company, the GM seat, a GM
 of another company, bot and automation, low assurance, unfed resources, and each mirrored key alone); `reads.http.test.ts` (the routes);
 `ai-usage-unit-node.db.test.ts` (the column, AIP-15a).
+
+## 59. AIP-23b — the `dept_assistant_note` kind: who reads, suggests and approves a department's notes (2026-10-31, BUILT, PROTOTYPED)
+
+Owner rulings **AIP-D20** (department notes, suggested by a person and approved before the assistant uses them), **AIP-D21** ("head, and owner,
+gm, or superadmin" approve), **AIP-D22** (both names shown), **AIP-D23** (the names stay after erasure, marked former) and **AIP-D24** (build
+now); plan `docs/plans/2026-10-31-aip-23-department-notes.md` §4.2, §4.8 and §5. BFF rows: `docs/FRONTEND-BFF-CONTRACT.md` §67. Status:
+**BUILT, PROTOTYPED.** The policy, the two derived roles, `cerbos.ts`, catalog, group, bundles, the IAM seed
+`202610311710_iam_dept_assistant_note_permissions.sql`, the routes and the static and unit suites are in the repo. The live Cerbos matrix
+(`cerbos-dept-assistant-note.test.ts`), the HTTP suite (`core/dept-assistant-notes.test.ts`) and the migration suite
+(`db/assistant-dept-notes-migration.db.test.ts`) run on the Linux CI gate and skip without Postgres and Cerbos. **Restart Cerbos at the deploy**
+(a new policy file is not hot-reloaded) and probe it: a member placed in `d-web` `read` and `propose` allowed on `d-web` and refused on a sibling;
+the head of `d-web` `decide` allowed; a company admin placed elsewhere refused; the owner `manage` allowed.
+
+**A new core kind, `dept_assistant_note` (no module), with seven actions.** One resource is one department of one company (the list and suggest
+routes), or one note of it (the named-note routes). Attributes, all computed by the handler (`core/dept-assistant-notes.service.ts`), never from a
+body: `tenantId` (the route's company); `unitNodeId` (the route's `:unitNodeId`); `unitAncestors` (`loadUnitAncestors`, WITH the tenant); `gmIds`
+(`loadGmSeatIds`, AIP-15's computation); and two NEW attributes, added to `Resource` AND to the `resourcePayload()` allow-list: **`homeAncestors`**
+(the caller's primary `org_unit_memberships` node(s) valid today, UTC, each with its ancestors from the per-tenant closure; `[]` without a
+placement) and **`proposedBy`** (the stored note's `proposed_by`; `""` for the department, an unknown note, or an erased author). Keys
+`core.dept_assistant_note.<action>`.
+
+| Action | Reach | What it opens |
+|---|---|---|
+| `read` | `company_admin`, `manager`, `member`, `viewer` when `unitNodeId in homeAncestors` (one rule); **its own rule** for `org_unit_lead` (`unitAncestors`); **its own rule** for the GM seat `dept_note_gm_seat` | the department's approved notes; for an approver, also the waiting ones (the route decides which with `decide`) |
+| `propose` | `company_admin`, `manager`, `member` when `unitNodeId in homeAncestors` (one rule; NOT `viewer`) | suggest a note |
+| `withdraw` | `company_admin`, `manager`, `member`, `viewer` when `proposedBy == principal.id` (self-scoped) | take back one's own note, waiting or approved; the row is deleted |
+| `decide` | its own rule each for `org_unit_lead` and `dept_note_gm_seat` | approve, or reject (the row is deleted) |
+| `delete` | as `decide` | remove a note |
+| `pin` | as `decide` | pin or unpin an approved note |
+| `manage` | NO role rule: the owner through `perm_dept_assistant_note_manage` (`inTenant && notLow && inRoot`); `platform_admin`'s wildcard | **the company tier**: every per-unit route in ANY department |
+
+Every allow rule but the wildcard keeps `variables.inTenant && variables.notLow`. **`company_admin` is not an approver** (AIP-D21 names the head,
+the GM, the owner and the superadmin): it reaches only the member-level rules, like any colleague placed in the department. A head of an
+enclosing unit and the GM approve but are not "in" the department, so they do not suggest there (the owner does, through `manage`).
+
+**Authoring rules:**
+- Home placement is not a grant. Cerbos cannot read placement, so the handler feeds `homeAncestors`; the containment `unitNodeId in homeAncestors` is
+  written inline in the rule (never behind a variable), with `has()` and `!= ""` guards, so an unfed unit or home denies. The four scope roles share
+  one rule per action because each is scope-only.
+- Each attribute-dependent role stands alone (HIER-2): `org_unit_lead` and `dept_note_gm_seat` have one rule per action, never mixed.
+- `dept_note_gm_seat` (derived_roles.yaml) is a copy of `ai_usage_gm_seat` under its own name: `has(gmIds) && gmIds.exists(id, id == principal.id)`.
+  A seat is a relationship, so `DIRECT` maps it to no real role in both resolvers and no mirror reads it.
+- **One `EFFECT_DENY` on every action** (listed, not `*`) for `principal.attr.kind in ["automation", "bot", "contributor", "client"]`, shaped like
+  `resource_dept_notice.yaml`'s (`roles: ["user"]`, `has()`-guarded): it beats the wildcard, the lead rule and the mirror. A client-only principal
+  holds only `client`, which no rule names; the `client` kind is the second wall.
+- `platform_admin` keeps the house wildcard (so the superadmin may also `withdraw` any note; it may delete any note anyway).
+
+**The owner and the permission arm: `manage` ONLY.** `owner` is permission-native (IAM-04c §3). `manage` is named by no role rule; its key rides
+`OWNER_EXTENSION` with `uiGrantable: false` (the AIP-D16 / AIP-08c pattern), so no role edit, position or request hands it out, and the mirror
+is the only way in. No other mirror: `read` and `propose` hang on the home condition, `decide`, `delete` and `pin` on the lead rule, `withdraw` on
+the author rule, and a flat `perms` mirror cannot express any of them (it would reach every department: `iam-04-reg1-mirror-reach-invariant`,
+`permission-arm-hazard-scan` Pattern B). **Handler:** every route but `withdraw` probes all seven actions with `checkActions` (no audit row), then
+authorizes `manage` when it is allowed, else the per-unit action, through `authorize()`, so the denial, its audit row and the delegation
+intersection are the house ones. A bot owner is denied `manage` and the per-unit action alike. The owner holds the `withdraw` key in its bundle
+(company_admin's envelope) but no rule reaches it for the owner; an owner removes a note with `delete`, through `manage`.
+
+**Bundles:**
+
+| Role | Holds |
+|---|---|
+| `platform_admin` | all seven |
+| `company_admin`, `manager`, `member` | `read`, `propose`, `withdraw` (`withdraw` self-scoped) |
+| `viewer` | `read`, `withdraw` (`withdraw` self-scoped) |
+| `org_unit_lead` | `read`, `decide`, `delete`, `pin` (unit-scoped) |
+| `owner` | `company_admin`'s three + `manage` (owner == company_admin + OWNER_EXTENSION; owner rows are never marked self-scoped: the generator marks real roles only, the `personal_mailbox` precedent) |
+| everyone else | nothing |
+
+No key is `sensitive` (a note is a short work fact a person chose to share; a note about a record is filtered by that record's own read check), as
+AIP-13b's preamble keys are not. Six keys are `uiGrantable: true`; `manage` is false.
+
+**The six artifacts** (the §36 template): the policy (+ `dept_note_gm_seat` and `perm_dept_assistant_note_manage` in `derived_roles.yaml`);
+`cerbos.ts` (`homeAncestors`, `proposedBy` in `Resource` and the allow-list); the catalog (+7 entries); the groups (+1 group
+`assistant_dept_notes`); the migration `202610311710` with its DO-block self-assertion (per-role counts, `manage` on platform_admin and owner only,
+`decide`/`delete`/`pin` on platform_admin and org_unit_lead only, exactly the four `withdraw` rows self-scoped, owner == company_admin + `manage` in
+both directions, 26 rows in all); the bundles, regenerated (`DIRECT` gains `dept_note_gm_seat: []` in the generator and the parity suite,
+`OWNER_EXTENSION` the `manage` key).
+
+**Counts:** 116 kinds, 516 pairs, 501 grantable, 15 relationship, 219 sensitive; uiGrantable 480 true / 36 false; 179 groups; bundles 2239 pairs,
+62 self-scoped (`company_admin`, `manager`, `member` +3 each, `viewer` +2, `org_unit_lead` +4, `owner` +4, `platform_admin` +7).
+
+**Proof:** `cerbos-dept-assistant-note.test.ts` (static pin of the rules, the seat, the mirror, the DENY, the attributes in the payload, the bundles,
+the catalog and group, OWNER_EXTENSION, DIRECT and the seed's pairs and markers; the live matrix: a member placed in the unit, in a child unit, in a
+sibling, above the unit and nowhere, manager, viewer, company_admin placed in and out of the unit, the owner with its live bundle, platform_admin,
+the head of the unit, of an enclosing unit, below and of a sibling, the same node id in another company, the GM seat and another company's GM,
+HR and module tiers, a client-only principal, bot, automation, contributor and client accounts, low assurance, the author rule, unfed resources and
+the `manage` key alone); `core/dept-assistant-notes.test.ts` (the routes); `db/assistant-dept-notes-migration.db.test.ts` (the table and the seed).

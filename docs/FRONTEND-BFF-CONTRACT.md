@@ -14692,3 +14692,111 @@ No new route and no contract change: the screens read §66.8 and §66.11 and wri
 - **Demo mode** (`DEMO_MODE=1`): a stateful budget store (company figure over 80 percent, Web Dev in Soft stop over its figure with the Lift button for the owner
   and its head, SEO in Report only, one allowance override), and `asst-thread-4` with a reply per kind of stop and a held hand-off. Send `BUDGET_TEST` or
   `BUDGET_DEPT_TEST` to be stopped live; hand off a goal containing `HOLD_TEST` or `HOLD_DEPT_TEST` to see one held.
+
+## 67. Department notes: a department's shared assistant memory (AIP-23b, 2026-10-31; plan `docs/plans/2026-10-31-aip-23-department-notes.md` §4, AIP-D20 to AIP-D24) — `platform-nest/src/core/dept-assistant-notes.{controller,service}.ts` (new), `modules/knowledge/search-filter.ts` (`filterReadableHits` generic over `{ family, id }`); migrations `202610311700_assistant_dept_notes.sql` and `202610311710_iam_dept_assistant_note_permissions.sql` — **STATUS: BUILT, PROTOTYPED (server only: the pure suite `dept-assistant-notes.service.test.ts` and the static half of `cerbos-dept-assistant-note.test.ts` ran locally; the HTTP, migration and live-Cerbos suites `dept-assistant-notes.test.ts`, `assistant-dept-notes-migration.db.test.ts` and `cerbos-dept-assistant-note.test.ts` run on the Linux CI gate). NOT here: the notices (AIP-23d), notes in the prompt, the `ASSISTANT_DEPT_NOTES` switch and the name guard (AIP-23c), the screens (AIP-23d). The authorization is PERMISSION-CONTRACT §59**
+
+A person in a department suggests a short work fact; an approver (the department's head, the GM, the owner or the superadmin) approves it; only approved
+notes will reach the assistant (AIP-23c). A rejected or withdrawn note is deleted, text and all. "In the department" means the person's home placement
+(their primary `org_unit_memberships` row today, UTC) is the department or inside it.
+
+### 67.1 A note
+
+```
+{
+  "id": "<uuid>",
+  "unitNodeId": "d-web",
+  "body": "Cosmedic's monthly report goes out by the 3rd.",   // 1 to 500 characters, trimmed and scrubbed (e-mail, card and id numbers) as a preamble is
+  "status": "proposed" | "approved",
+  "pinned": false,                                            // only an approved note is pinned
+  "record": { "kind": "client", "id": "<uuid>" } | null,      // the optional link; kinds = the knowledge filter's families
+  "proposedBy": { "id": "<uuid>" | null, "name": "…", "former": false },
+  "decidedBy":  { "id": "<uuid>" | null, "name": "…", "former": false } | null,   // null while waiting
+  "proposedAt": "2026-10-31T01:00:00.000Z",
+  "decidedAt": "2026-10-31T02:00:00.000Z" | null
+}
+```
+
+**Names (AIP-D22, AIP-D23).** `name` is the person's CURRENT name while their user row exists and they hold an active membership of the company
+(`company_memberships`, not deleted, status active), with `former: false`. Otherwise it is the name stored when they suggested or decided, with
+`former: true` ("former colleague"); `id` is null once the user row is deleted. The note itself stays, approved or waiting.
+
+### 67.2 `GET /api/:tenantId/departments/:unitNodeId/assistant-notes`
+
+```
+{
+  "unitNodeId": "d-web",
+  "department": { "name": "Web Dev", "key": "web-dev" },
+  "approved": [Note],      // pinned first, then the newest decided
+  "waiting":  [Note],      // the queue, oldest first; ALWAYS [] unless the caller may decide here
+  "mine":     [Note],      // the caller's own suggestions in this department, waiting and approved, newest first
+  "capabilities": { "canPropose": bool, "canDecide": bool, "canManage": bool },
+  "limits": { "bodyMaxChars": 500, "approvedPerDepartment": 50, "waitingPerPerson": 10 }
+}
+```
+
+**The record filter.** A note linked to a record is listed in `approved` and `waiting` only when the caller passes that record's read check NOW
+(`filterReadableHits`: the record exists in this company and is not deleted, its module is on, and the record's own Cerbos read allows, for the
+acting user too). A refused note is dropped silently. The caller's own notes are exempt (their text, their link).
+
+Checks in order: (1) the facts (the unit's ancestry, the caller's home ancestry, the GM seats), (2) `manage`, else `read`, (3) the department
+(`resolveDepartment`: an ACTIVE department of this company, a node of `company_org_structure` or an `org_units` row).
+
+| Status | When |
+|---|---|
+| 200 | the department resolves and the caller may read it |
+| 401 | no credentials |
+| 403 | not placed in the department and no approver: a sibling's people and head, a person placed above it, a company admin of another department, a client contact, a bot, automation or contributor, another company's people. An unknown unit is 403 for anyone whose reach depends on the unit |
+| 404 `department_not_found` | an authorized caller (the GM, the owner, a head above, a person placed in a division) names a unit that is not an active department: unknown, a division, the root |
+
+### 67.3 `POST /api/:tenantId/departments/:unitNodeId/assistant-notes`
+
+Body `{ "body": string, "record"?: { "kind": string, "id": uuid } | null }` and nothing else. **201** with 67.1. Checks in order: (1) facts, (2) `manage`,
+else `propose` (a person placed in the department or below; not a viewer), (3) the body (400), (4) the department (404), (5) the record (400), (6) the caps
+and the insert in one transaction under a per-department advisory lock (409).
+
+- `body`: trimmed and scrubbed, then **1 to 500 characters** (code points); empty is 400. `record.kind` is one of `client`, `project`, `task`, `pmtask`,
+  `deliverable`, `meeting`, `pmdoc`, `file` (reports, people and org are NOT linkable) and `record.id` a uuid, else 400 naming `record`.
+- **400 `record_not_found`** when the record does not exist in this company or the caller may not open it (one answer for both).
+- **Approved at once** when the caller may decide here (the head of the unit placed in it, the owner, the superadmin): `status: "approved"`,
+  `decidedBy` = the caller. Not when the call acts for someone else (it waits).
+- **409 `waiting_limit_reached`**: the caller already has 10 waiting notes in this department. **409 `approved_limit_reached`**: a self-approved note
+  in a department that already holds 50 approved.
+- Activities: `suggested`, and `approved` too for a self-approved note.
+
+### 67.4 `POST …/assistant-notes/:id/withdraw`
+
+No body. **200** `{ "id", "status": "withdrawn" }`; the row is DELETED, waiting or approved. The author only (`proposedBy == caller`), wherever they now
+work; anyone else, an unknown id, another company's note, and a note whose author was erased: **403** (the head, the GM and the owner delete instead).
+404 `note_not_found` only for an author who races a delete. Activity `withdrawn`.
+
+### 67.5 `POST …/assistant-notes/:id/decide`
+
+Body `{ "approve": boolean, "reason"?: string ≤ 300 }`. The approvers only (the head of the unit or above, the GM, the owner, the superadmin); anyone
+else **403** before the body is read. Then 400 for the body, 404 `department_not_found`, 404 `note_not_found` (unknown, another department's,
+another company's), **409 `note_already_decided`** for an approved note.
+- `approve: true`: **200** with 67.1 (status approved, `decidedBy` = the caller, the name snapshot stored). **409 `approved_limit_reached`** when the
+  department already holds 50 approved; the note keeps waiting. Activity `approved`.
+- `approve: false`: **200** `{ "id", "status": "rejected" }`; the row is DELETED. The `reason` is validated and stored NOWHERE (the notice that carries it
+  to the person is AIP-23d). Activity `rejected`.
+
+### 67.6 `DELETE …/assistant-notes/:id` and `POST …/assistant-notes/:id/pin`
+
+The approvers only, 403 for everyone else (the author too: they withdraw). DELETE: **200** `{ "id", "status": "deleted" }`, waiting or approved;
+404 `note_not_found`; activity `deleted`. Pin: body `{ "pinned": boolean }` (400 otherwise); **200** with 67.1; **409 `note_not_approved`** for a waiting
+note; activity `pinned` or `unpinned`, none when nothing changed.
+
+**Activities (every route).** Entity type `dept_assistant_note`, entity id the note, payload `{ unitNodeId, length }`. **Never the text and never the
+reason** (plan §5 rule 6).
+
+### 67.7 Table `assistant_dept_notes`
+
+`(id uuid PK, tenant_id → companies, unit_node_id text 1..120, body text 1..500 (char_length), status 'proposed'|'approved', record_kind text 1..40,
+record_id uuid (both or neither), proposed_by → users ON DELETE SET NULL, proposed_by_name text 1..200 NOT NULL, decided_by → users ON DELETE SET NULL,
+decided_by_name text 1..200, pinned, proposed_at, decided_at, created_at, updated_at)`. CHECKs: a waiting note carries no decision; an approved one
+carries `decided_at` and `decided_by_name` (the id may be null after erasure); pinned only when approved. Indexes `(tenant_id, unit_node_id, status)` and
+`(tenant_id, proposed_by, status)`. FORCE RLS on `tenant_id = ANY(app_current_tenants())`, the `assistant_dept_preambles` pattern; no module term, no
+`origin_site`. No erasure function: deleting a user keeps the note and the stored names (AIP-D23).
+
+### 67.8 Capability inventory and tools
+
+Six routes under `/api/:tenantId/departments/:unitNodeId/`, no MCP tool, no module tool, no n8n flow.
