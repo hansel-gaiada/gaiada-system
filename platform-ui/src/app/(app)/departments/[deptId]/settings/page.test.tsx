@@ -18,12 +18,16 @@ vi.mock("@/lib/socialCycles-data", () => ({ getSocialSettings: vi.fn(), getCycle
 vi.mock("@/lib/socialCyclesActions", () => ({ saveSocialSettings: vi.fn(), saveCycleDeadlines: vi.fn() }));
 vi.mock("@/lib/socialAllocation-data", () => ({ getAllocation: vi.fn() }));
 vi.mock("@/lib/socialAllocationActions", () => ({ saveAllocation: vi.fn() }));
+vi.mock("@/lib/socialReportSchedules-data", () => ({ getReportSchedules: vi.fn() }));
+vi.mock("@/lib/socialReportSchedulesActions", () => ({ saveSchedule: vi.fn(), editSchedule: vi.fn(), setScheduleOn: vi.fn(), deleteSchedule: vi.fn(), runScheduleNow: vi.fn(), getRunProgress: vi.fn() }));
 
 import { getDepartment } from "@/lib/departments";
 import { getCycleTable, getSocialSettings } from "@/lib/socialCycles-data";
 import { saveCycleDeadlines, saveSocialSettings } from "@/lib/socialCyclesActions";
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { saveAllocation } from "@/lib/socialAllocationActions";
+import { getReportSchedules } from "@/lib/socialReportSchedules-data";
+import { asSchedule } from "@/lib/socialReportSchedules";
 import type { AllocationRow } from "@/lib/socialAllocation";
 import { PLAN_REFUSAL_REASON, type CycleRow, type CycleTable, type SocialSettings } from "@/lib/socialCycles";
 import type { ReadResult } from "@/lib/readResult";
@@ -72,6 +76,7 @@ beforeEach(() => {
   vi.mocked(saveCycleDeadlines).mockReset();
   vi.mocked(getAllocation).mockReset().mockResolvedValue(ok([alloc(), alloc({ engagementId: "e-beta", clientName: "Brand Beta", stepEstimates: {} })]));
   vi.mocked(saveAllocation).mockReset();
+  vi.mocked(getReportSchedules).mockReset().mockResolvedValue({ kind: "forbidden" });
 });
 afterEach(() => vi.useRealTimers());
 
@@ -377,5 +382,41 @@ describe("refused and failed reads are never an empty page", () => {
     await mount();
     expect(screen.getByText(/platform 500/)).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+});
+
+// SCP-5 W5-A6 (BFF §63.24.9): the Report automation section sits below the deadline table, for the four only, and is never an empty section that implies there is nothing.
+describe("Report automation", () => {
+  const schedule = () => asSchedule({
+    id: "s1", kind: "weekly", scope: "all", clients: [], timing: { weekday: 1, at: "08:00" }, timingText: "Every Monday at 08:00, for the week before", enabled: true, pausedReason: null,
+    owner: { id: "u-2", name: "Sam Officer" }, nextRunAt: "2026-10-19T08:00:00.000Z", nextPeriod: "2026-W42", lastRunAt: null, lastPeriod: null, lastRun: null,
+    spend: { last30Days: { runs: 0, calls: 0, promptTokens: 0, completionTokens: 0, costUsd: null }, monthToDate: { runs: 0, calls: 0, promptTokens: 0, completionTokens: 0, costUsd: null } },
+  });
+  it("shows the section after the deadlines when the server lets the person read schedules, and offers the allocation clients to the picker", async () => {
+    vi.mocked(getReportSchedules).mockResolvedValue(ok([schedule()]));
+    await mount();
+    expect(getReportSchedules).toHaveBeenCalledWith("u-1", "co-a");
+    const heading = screen.getByRole("heading", { name: "Report automation" });
+    expect(heading.compareDocumentPosition(screen.getByRole("heading", { name: "Deadlines" })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "Weekly report" })).toHaveTextContent("Every Monday at 08:00, for the week before");
+    fireEvent.click(screen.getByRole("button", { name: "Add a schedule" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("radio", { name: /Only these clients/ }));
+    expect(within(screen.getByRole("dialog")).getByRole("checkbox", { name: "Brand Beta" })).toBeInTheDocument();
+  });
+  it("is hidden, and not even read, without canPlan", async () => {
+    vi.mocked(getSocialSettings).mockResolvedValue(ok(settings({ canPlan: false })));
+    await mount();
+    expect(screen.queryByRole("heading", { name: "Report automation" })).not.toBeInTheDocument();
+    expect(getReportSchedules).not.toHaveBeenCalled();
+  });
+  it("is hidden when the server refuses the read", async () => {
+    await mount();
+    expect(screen.queryByRole("heading", { name: "Report automation" })).not.toBeInTheDocument();
+  });
+  it("says it cannot tell when the read fails", async () => {
+    vi.mocked(getReportSchedules).mockResolvedValue({ kind: "unavailable", reason: "platform 500" });
+    await mount();
+    expect(screen.getByRole("heading", { name: "Report automation" })).toBeInTheDocument();
+    expect(screen.getByText(/cannot be shown right now \(platform 500\)/)).toBeInTheDocument();
   });
 });
