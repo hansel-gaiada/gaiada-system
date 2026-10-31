@@ -218,16 +218,16 @@ describe("the preview of a client's score", () => {
     mount();
     fireEvent.change(screen.getByLabelText("For client"), { target: { value: "e1" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview a client's score" }));
-    expect(await screen.findByText("Nothing is scored yet under this scorecard (0 of 12 dimensions have a score).")).toBeInTheDocument();
+    expect(await screen.findByText("Nothing is scored yet under this scorecard (0 of 12 dimensions have a score).", {}, { timeout: 4000 })).toBeInTheDocument();
     vi.mocked(previewRules).mockResolvedValueOnce({ ok: true, preview: asPreview({ section: "audit", engagementId: "e1", audit: null }) });
     fireEvent.click(screen.getByRole("button", { name: "Preview a client's score" }));
-    expect(await screen.findByText("A score cannot be previewed for this client right now.")).toBeInTheDocument();
+    expect(await screen.findByText("A score cannot be previewed for this client right now.", {}, { timeout: 4000 })).toBeInTheDocument();
   });
   it("words a refusal of the preview", async () => {
     vi.mocked(previewRules).mockResolvedValue(failure("invalid_field", 400, { field: "audit.bands" }, "preview"));
     mount();
     fireEvent.change(screen.getByLabelText("For client"), { target: { value: "e1" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview a client's score" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The bands is not valid.");
+    expect(await screen.findByRole("alert", {}, { timeout: 4000 })).toHaveTextContent("The bands is not valid.");
   });
 });

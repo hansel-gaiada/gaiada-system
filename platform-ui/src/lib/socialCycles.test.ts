@@ -47,7 +47,7 @@ describe("deadlineRange (the social_cycles check)", () => {
 describe("asSocialSettings", () => {
   it("reads the contract's shape", () => {
     expect(asSocialSettings({ bufferWorkingDays: 2, boostCandidateFactor: 1.5, holidayCalendar: { known: true, name: "Public holidays" }, canPlan: true }))
-      .toEqual({ bufferWorkingDays: 2, boostCandidateFactor: 1.5, holidayCalendar: { known: true, name: "Public holidays" }, canPlan: true });
+      .toEqual({ bufferWorkingDays: 2, boostCandidateFactor: 1.5, holidayCalendar: { known: true, name: "Public holidays" }, onboardingTemplate: null, canPlan: true });
   });
   it("reads an unknown calendar as weekends only, and a missing canPlan as false", () => {
     const s = asSocialSettings({ bufferWorkingDays: 1, boostCandidateFactor: 1.25, holidayCalendar: { known: false, name: null } });
