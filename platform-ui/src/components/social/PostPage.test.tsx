@@ -627,3 +627,18 @@ describe("comments and pins (SCP-1l)", () => {
     await waitFor(() => expect(postEntityComment).toHaveBeenCalledWith("social_post", postOf(t).id, "The price is right", { visibility: "client", anchor: { x: 0.5, y: 0.5, fileId: FILE(t) } }));
   });
 });
+
+describe("From an idea (SCP-5c, BFF §63.25.4)", () => {
+  it("a post planned from an idea says so, with what was seen, the metric and the suggestion", () => {
+    mount("Show the team preparing the harvest collection.", "u-social");
+    const section = screen.getByRole("region", { name: "From an idea" });
+    expect(within(section).getByText(/Behind-the-scenes posts earned the most saves\./)).toBeInTheDocument();
+    expect(within(section).getByText(/Saves/)).toBeInTheDocument();
+    expect(within(section).getByText(/Show the team preparing the harvest collection\./)).toBeInTheDocument();
+  });
+  it("a post with no idea draws nothing of it", () => {
+    mount("Wool care in three steps", "u-social");
+    expect(screen.queryByRole("region", { name: "From an idea" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "From an idea" })).toBeNull();
+  });
+});
