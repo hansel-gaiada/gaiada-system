@@ -64,7 +64,7 @@ up() {
   mkdir "$LOCK" 2>/dev/null || { echo "STOP: $LOCK is held by: $(cat "$LOCK"/* 2>/dev/null)"; exit 2; }
   echo "PID-2 passkey realm proof by $(whoami), $(date -u +%FT%TZ) (containers pid2-*)" > "$LOCK/owner"
   for i in "$OLD" "$PGI" "$PWI"; do docker image inspect "$i" >/dev/null 2>&1 || docker pull -q "$i" >/dev/null || { echo "STOP: cannot pull $i"; exit 2; }; done
-  # the gaiada-keycloak image, from the same Dockerfile release.yml builds (its unit tests run inside the build)
+  # the gaiada-keycloak image, from the same Dockerfile keycloak-image.yml builds (its unit tests run inside the build)
   docker build -q -t "$NEW" "$D/keycloak" >/dev/null && pass "gaiada-keycloak image built ($(docker run --rm --entrypoint ls "$NEW" /opt/keycloak/providers /opt/keycloak/themes | tr '\n' ' '))" \
     || { fail "image build (docker build $D/keycloak)"; exit 1; }
   ( umask 077; : > "$ST" )

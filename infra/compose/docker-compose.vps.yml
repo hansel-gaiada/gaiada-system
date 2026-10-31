@@ -379,8 +379,8 @@ services:
   # checklist and the one-line rollback — do not deploy this without running it.
   #
   # NOT using `--optimized`: that flag skips Keycloak's own startup build step and REQUIRES the
-  # image to have already been built with `kc build` baked in (a custom Dockerfile layer this repo
-  # does not have — `quay.io/keycloak/keycloak` here is the vanilla upstream image). Passing
+  # image to have already been built with `kc build` baked in (a Dockerfile layer this repo does not
+  # have — keycloak/Dockerfile (PID-2h) adds a provider jar and a theme but runs no `kc build`). Passing
   # `--optimized` against an unbuilt image fails the KC_* config validation at boot. Plain `start`
   # runs the build step at container start instead — slower boot (still well inside the 300s
   # start_period this repo already budgets for platform/report-renderer's own slow-boot fix), but
@@ -396,7 +396,14 @@ services:
     #   - revert = restore that dump AND put the old tag back, together, never the image alone;
     #   - never re-run an older release's deploy job afterwards: it would rsync the old compose and start
     #     26.0 on the migrated database. `infra/scripts/rollback-to.sh` is safe (it keeps this file).
-    image: quay.io/keycloak/keycloak:26.8.1
+    # PID-2h (runbook infra/runbooks/keycloak-passkey-rollout.md step A): the SAME Keycloak 26.8.1 + the phone
+    # sign-in form + the gaiada login theme, built and cosign-signed by .github/workflows/keycloak-image.yml.
+    #   - The tag is <KEYCLOAK_VERSION>-<first 12 of `git rev-parse HEAD:keycloak`>: named by the image's CONTENTS,
+    #     not by the release, so Keycloak restarts only when this line moves. deploy.yml verifies its signature.
+    #   - No database change. Both additions are inert until keycloak-passkey-realm.sh binds them.
+    #   - Revert = `quay.io/keycloak/keycloak:26.8.1` again, ONLY while the realm uses neither the phone form nor the
+    #     gaiada theme (revert the realm first): a flow naming a missing authenticator signs nobody in.
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-keycloak:26.8.1-5d87c9566d96
     restart: unless-stopped
     # ⚠ HELD AT `start-dev` DELIBERATELY — this is the ONE line of finding 07 still open.
     # Everything else finding 07 needed is already correct below: KC_HOSTNAME,
