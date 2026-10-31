@@ -4,6 +4,10 @@
 
 > ⚠️ **DRAFTS — NOT LEGAL ADVICE.** This document is a working draft to accelerate and reduce the cost of legal review. **A qualified data-protection lawyer in the applicable jurisdiction(s) must review, localize, and sign off before any visitor or lead data is collected on a live site.** Nothing here is a ruling. Facts not established by the sources are marked «ASSUMPTION: …» for counsel or the owner to confirm.
 
+## Changes in v1.1
+
+The owner gave the last facts of the final notice on 2026-10-31 (WSK-D94): the site is hosted in Singapore (Hostinger), and staff and the WhatsApp alert system are in Bali, Indonesia. The "Sites" row below and open item 4 in §11 are updated. The final notice states the transfer basis as the visitor's banner consent together with each provider's own data-protection terms.
+
 ## Changes in v1.0
 
 The owner approved this addendum on 2026-10-31 in place of counsel's review (WSK-D93). The controller is Gaia Digital Agency (Jl. Raya Mas, Ubud, Gianyar, Bali, Indonesia); the privacy contact is info@gaiada.com; every retention period in §5 is approved as written; the other open items in §11 stand at their proposed defaults. The final visitor notice is the site's `src/config/privacy.ts` (proof line), finalized from these facts; §10 below is the draft it came from.
@@ -26,7 +30,7 @@ v0.2 works in the phase 5 design (`docs/plans/2026-10-12-m5-phase5-design.md`, �
 | 1 | ~~Placement of F7–F9 fixed: a 72-hour buffer and 30-day recordings on `sumopod`; profiles in the ERP on `gda-aicenter`. R-V18 narrows.~~ | **RESOLVED by WSK-D93 (owner 2026-10-31): Gaia Digital Agency, Jl. Raya Mas, Ubud, Gianyar, Bali, Indonesia.** |
 | 2 | F6, LIA A and LIA C: Umami receives a daily-keyed pseudonym, not the IP. R-V6 improves. | F6 (§2.2); §3.2; §3.4; R-V6 (§6) |
 | 3 | F7: the network name is shown as a network; company identification only after owner decision O-12 and counsel's answer to item 5. | F7 (§2.2); open item 5 (§11) |
-| 4 | F8: forms blocked, nothing typed recorded, 30 days, not backed up; the O-5 wording. | F8 (§2.2); §5; open item 10 (§11) |
+| 4 | ~~F8: forms blocked, nothing typed recorded, 30 days, not backed up; the O-5 wording.~~ | **RESOLVED by WSK-D94 (owner 2026-10-31): the visitor's consent in the banner, together with each provider's own data-protection terms, as the approved notice states.** |
 | 5 | F9: with a visitor id, consent; the session-only arm needs counsel on device storage. | F9 (§2.2); open item 21 (§11) |
 | 6 | ~~Retention rows (buffer 72 h; tombstones 14 months; bot counts and experiment results are aggregate) and rights rows (profile and recordings by visitor id, consent id, or a lead's consent id).~~ | **RESOLVED by WSK-D93 (owner 2026-10-31): the privacy contact is info@gaiada.com (not a designated DPO).** |
 | 7 | Rows for rrweb and rrweb-player (MIT). The DB-IP row (footnote 11 of `docs/blueprints/vendor-exit-register.md`) already covers the ASN edition. | §8.2 |
@@ -38,7 +42,7 @@ v0.2 works in the phase 5 design (`docs/plans/2026-10-12-m5-phase5-design.md`, �
 | Field | Value |
 |---|---|
 | Document | Website-visitor and website-lead addendum (DPIA + LIA + RoPA rows + notice + DSR changes) |
-| Version / status | v1.0 — APPROVED BY THE OWNER 2026-10-31 (WSK-D93), in place of counsel's review (v0.1 was 2026-10-11, v0.2 2026-10-13, v0.3 2026-10-29) |
+| Version / status | v1.1 — APPROVED BY THE OWNER 2026-10-31 (WSK-D93; v1.1 adds the locations of WSK-D94), in place of counsel's review (v0.1 was 2026-10-11, v0.2 2026-10-13, v0.3 2026-10-29, v1.0 2026-10-31) |
 | Date | 2026-10-31 |
 | Controller | Gaia Digital Agency, Jl. Raya Mas, Ubud, Gianyar, Bali, Indonesia (WSK-D93) |
 | Primary jurisdiction | Indonesia (UU PDP No. 27/2022); drafted to GDPR-grade for EU/SG exposure. See [JURISDICTION] «ASSUMPTION: confirm jurisdictions» |
@@ -64,7 +68,7 @@ v0.2 works in the phase 5 design (`docs/plans/2026-10-12-m5-phase5-design.md`, �
 
 | Item | Detail |
 |---|---|
-| Sites | `gaiada.com` (production) and its staging hosts, currently `24-pyevq.gaiada.com`. The site is a static Astro site. «ASSUMPTION: production hosting is undecided (CMS_PLAN decision 8); the hosting provider and region of the access logs must be confirmed» |
+| Sites | `gaiada.com` (production) and its staging hosts, currently `24-pyevq.gaiada.com`. The site is a static Astro site. Hosting: Hostinger, Singapore, where the access logs also are (owner, 2026-10-31, WSK-D94). |
 | Staging | `PUBLIC_TRACKING=off` is the default outside production, so staging sends nothing to vendors. «ASSUMPTION: staging hosts accept no real personal data in forms and are not indexed; confirm» |
 | ERP systems touched | Umami (self-hosted on `sumopod`; owner ruling WSK-D66), the enrichment collector, profile store and replay (PLANNED, placed with Umami), WebDesk forms API, `agency_leads` and AD-1 Discovery Intake tables in platform-nest, the WhatsApp bot alert, the `search` module's conversion uploads (PLANNED) |
 | Third-party systems | Google (GA4, Google Ads), Meta (Pixel; Conversions API PLANNED), Microsoft (Clarity), LinkedIn (Insight tag, BUILT and off until a partner id is set; Conversions API PLANNED), Cloudflare (Turnstile on the forms API), a geo/company dataset vendor (DB-IP Lite or MaxMind GeoLite2, not chosen) |
