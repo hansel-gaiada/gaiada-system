@@ -1,9 +1,8 @@
 import "server-only";
-// SCP-5 W5-A4 (BFF §63.24.5, §63.30.4) — what DEMO_MODE answers for "Generate with AI" for every client, and for the company's rules the report pages read:
+// SCP-5 W5-A4 (BFF §63.24.5) — what DEMO_MODE answers for "Generate with AI" for every client (`GET rules`, which the report pages read too, is W5-C5's store in demoSocialRules.ts):
 //
 //   POST  reports/generate           start a run for every client the person may draft for      GET  reports/generate/:runId   the run's progress, each client's result as it lands
 //   GET   reports/generate           the last 30 days' runs (the company's for the four, one's own otherwise)
-//   GET   rules                      the company's rules, as the seed (version 0): every kind on, AI drafting on (the Settings page's writes are W5-A6's)
 //
 // THE ORDER OF CHECKS is the server's (`pipeline/report-runs.ts`): the role (403 `not authorized`), the body (400 `invalid_field` `{field}`), a replayed id (200, the run as it stands), the
 // kind's period (400 `period_not_over` for every kind frozen at create, the monthly included), then 409 `generation_running` `{detail: {runId}}` while a run of the same kind and period goes.
@@ -16,7 +15,6 @@ import { PIPE_ENGAGEMENTS, isClientContact, isDemoSocialApprover, allocStore, ty
 import { demoReports, dueKindsOf } from "./demoSocialReports";
 import { isPeriodicKind, isShortKind, periodOf, periodRange, shiftPeriod } from "./socialReportKinds";
 import { todayIsoInDisplayZone } from "./format";
-import defaults from "./socialRulesDefaults.json";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}): DemoResult => ({ status, json: { error, ...extra } });
 const ok = (json: unknown, status = 200): DemoResult => ({ status, json });
@@ -145,16 +143,9 @@ export function seedRunStore(s: RunStore): void {
 }
 seedRunStore(store);
 
-/** `GET rules`: the company's rules as the seed (version 0), the part of Settings the report pages read. */
-function rules(userId: string): DemoResult {
-  if (isClientContact(userId)) return err(403, "not authorized: cerbos denied read on social_post");
-  return ok({ version: 0, defaultsVersion: (defaults as { defaultsVersion: string }).defaultsVersion, rules: defaults, defaults, sections: {}, canEdit: isDemoSocialApprover(userId) });
-}
-
-/** The run routes and `GET rules` by `tail`; null for any other path or method (the caller falls through). */
+/** The run routes by `tail`; null for any other path or method (the caller falls through). `GET rules` is the company rules store's (W5-C5, demoSocialRules.ts). */
 export function demoReportRunsRoute(method: string, tail: string, params: URLSearchParams, body: string | undefined, userId: string): DemoResult | null {
   const m = method.toUpperCase();
-  if (tail === "rules") return m === "GET" ? rules(userId) : null;
   if (tail === "reports/generate") return m === "POST" ? start(body, userId) : m === "GET" ? list(params, userId) : null;
   const x = /^reports\/generate\/([^/]+)$/.exec(tail);
   if (x && m === "GET") return read(decodeURIComponent(x[1]), userId);
