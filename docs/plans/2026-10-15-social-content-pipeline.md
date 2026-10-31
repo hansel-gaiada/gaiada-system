@@ -132,6 +132,15 @@ of work (SCP-Q25 to SCP-Q40, where they are) are the seeded defaults of each com
 | SCP-Q42 | May a company admin add to a client's Saved? (2026-10-30; adding is gated on `social_post` · `create`, which a company admin holds) | **Yes.** The owner's answer: "yes". Changing or deleting someone else's item stays the client's officer, the HoD or the GM (SCP-Q29). |
 | SCP-Q43 | May the owner and the superadmin write a CLIENT's audit? (2026-10-30; SCP-Q34 named only the officer, the HoD and the GM for a client) | **Yes.** The owner's answer: "yes". A client's audit is written by its officer or any of the four; a prospect's stays the four's. |
 
+**Ruled by the owner on 2026-10-31** (first-hand, in the SCP-6 session). The team's real sheet arrived that day: one file per client and month, with a content plan tab and a stories tab, and a separate approval link the client opens without a login. Comparing it with the ERP raised four questions (§8 SCP-6).
+
+| # | Question | Ruling |
+|---|---|---|
+| SCP-Q44 | Does a reposted story need the client? (the sheet marks 17 of one client's 39 November stories "REPOSTED" and shows them to the client as "no review needed") | **Yes. Every post and story goes to the client, and a repost is marked as one.** The owner's words: "all post should be approved by client and marked repost if its repost." A post or story that reposts another account's content carries a repost mark, which staff and the portal show. It passes the client step like any other post, and the stage machine's other steps do not change. |
+| SCP-Q45 | Keep the team's AI check? (the sheet carries an "AI CHECK NOTES" column, graded Critical, Major, Minor and Check, "flag only, SMM to edit") | **Yes.** The owner's answer: "yes". The ERP runs an AI check on a post and flags what it finds at those four levels. It only flags; the officer makes the edit, as SCP-Q41's invariant "AI only drafts" requires. When it runs, what it reads and how its findings show are for SCP-6b2's contract; its spend is tracked and never capped (SCP-Q40). |
+| SCP-Q46 | Track the month's output per format, or only the total? (the sheet's header reads, for example, "4 REELS, 3 CAROUSEL, 4 SINGLE POST, 1 CAROUSEL VIDEO") | **Each format.** The owner's words: "track each". A client's allocation sets a target per format, and progress, schedule health and the Team dashboard count each format against its own target, with the total as their sum. Plan reading, which the owner may overrule: stories get a target line of their own and stay outside the posts' total, as §4.4 says. Whether "carousel video" becomes a format of its own is for SCP-6b2's contract. |
+| SCP-Q47 | Which month runs in parallel (SCP-6b)? | **December 2026, planned in the ERP from the start; November is seed.** The owner's words: "december. and november is a seed". December's posts are planned, approved and scheduled in the ERP beside the sheet. November, already mostly approved by the client in the sheet, is not reworked. Plan reading: its file is loaded into the live ERP as seed data through the fixed import (SCP-6b1), which rehearses the real file. |
+
 **Open:** none.
 
 **Superseded on 2026-10-26:** SCP-Q3 (the client page's look) by SCP-D5 and SCP-Q8; SCP-Q4 (two internal approvers) and
@@ -752,7 +761,29 @@ once deployed, checked on the live ERP's mock seed.
   BFF §63.23, SCP-D10. Upload an `.xlsx` or `.csv`, or paste; map the columns; pick the names the server could not
   match; preview every row; write all or nothing. The four approvers only, at `{D}/settings/import`. Proved on a mock
   sheet: on the CI gate (real Postgres and Cerbos) and live on the mock seed as `hod@scp.test`, the replay unchanged.
-- **6b.** One month run in parallel.
+- **The real sheet (2026-10-31).** One file per client and month. The content plan tab gives each post two rows (merged):
+  date, type (single post, carousel, reels, carousel video), the footage link, the designs pasted into the cells with a
+  description per image, one cell holding "Content Pillar", "Content Angle" and the brief, separate Instagram and
+  Facebook captions with their hashtags on the second row, the team's check, the client's check and its feedback, the
+  posting status, the tagged accounts, the live link and the AI check notes. The stories tab gives one row per story
+  (two stories on a day share a merged date): photo or video, the text, the call to action with its link, the tagged
+  accounts and a story content type (Villa tour, Hard selling, Sticker slider and so on). The approval link is an Apps
+  Script web app that anyone holding it can open. Its decisions write the client's check, the feedback and a cell note
+  back into the sheet. The ERP portal of SCP-2 already covers its pages (the progress header, the lists, the grid preview
+  and the per-network captions) and its decisions, behind a portal login (SCP-Q8).
+- **6b1.** The import reads the real file. It takes one client for the whole file, which has no client column (today's
+  guess takes "TAG IG ACCOUNT" for the client). It takes a file far over today's 2 MiB cap, because the pasted design
+  images make one month about 155 MB, and it skips the images. It reads a post written over two rows, a merged date
+  shared by two stories, the pillar, angle and brief cell split into its three fields, and a stories tab as stories
+  ("PHOTO" and "VIDEO" are the story's kind). The headers "TEXT" and "INSTAGRAM CONTENT ANGLES" are guessed. Then
+  November's file is loaded as seed (SCP-Q47).
+- **6b2.** Contract and build for what the post cannot yet hold: the repost mark (SCP-Q44), the AI check (SCP-Q45), a
+  target per format (SCP-Q46), the separate Facebook caption (onto the Facebook version), the tagged accounts, the story
+  content type and the description per image.
+- **6b3.** The client's contacts get portal logins before the parallel month, replacing the link that opens without
+  one (SCP-Q8).
+- **6b4.** The owner's answers on the real sheet: SCP-Q44 to SCP-Q47 (2026-10-31).
+- **6b.** One month run in parallel: December 2026 (SCP-Q47).
 - **6c.** The sheet retired.
 
 ### SCP-7 · Proof: a simulated month, end to end
