@@ -19,6 +19,8 @@ vi.mock("@/lib/socialCyclesActions", () => ({ saveSocialSettings: vi.fn(), saveC
 vi.mock("@/lib/socialAllocation-data", () => ({ getAllocation: vi.fn() }));
 vi.mock("@/lib/socialAllocationActions", () => ({ saveAllocation: vi.fn() }));
 vi.mock("@/lib/socialReportSchedules-data", () => ({ getReportSchedules: vi.fn() }));
+vi.mock("@/lib/socialRules-data", () => ({ getRules: vi.fn() }));
+vi.mock("@/lib/socialRulesActions", () => ({ saveRules: vi.fn(), resetRules: vi.fn(), previewRules: vi.fn(), loadRulesHistory: vi.fn() }));
 vi.mock("@/lib/socialReportSchedulesActions", () => ({ saveSchedule: vi.fn(), editSchedule: vi.fn(), setScheduleOn: vi.fn(), deleteSchedule: vi.fn(), runScheduleNow: vi.fn(), getRunProgress: vi.fn() }));
 
 import { getDepartment } from "@/lib/departments";
@@ -27,6 +29,8 @@ import { saveCycleDeadlines, saveSocialSettings } from "@/lib/socialCyclesAction
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { saveAllocation } from "@/lib/socialAllocationActions";
 import { getReportSchedules } from "@/lib/socialReportSchedules-data";
+import { getRules } from "@/lib/socialRules-data";
+import { rulesAnswer } from "@/components/social/rulesTestKit";
 import { asSchedule } from "@/lib/socialReportSchedules";
 import type { AllocationRow } from "@/lib/socialAllocation";
 import { PLAN_REFUSAL_REASON, type CycleRow, type CycleTable, type SocialSettings } from "@/lib/socialCycles";
@@ -77,6 +81,7 @@ beforeEach(() => {
   vi.mocked(getAllocation).mockReset().mockResolvedValue(ok([alloc(), alloc({ engagementId: "e-beta", clientName: "Brand Beta", stepEstimates: {} })]));
   vi.mocked(saveAllocation).mockReset();
   vi.mocked(getReportSchedules).mockReset().mockResolvedValue({ kind: "forbidden" });
+  vi.mocked(getRules).mockReset().mockResolvedValue(ok(rulesAnswer()));
 });
 afterEach(() => vi.useRealTimers());
 
@@ -418,5 +423,46 @@ describe("Report automation", () => {
     await mount();
     expect(screen.getByRole("heading", { name: "Report automation" })).toBeInTheDocument();
     expect(screen.getByText(/cannot be shown right now \(platform 500\)/)).toBeInTheDocument();
+  });
+});
+
+// SCP-5 W5-C5 (BFF §63.30.5): the company's rules sit between the deadline table and Report automation, one section each. A refused read says so and a failed one says it cannot tell: neither draws the defaults.
+describe("Company rules", () => {
+  it("reads the rules for the signed-in person and draws the Reports section after the deadlines and before Report automation", async () => {
+    vi.mocked(getReportSchedules).mockResolvedValue(ok([]));
+    await mount();
+    expect(getRules).toHaveBeenCalledWith("u-1", "co-a");
+    const reports = screen.getByRole("heading", { name: "Reports" });
+    expect(screen.getByRole("heading", { name: "Deadlines" }).compareDocumentPosition(reports) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(reports.compareDocumentPosition(screen.getByRole("heading", { name: "Report automation" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Report rules" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Ideas for next month" })).toBeInTheDocument();
+  });
+  it("offers the allocation's open clients to the previews", async () => {
+    await mount();
+    const pick = screen.getAllByLabelText("For client")[0];
+    expect(within(pick).getByRole("option", { name: "Brand Alpha" })).toBeInTheDocument();
+  });
+  it("shows the values read-only to a person who cannot edit, and still draws the sections", async () => {
+    vi.mocked(getRules).mockResolvedValue(ok(rulesAnswer({ canEdit: false })));
+    await mount();
+    expect(screen.getByRole("region", { name: "Report rules" })).toBeInTheDocument();
+    expect(screen.getByLabelText("The fiscal year starts in")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save report rules" })).not.toBeInTheDocument();
+  });
+  it("says the rules cannot be shown for a refused read, and draws no values", async () => {
+    vi.mocked(getRules).mockResolvedValue({ kind: "forbidden" });
+    await mount();
+    expect(screen.getByRole("heading", { name: "Company rules" })).toBeInTheDocument();
+    expect(screen.getByText(/rules cannot be shown to you/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("The fiscal year starts in")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Deadlines" })).toBeInTheDocument();
+  });
+  it("says it cannot tell for a failed read, never the defaults", async () => {
+    vi.mocked(getRules).mockResolvedValue({ kind: "unavailable", reason: "platform 500" });
+    await mount();
+    expect(screen.getByText(/cannot be shown right now \(platform 500\)\. They are not lost, and they are not the defaults/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("The fiscal year starts in")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Reports" })).not.toBeInTheDocument();
   });
 });
