@@ -771,7 +771,12 @@
     "audit_not_found": { "http": 404 },
     "audit_final": { "http": 409 },
     "audit_attached": { "http": 409 },
-    "not_a_prospect_audit": { "http": 409 }
+    "not_a_prospect_audit": { "http": 409 },
+    "schedule_not_found": { "http": 404 },
+    "schedule_exists": { "http": 409, "with": "detail {scheduleId}" },
+    "generation_running": { "http": 409, "with": "detail {runId}" },
+    "report_kind_off": { "http": 409 },
+    "ai_drafting_off": { "http": 409 }
   },
   "scenarioPersonas": {
     "approver": "the HoD: the Social Media unit's lead seat",

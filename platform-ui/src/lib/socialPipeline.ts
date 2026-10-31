@@ -278,6 +278,11 @@ export const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   audit_final: "This audit is final, so it cannot change. A final audit is a dated record; start a new one for the client instead.",
   audit_attached: "This prospect audit is already attached to another client.",
   not_a_prospect_audit: "Only a prospect's audit can be attached to a client.",
+  schedule_not_found: "That report schedule is gone. It may have been deleted. Reload the page.",
+  schedule_exists: "This company already has an all-clients schedule for that report kind. Edit that one, or choose some clients.",
+  generation_running: "Reports of that kind and period are already being drafted. Wait for that run to finish.",
+  report_kind_off: "The company has turned this report kind off in its report rules, so nothing can be drafted for it.",
+  ai_drafting_off: "This report kind is drafted by hand, because AI drafting is off for it in the company's report rules.",
 };
 
 /**
