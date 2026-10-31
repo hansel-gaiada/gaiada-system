@@ -54,6 +54,7 @@ describe.skipIf(!TEST_URL)("IAM-14 · the owner role", () => {
   // approver-only social keys are the owner's and NOT company_admin's; everywhere else the envelope is unchanged (D-8).
   // AIP-D5 holders (2026-10-29, §55.1): + assistant.brain.choose_provider ("only superadmin and owner"), migration 202610291200.
   // AIP-15 (2026-10-30, §58): + core.ai_usage.read_people and core.ai_usage.manage (the owner only; AIP-D6, AIP-D18), migration 202610300310.
+  // AIP-23b (2026-10-31, §59): + core.dept_assistant_note.manage (the owner only; AIP-D21), migration 202610311710.
   it("🔴 the DB bundle is company_admin's EXACTLY plus OWNER_EXTENSION — the envelope cannot be short or long", async () => {
     const owner = await keysFor("owner");
     const admin = await keysFor("company_admin");

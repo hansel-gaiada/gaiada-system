@@ -1,0 +1,162 @@
+# AIP-23b (docs/plans/2026-10-31-aip-23-department-notes.md §4.2, §4.8 and §5; owner rulings AIP-D20 to AIP-D24; docs/PERMISSION-CONTRACT.md §59;
+# docs/FRONTEND-BFF-CONTRACT.md §67) — authz for the NEW `dept_assistant_note` resource kind (core, no module): ONE note of one department's
+# shared assistant memory (`assistant_dept_notes`), or, on the list and suggest routes, the department's notes as a whole. One resource is one
+# org unit of one company. Seven actions:
+#   read      — see the department's approved notes (and, for an approver, the waiting ones). Staff whose HOME placement is the unit or inside
+#               its subtree (one rule, company_admin, manager, member, viewer); the `org_unit_lead` of the unit or of an enclosing unit (its own
+#               rule); the GM (the seat `dept_note_gm_seat`, its own rule).
+#   propose   — suggest a note. Staff whose home placement is in the unit's subtree (one rule, company_admin, manager, member: NOT viewer).
+#   withdraw  — take back one's OWN note (waiting or approved); the row is deleted. The author only (`proposedBy == principal.id`, self-scoped).
+#   decide    — approve or reject a waiting note (a rejected note is deleted). The head (its own rule) and the GM (its own rule).
+#   delete    — remove an approved or waiting note. The head and the GM, each its own rule.
+#   pin       — pin or unpin an approved note. The head and the GM, each its own rule.
+#   manage    — the COMPANY TIER, named: read, decide, delete and pin in ANY department of the company (and suggest there). The OWNER ONLY
+#               (OWNER_EXTENSION, uiGrantable false: the AIP-D16 / AIP-08c pattern) through its permission arm, and the superadmin's
+#               wildcard. The handler asks `manage` first and falls back to the per-unit action (AIP-13b's key split).
+# AIP-D21 names the approvers: "head, and owner, gm, or superadmin". company_admin is NOT one of them: it reaches this kind only through the
+# member-level home rules, like any colleague of the department. NOBODY ELSE: other departments' people (context narrows, never widens: plan
+# §4.2), the HR tier, the module tiers, client contacts, contributors, bots and automation.
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── HOME PLACEMENT, NOT A GRANT (the read and propose rules) ─────────────────────────────────────
+# "In the department" means the person's HOME placement (their primary, active `org_unit_memberships` row in THIS company) is the unit or
+# inside its subtree (plan §4.2). Cerbos cannot read placement, so the HANDLER feeds `homeAncestors`: the caller's home node and every ancestor
+# of it, from the per-tenant closure (computed WITH the tenant: node ids repeat across companies), never from a body. The rule matches when it
+# holds the note's `unitNodeId` (the route's unit). An unfed list ([]) or an unfed unit ("") matches nothing (fail closed). The four scope
+# roles share ONE rule per action because each is scope-only; the containment lives in the rule's condition, written INLINE (never behind a
+# policy variable), so the bundle generator and the hazard scan read it. No mirror exists for read or propose (see the permission arm below).
+#
+# ── EVERY ATTRIBUTE-DEPENDENT ROLE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
+# `org_unit_lead` is its own rule per action (read, decide, delete, pin), never mixed with a scope role and never with another action.
+# Containment is the derived role's: the grant's scopeId must be in `resource.attr.unitAncestors` (the unit and every ancestor,
+# `loadUnitAncestors`), fed by the HANDLER from the route's `:unitNodeId`. An id that is not in the org tree has no closure rows, so its
+# ancestors are [] and no lead grant matches. The GM seat is its own rule per action too.
+#
+# ── THE GM IS A SEAT, NOT A GRANT (`dept_note_gm_seat`, derived_roles.yaml) ────────────────────────
+# `gmIds` = the live lead-seat holders of the company's GM unit(s) (`gmUnitIds` + `loadSeatHoldersByNode`, the SCP-1b shape; the handler calls
+# modules/ai-usage/authz.ts `loadGmSeatIds`), never from a body. A seat is a relationship: no bundle carries a key through it (DIRECT maps it to
+# no real role) and no perm_* mirror reads it. An unfed list ([]) contains nobody (fail closed). The GM's rules read no unit: AIP-D21 gives the
+# GM every department of the company.
+#
+# ── THE TENANT TRAP ─────────────────────────────────────────────────────────────────────────────
+# An `org_unit` grant carries no tenant (the derived role checks the grant's own `tenantIds`), and node ids repeat across companies. So EVERY
+# rule keeps `variables.inTenant`, the handler computes `unitAncestors` and `homeAncestors` WITH the tenant, and `gmIds` per company.
+#
+# ── DENIED EVERY ACTION: automation, bots, contributors, client accounts ─────────────────────────
+# One `roles: ["user"]` DENY (every principal carries `user`, so under deny-overrides it beats every ALLOW below, the platform_admin wildcard and
+# the perm mirror included) on `principal.attr.kind` (users.kind, sent by principalPayload()); `has()` makes a caller that omits the attribute
+# evaluate to false. A note is people's words for people: an agent neither reads nor writes them (the assistant reads approved notes on the
+# server, AIP-23c, with no Cerbos call as the agent). A CLIENT-ONLY principal holds only `client`, which no rule here names; the `client` kind
+# in the DENY is the second wall. The actions are LISTED, not "*" (a "*" DENY reads as a wildcard kind to cerbos-catalog-alignment.test.ts).
+#
+# ── THE OWNER AND THE PERMISSION ARM: `manage` ONLY ─────────────────────────────────────────────
+# `owner` is permission-native (IAM-04c §3: ZERO policy rules; its reach is its bundle through a `perm_*` mirror). `manage` is named by NO role
+# rule: its key rides OWNER_EXTENSION (scripts/generate-role-bundles.mjs), uiGrantable false, so no role edit, position or request can hand it
+# out, and the mirror is the only way in (the AIP-D16 owner-only pattern). NO other mirror, on purpose: read and propose are reached through the
+# home-placement condition, decide, delete and pin through the lead rule (attribute-dependent: the grant's one unit), withdraw through the
+# author rule (self-scoped); a flat `perms` mirror cannot express any of them and would let a holder reach EVERY department's notes
+# (permission-arm-hazard-scan Pattern B, iam-04-reg1-mirror-reach-invariant).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: dept_assistant_note
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # People whose HOME placement is the unit or inside its subtree read the department's notes. One rule, scope-only roles; the placement is
+    # the handler-fed `homeAncestors` (the caller's home node and its ancestors), never a grant.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.unitNodeId) && request.resource.attr.unitNodeId != "" &&
+            has(request.resource.attr.homeAncestors) &&
+            request.resource.attr.unitNodeId in request.resource.attr.homeAncestors
+
+    # ... and suggest one. A viewer reads, never suggests.
+    - actions: ["propose"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.unitNodeId) && request.resource.attr.unitNodeId != "" &&
+            has(request.resource.attr.homeAncestors) &&
+            request.resource.attr.unitNodeId in request.resource.attr.homeAncestors
+
+    # The person who SUGGESTED a note takes it back, waiting or approved, wherever they now work (plan §4.3: a person can always take back their
+    # own words). Self-scoped; the `has()` guard and the `!= ""` test make a call that never fed `proposedBy` deny.
+    - actions: ["withdraw"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.proposedBy) && request.resource.attr.proposedBy != "" &&
+            request.resource.attr.proposedBy == request.principal.id
+
+    # Department head of the unit or an enclosing one: OWN rule per action, never mixed (HIER-2 §1.4). The unit's subtree only: an unfed
+    # `unitAncestors` contains nothing, so an unfed resource denies.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["decide"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["pin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The GM (the live lead seat of the company's GM unit), in every department of the company (AIP-D21). OWN rule per action, never mixed.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["dept_note_gm_seat"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["decide"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["dept_note_gm_seat"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["dept_note_gm_seat"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["pin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["dept_note_gm_seat"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════ automation, bots, contributors and client accounts: every action denied ══════════════
+    # `roles: ["user"]`, so under deny-overrides it beats the platform_admin wildcard and every ALLOW (the perm mirror too).
+    - actions: ["read", "propose", "withdraw", "decide", "delete", "pin", "manage"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot", "contributor", "client"]
+
+    # =========== permission-matching arm: manage ONLY (see the header) =====================================
+    # Generic global-or-company mirror. The platform_admin wildcard is deliberately NOT mirrored (IAM-04c: the tier bypass never enters the
+    # permission catalog).
+    - actions: ["manage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_dept_assistant_note_manage"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

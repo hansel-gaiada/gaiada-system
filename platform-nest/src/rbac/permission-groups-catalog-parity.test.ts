@@ -145,7 +145,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // AIP-13b (2026-10-29, AIP-D10): +3 grantable (core.dept_assistant_preamble.{read,edit,manage} on the NEW dept_assistant_preamble kind, in 1 NEW authoring group `assistant_dept_preamble`, not sensitive, not advancedOnly). 484 -> 487.
     // AIP-15 (2026-10-30, AIP-D6/AIP-D18): +6 grantable (core.ai_usage.{read_own,read_unit,read_company,read_people,manage,lift_stop} on the NEW ai_usage kind, in 1 NEW authoring group `ai_usage`, not sensitive, not advancedOnly; read_people and manage are uiGrantable false). 487 -> 493.
     // M5-P4 (2026-10-30, WSK-D92): +1 grantable (search.property.manage_tags on the EXISTING resource_search_property kind, in 1 NEW authoring group `search_manage_tags`, sensitive, not advancedOnly). 493 -> 494.
-    expect(grantable.length).toBe(494);
+    // AIP-23b (2026-10-31, AIP-D20 to AIP-D24): +7 grantable (core.dept_assistant_note.{read,propose,withdraw,decide,delete,pin,manage} on the NEW dept_assistant_note kind, in 1 NEW authoring group `assistant_dept_notes`, not sensitive, not advancedOnly; manage is uiGrantable false). 494 -> 501.
+    expect(grantable.length).toBe(501);
     expect(relationshipKeys.size).toBe(15);
   });
 

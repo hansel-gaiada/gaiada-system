@@ -224,6 +224,21 @@ derivedRoles:
             has(request.resource.attr.gmIds) &&
             request.resource.attr.gmIds.exists(id, id == request.principal.id)
 
+    # dept_note_gm_seat -- AIP-23b (owner ruling AIP-D21, docs/PERMISSION-CONTRACT.md §59): the GM, for the `dept_assistant_note` kind's
+    #   `read`, `decide`, `delete` and `pin` in every department of the company. A copy of ai_usage_gm_seat, kept as its own name so each kind's
+    #   seat reach is read and pinned on its own: the principal is one of `gmIds`, the live lead-seat holders of the company's GM unit(s), computed
+    #   by the handler per company (core/dept-assistant-notes.service.ts, through modules/ai-usage/authz.ts loadGmSeatIds), never from a grant or
+    #   a body. A seat is a relationship, not a grant: DIRECT maps it to no real role and no perm_* mirror reads it. Same social_approver_seat
+    #   shape (a top-level attribute gate before the `.exists`, no g.role literal). An unfed list ([]) contains nobody. Every rule naming it
+    #   keeps `variables.inTenant`, so another company's GM never reaches here.
+    - name: dept_note_gm_seat
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.gmIds) &&
+            request.resource.attr.gmIds.exists(id, id == request.principal.id)
+
     # ═══════ M5-W1a -- the writers' room: four editorial roles as SCOPED grants ═══════════════════════════════
     # docs/plans/2026-10-11-m5-writers-room-design.md §2.2. The ROLES `webdesk_writer`, `webdesk_translator`,
     # `webdesk_seo_reviewer`, `webdesk_editor` are grants stored as data: a `user_roles` row at scopeType
@@ -847,6 +862,20 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "core.ai_usage.manage" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_dept_assistant_note_manage — AIP-23b (2026-10-31, docs/PERMISSION-CONTRACT.md §59, docs/FRONTEND-BFF-CONTRACT.md §67). One generic
+    # global-or-company mirror for `manage` ONLY: the company tier of department notes (read, decide, delete and pin in ANY department). Named by
+    # NO role rule: the key rides OWNER_EXTENSION (uiGrantable false), so the mirror is the owner's only way in (the AIP-D16 owner-only pattern).
+    # NO other mirror, on purpose: read and propose are reached through the home-placement condition, decide, delete and pin through the
+    # org_unit_lead rule (the grant's one unit, via unitAncestors), withdraw through the author rule (self-scoped); a flat `perms` mirror on any
+    # of them would let a holder reach every department (iam-04-reg1-mirror-reach-invariant, permission-arm-hazard-scan Pattern B).
+    - name: perm_dept_assistant_note_manage
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.dept_assistant_note.manage" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_creative_asset_* — DW-6h (2026-10-13, docs/FRONTEND-BFF-CONTRACT.md §35.4). One generic global-or-company

@@ -55,7 +55,9 @@ export interface Resource {
    *  AIP-13b: `dept_assistant_preamble` (resource_dept_assistant_preamble.yaml) reads it for the head's `read` and `edit` rules; the
    *  handler (dept-assistant-preamble.controller.ts) feeds the route's unit chain, computed WITH the tenant. Again no allow-list change.
    *  AIP-15: `ai_usage` (resource_ai_usage.yaml) reads it for the head's `read_unit` and `lift_stop` rules; the handler
-   *  (modules/ai-usage/reads.controller.ts) feeds the route's unit chain, computed WITH the tenant. No allow-list change. */
+   *  (modules/ai-usage/reads.controller.ts) feeds the route's unit chain, computed WITH the tenant. No allow-list change.
+   *  AIP-23b: `dept_assistant_note` (resource_dept_assistant_note.yaml) reads it for the head's `read`, `decide`, `delete` and `pin` rules; the
+   *  handler (dept-assistant-notes.controller.ts) feeds the route's unit chain, computed WITH the tenant. No allow-list change. */
   unitAncestors?: string[];
   /** P2-02/P2-06 — the person BEING acted upon, as distinct from the resource's owner or subject:
    *  the target of a `position` assign or a `role_grant` create/revoke. Backs the self-target DENY
@@ -166,7 +168,10 @@ export interface Resource {
   /** DW-10c (docs/FRONTEND-BFF-CONTRACT.md §59.3, PERMISSION-CONTRACT §48) -- the org-tree node a `department`-visible
    *  `calendar_event` belongs to (`calendar_events.unit_node_id`). Read from the STORED row by the handler, never from a body. No
    *  Cerbos rule compares it (the per-unit narrowing needs the caller's placement as of today, which Cerbos cannot read, so the
-   *  handler and the SQL mirrors apply it); it is in the payload so the decision carries the unit the event names. Omitted -> "". */
+   *  handler and the SQL mirrors apply it); it is in the payload so the decision carries the unit the event names. Omitted -> "".
+   *  AIP-23b (docs/PERMISSION-CONTRACT.md §59): `dept_assistant_note` (resource_dept_assistant_note.yaml) DOES compare it: the home-placement
+   *  `read` and `propose` rules allow when `unitNodeId in homeAncestors`. The handler (dept-assistant-notes.controller.ts) feeds the ROUTE's
+   *  `:unitNodeId`, never a body. Omitted -> "" -> those rules' `!= ""` guard denies (fail closed). Already in the allow-list below. */
   unitNodeId?: string;
   /** SCP-1b (docs/PERMISSION-CONTRACT.md §53.4, §53.5) -- the company's live lead-seat holders of its Social Media unit and
    *  its GM unit (the HoD and the GM), for `social_post` / `social_engagement` / `social_report`. Backs the
@@ -195,8 +200,21 @@ export interface Resource {
    *  `ai_usage` kind's `read_company` (company totals, never people). Backs the `ai_usage_gm_seat` derived role
    *  (`gmIds.exists(id, id == principal.id)`). Computed BY THE HANDLER per company (`modules/ai-usage/authz.ts` loadGmSeatIds: gmUnitIds +
    *  loadSeatHoldersByNode), never from a body. Omitted -> [] -> contains nobody, so no GM matches (fail closed). A dropped allow-list line
-   *  below would silently deny the GM, so cerbos-ai-usage.test.ts pins that it is carried. */
+   *  below would silently deny the GM, so cerbos-ai-usage.test.ts pins that it is carried.
+   *  AIP-23b (§59, owner ruling AIP-D21): `dept_assistant_note` reads it too, through its own seat `dept_note_gm_seat` (read, decide, delete,
+   *  pin in every department); the handler (dept-assistant-notes.controller.ts) feeds the same `loadGmSeatIds`. No allow-list change. */
   gmIds?: string[];
+  /** AIP-23b (docs/PERMISSION-CONTRACT.md §59, plan docs/plans/2026-10-31-aip-23-department-notes.md §4.2) -- the CALLER's home placement in
+   *  this company: their primary, active `org_unit_memberships` node(s) and every ancestor of each, from the per-tenant closure (computed WITH
+   *  the tenant). Backs `dept_assistant_note`'s `read` and `propose` rules (`unitNodeId in homeAncestors`: the person works in the note's unit
+   *  or inside its subtree). Computed BY THE HANDLER (core/dept-assistant-notes.service.ts loadHomeAncestors), never from a body. Omitted ->
+   *  [] -> contains nothing, so no home rule matches (fail closed). A dropped allow-list line below would silently deny every member, so
+   *  cerbos-dept-assistant-note.test.ts pins that it is carried. */
+  homeAncestors?: string[];
+  /** AIP-23b -- the user who SUGGESTED a department note (`assistant_dept_notes.proposed_by`), for `dept_assistant_note`'s self-scoped
+   *  `withdraw` rule (`proposedBy == principal.id`). Read by the handler from the stored row, never from a body. Omitted -> "" -> the rule's
+   *  `has() && != ""` guard and the equality both fail closed (a note whose author was erased can be withdrawn by nobody; an approver deletes). */
+  proposedBy?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -359,6 +377,11 @@ function resourcePayload(r: Resource) {
       // AIP-15. Listed here or it never reaches derived_roles.yaml's ai_usage_gm_seat (this is an allow-list; the handler builds the
       // Resource through an object spread, where TypeScript's excess-property check does not fire). Fails closed: [] contains nobody.
       gmIds: r.gmIds ?? [],
+      // AIP-23b. Listed here or they never reach resource_dept_assistant_note.yaml (this is an allow-list; the handler builds the Resource
+      // through an object spread, where TypeScript's excess-property check does not fire). Both fail closed: [] contains nothing, and ""
+      // equals no principal id.
+      homeAncestors: r.homeAncestors ?? [],
+      proposedBy: r.proposedBy ?? "",
     },
   };
 }
