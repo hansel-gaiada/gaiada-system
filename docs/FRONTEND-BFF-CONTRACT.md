@@ -13666,6 +13666,16 @@ Activity on entity `social_report_schedule`: `created`, `updated`, `paused`, `re
 - the spend: a run's usage sums its calls, a schedule's 30-day and month-to-date spend sums its runs, and nothing is refused on spend;
 - the page: phone width and keyboard, axe in light and dark, DEMO_MODE.
 
+**As built** (W5-A5, release 476; W5-A6, the page, 2026-10-31). Where the build reads more closely than the text above:
+- The order of checks is an automation principal first (403 `automation_cannot_act`), then `plan` (403 `not_a_social_approver`), as on every other route here.
+- A refusal's body is `{message: <code>, detail: {...}}`: `schedule_exists` carries `detail.scheduleId`, `generation_running` `detail.runId`.
+- `PATCH` takes `scope`, `engagementIds`, `timing` and `enabled`, never `kind`: a schedule keeps its kind (edit another kind by adding a schedule). A create or edit with scope `all` refuses a non-empty `engagementIds` with 400 `invalid_field` `engagementIds`.
+- Resuming does not re-check the kind's rules: a schedule whose kind is off or drafted by hand is paused again by the job (`kind_off`, `ai_drafting_off`), and its "Run now" answers 409 `report_kind_off` or `ai_drafting_off`.
+- "Run now" answers 200 `{alreadyApplied, runId, period}` and 202 the started run, both with the period it drafted.
+- A schedule has no AI-drafting switch of its own: AI drafting is the kind's company rule (63.30).
+- The page's "Next runs" preview is computed in the browser (UTC, Monday to Friday, no holidays), and says so; the card shows the server's `nextRunAt` once saved. OPEN: a server preview on the company's zone and working calendar, so the preview and the job never disagree near a holiday.
+- A run's results link to `{D}/social-reports?run=<runId>`, which the reports page opens on its progress (W5-A4).
+
 ### 63.25 Ideas for next month (SCP-5c) — **STATUS: SERVER BUILT (W5-B1 in release 470, W5-B2 in 472); the monthly page's section and "From an idea" (W5-A4) IN PROGRESS (2026-10-31)**
 
 **What it is.** Per client: what we saw, the metric it rests on, and what we suggest. "Add to next plan" turns an idea into a `planned` post of a cycle the person picks, linked both ways; "Mark shared" records that the team shared it with the client. By default ideas stay internal and nothing reaches the portal or the report's PDF (SCP-Q27). A company may set shared ideas to print in the next monthly report (`ideas.sharedInMonthlyReport`, 63.30): that report's document and PDF then list its client's ideas marked shared since the previous monthly report, by the report's own rules. They sit on the monthly report's page, as in the team's design.
