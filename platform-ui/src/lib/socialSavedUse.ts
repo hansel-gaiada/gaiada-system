@@ -129,7 +129,7 @@ export type UseCheck = { ok: true; body: UseBody; counted: number } | { ok: fals
 const no = (message: string): UseCheck => ({ ok: false, message });
 
 const len = (s: string): number => [...s].length;
-const tag = (t: string): string => t.replace(/^#+/, "").replace(/\s+/g, "");
+const tag = (t: string): string => t.trim().replace(/^#+/, "").replace(/\s+/g, "");
 
 /**
  * The body of the post edit for the chosen entries: the changed fields (only those) and the ids of the stored items, in the order chosen. Nothing is sent that the post's step does not take, an

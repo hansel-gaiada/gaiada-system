@@ -122,3 +122,18 @@
 .scp-metrics__form { width: 100%; border-left: 3px solid var(--status-info); padding: 4px 0 4px 12px; box-sizing: border-box; }
 .scp-metrics__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 14px; }
 @media (max-width: 600px) { .scp-metrics__fields { grid-template-columns: minmax(0, 1fr); } }
+
+/* SCP-5e — "Use from Saved": the picker over the client's content bank, grouped by the company's categories (BFF §63.26.3). Fits 375px: one column, long words wrap. */
+.scp-usepick { display: grid; gap: 12px; min-width: 0; }
+.scp-usepick__group { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 6px; }
+.scp-usepick__group legend { padding: 0; font: 700 13px var(--font-body); color: var(--text-primary); }
+.scp-usepick__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.scp-usepick__item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: start; padding: 8px; border: 0.5px solid var(--erp-hairline-soft); min-width: 0; cursor: pointer; }
+.scp-usepick__item--off { cursor: not-allowed; opacity: 0.75; }
+.scp-usepick__item input { margin-top: 3px; }
+.scp-usepick__body { display: grid; gap: 2px; min-width: 0; font: 400 13px/1.45 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
+.scp-usepick__title { font-weight: 700; }
+.scp-usepick__preview { color: var(--erp-ink-60); }
+.scp-usepick__meta { font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.scp-usepick__thumb { max-width: 96px; max-height: 72px; height: auto; display: block; }
+.scp-usepick__count { font: 400 12px var(--font-body); margin: 0; }
