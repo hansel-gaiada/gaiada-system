@@ -113,6 +113,7 @@ jobs:
       webdesk_deploy: ${{ steps.plan.outputs.webdesk_deploy }}
       webdesk_wordpress: ${{ steps.plan.outputs.webdesk_wordpress }}
       obs: ${{ steps.plan.outputs.obs }}
+      keycloak: ${{ steps.plan.outputs.keycloak }}
       any_test: ${{ steps.plan.outputs.any_test }}
       any_webdesk_light: ${{ steps.plan.outputs.any_webdesk_light }}
     steps:
@@ -527,6 +528,37 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+
+  # keycloak (PID-2h): the gaiada-keycloak image = stock Keycloak + the phone sign-in form (keycloak/extension, Java)
+  # + the gaiada login theme. The unit tests, the theme's one-change check against upstream, and an image build (whose
+  # Dockerfile runs the tests again). The image is pushed and cosign-signed only by keycloak-image.yml on main. The
+  # browser proof (a throwaway Keycloak + Chrome's virtual authenticator) runs on sumopod:
+  # infra/scripts/keycloak-passkey-realm-test.sh all.
+  keycloak:
+    needs: plan
+    if: needs.plan.outputs.keycloak == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: keycloak/extension/pom.xml
+      - name: Unit tests (against the image's Keycloak version)
+        working-directory: keycloak/extension
+        run: mvn -B verify -Dkeycloak.version="$(sed -n 's/^ARG KEYCLOAK_VERSION=//p' ../Dockerfile)"
+      - name: Theme template = upstream + the PID-D15 change only
+        if: ${{ !cancelled() }}
+        run: bash keycloak/theme/check-upstream.sh
+      - name: Image builds and carries the form and the theme
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          docker build -t gaiada-keycloak:ci keycloak
+          docker run --rm --entrypoint ls gaiada-keycloak:ci /opt/keycloak/providers/gaiada-keycloak-phone-form.jar \
+            /opt/keycloak/themes/gaiada/login/login-update-password.ftl /opt/keycloak/themes/gaiada/login/messages/messages_en.properties
 
   # insights-collector (M5-V2-b): the Go enrichment collector in front of Umami on sumopod. vet + the FULL
   # suite with the race detector; the Postgres store test runs against a service container (it creates

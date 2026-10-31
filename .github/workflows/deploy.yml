@@ -119,6 +119,21 @@ jobs:
             echo "::endgroup::"
           done
 
+      # PID-2h: once compose runs OUR Keycloak (gaiada-keycloak, built and signed by keycloak-image.yml and pinned by
+      # its CONTENT, not by the release tag), refuse to deploy an unsigned one. While compose still names the stock
+      # quay.io image this finds no line and does nothing.
+      - name: Verify the Keycloak image signature (when compose runs ours)
+        run: |
+          set -euo pipefail
+          ref=$(sed -n 's|^ *image: *ghcr\.io/${GHCR_OWNER:-[^}]*}/gaiada-keycloak:\([^ ]*\) *$|\1|p' infra/compose/docker-compose.vps.yml)
+          if [ -z "$ref" ]; then echo "compose runs the stock Keycloak image: nothing to verify"; exit 0; fi
+          img="ghcr.io/${OWNER}/gaiada-keycloak:${ref}"
+          cosign verify "$img" \
+            --certificate-identity-regexp "https://github.com/${OWNER}/.+/.github/workflows/keycloak-image.yml@.+" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            > /dev/null
+          echo "OK $img"
+
       - name: Set up SSH
         run: |
           set -euo pipefail
@@ -377,6 +392,7 @@ jobs:
         run: |
           ssh vps "KEEP='${TAG} ${{ steps.prev.outputs.tag }}'; \
             for img in \$(docker images 'ghcr.io/${OWNER}/gaiada-*' --format '{{.Repository}}:{{.Tag}}'); do \
+              case \"\$img\" in */gaiada-keycloak:*) continue ;; esac; \
               keep=no; for k in \$KEEP; do [ \"\${img##*:}\" = \"\$k\" ] && keep=yes; done; \
               [ \"\$keep\" = no ] && docker rmi \"\$img\" >/dev/null 2>&1 && echo \"pruned \$img\"; \
             done; df -h / | tail -1" || echo "::warning::image prune failed (non-fatal)"

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# PID-2 (docs/plans/2026-10-30-phone-identity.md §5, steps 2a 2b 2c 2d 2e 2f 2i): set up realm `gaiada` for
+# PID-2 (docs/plans/2026-10-30-phone-identity.md §5, steps 2a 2b 2c 2d 2e 2f 2h 2i): set up realm `gaiada` for
 # username/phone + password + a passkey on the person's phone, with a realm backup first and a revert.
-# Keycloak 26.8.1 or later (PID-1). Idempotent: every step reads the current state and writes only what differs.
+# Keycloak 26.8.1 or later (PID-1), from the gaiada-keycloak image (keycloak/, PID-2h: the phone sign-in form and the
+# gaiada login theme). Idempotent: every step reads the current state and writes only what differs.
 #
 #   RP_ID=erp.gaiada.com BIND=client:<clientId> keycloak-passkey-realm.sh apply [--dry-run]
 #   keycloak-passkey-realm.sh revert <backup-dir> [--dry-run]
@@ -20,14 +21,24 @@
 #   REALM [gaiada]  BACKUP_DIR [$HOME/gaiada-realm-backups]
 #   RP_ID (required for apply: the WebAuthn RP ID. Live: erp.gaiada.com. A passkey only works for its RP ID, so this
 #         must never change after anyone enrols)            RP_NAME [Gaiada]
-#   BIND (required for apply): where the new browser flow is bound
-#         realm            -> the realm's browser flow (everyone), and the passkey reset flow + "Forgot password?"
-#         client:<clientId>-> a browser-flow override on that client only (risk 1: live starts on a test client);
-#                             the reset flow is created but NOT bound, "Forgot password?" stays off
+#   BIND (required for apply): where the new browser flow and the login theme are bound
+#         realm            -> the realm's browser flow and login theme (everyone), and the passkey reset flow +
+#                             "Forgot password?" (only once the realm's login theme is LOGIN_THEME: PID-D15)
+#         client:<clientId>-> a browser-flow override and a login theme on that client only (risk 1: live starts on a
+#                             test client); the reset flow is created but NOT bound, "Forgot password?" stays off
 #         none             -> flows created, nothing bound
-#   STEPS [profile webauthn browser reset rememberme amr bruteforce]  (a subset runs only those steps; e.g. the
+#   STEPS [profile webauthn theme browser reset rememberme amr bruteforce]  (a subset runs only those steps; e.g. the
 #         early live brute-force step is STEPS=bruteforce)
+#   LOGIN_FORM [gaiada-phone-username-password-form]  the password form in the browser flow: the PID-2h form (username,
+#         email or phone). auth-username-password-form is Keycloak's stock form (username or email): the revert of the
+#         phone sign-in alone is `STEPS=browser LOGIN_FORM=auth-username-password-form apply`, which swaps it back.
+#   LOGIN_THEME [gaiada]  the PID-2h login theme: a new password always signs out the other devices (PID-D15) and the
+#         field reads "Username or phone number". Both need the gaiada-keycloak image; the script stops if it is absent.
 #   AMR_CLIENTS [gaiada-ui gaiada-platform]  clients that get the oidc-amr-mapper (enable-mfa.md §3.1)
+#   PHONE_REQUIRED [1]  1 = everyone is asked for a phone number (and may change their username) at their next sign-in,
+#         through ANY client: the staff wave (PID-5d). 0 = the phoneNumber attribute exists, so IT or the person can set
+#         it and the phone form can find it, but nobody is asked and editUsernameAllowed and VERIFY_PROFILE are left
+#         alone: the test-client phase (PID-5b, 5c), where only the test client's flow may change anything people see.
 #   PHONE_PATTERN [^\+62[1-9][0-9]{6,12}$]   USERNAME_RULE [0] (1 adds the plan's username pattern; see the report:
 #         with usernames that are emails today it breaks admin writes, so it stays off until PID-3c)
 #   REMEMBER_ME_SECONDS [604800]  REMEMBER_ME_LABEL [This is my own device]
@@ -53,8 +64,11 @@ BACKUP_DIR=${BACKUP_DIR:-$HOME/gaiada-realm-backups}
 RP_ID=${RP_ID:-}
 RP_NAME=${RP_NAME:-Gaiada}
 BIND=${BIND:-}
-STEPS=${STEPS:-profile webauthn browser reset rememberme amr bruteforce}
+STEPS=${STEPS:-profile webauthn theme browser reset rememberme amr bruteforce}
+LOGIN_FORM=${LOGIN_FORM:-gaiada-phone-username-password-form}
+LOGIN_THEME=${LOGIN_THEME:-gaiada}
 AMR_CLIENTS=${AMR_CLIENTS:-gaiada-ui gaiada-platform}
+PHONE_REQUIRED=${PHONE_REQUIRED:-1}
 PHONE_PATTERN=${PHONE_PATTERN:-'^\+62[1-9][0-9]{6,12}$'}
 USERNAME_RULE=${USERNAME_RULE:-0}
 USERNAME_PATTERN='^[a-z0-9][a-z0-9.-]{2,29}$'
@@ -73,10 +87,12 @@ AMR_HWK_MAX_AGE=${AMR_HWK_MAX_AGE:-900}
 FLOW_BROWSER=gaiada-passkey-browser
 FLOW_RESET=gaiada-passkey-reset
 FLOW_RESET_PROOF=gaiada-passkey-reset-proof
+# the password forms the browser flow may hold: Keycloak's stock one and the PID-2h phone form
+FORMS='["auth-username-password-form","gaiada-phone-username-password-form"]'
 DENY_MSG="This account cannot reset its password here. Ask IT to reset your sign-in."
 KCFG=/tmp/pid2-kcadm.$$.cfg
 # The realm fields this script owns. revert restores exactly these from the backup.
-REALM_KEYS='["editUsernameAllowed","resetPasswordAllowed","browserFlow","resetCredentialsFlow","rememberMe",
+REALM_KEYS='["editUsernameAllowed","resetPasswordAllowed","browserFlow","resetCredentialsFlow","loginTheme","rememberMe",
  "ssoSessionIdleTimeoutRememberMe","ssoSessionMaxLifespanRememberMe","webAuthnPolicyRpId","webAuthnPolicyRpEntityName",
  "webAuthnPolicyUserVerificationRequirement","webAuthnPolicyRequireResidentKey","webAuthnPolicyResidentKey",
  "webAuthnPolicyAttestationConveyancePreference","webAuthnPolicyAuthenticatorAttachment","webAuthnPolicySignatureAlgorithms",
@@ -124,24 +140,23 @@ realm_set() {
 }
 flow_json() { K get authentication/flows -r "$REALM" | jq -c --arg a "$1" 'first(.[]|select(.alias==$a)) // empty'; }
 execs() { K get "authentication/flows/$(uri "$1")/executions" -r "$REALM"; }
-# add_exec <flowAlias> <providerId> <requirement> -> prints the new execution id
+# Execution order is the PRIORITY, and every write here names it (PID-2h finding, 26.8.1 source):
+#   - updating an execution sets its priority to the body's, 0 when the body has none
+#     (AuthenticationManagementResource#updateExecutions);
+#   - executions with the SAME priority run in no guaranteed order (a stable sort over the database rows).
+# The first version of this script sent no priority, so a flow could hold ties: the order it was proved in was luck.
+next_prio() { execs "$1" | jq '([.[]|select(.level==0)|.priority]|max // 0) + 10'; }
+# ordered <flowAlias>: its top-level priorities strictly increase (no ties)
+ordered() { execs "$1" | jq -e '[.[]|select(.level==0)|.priority] as $p | [range(1; $p|length) | select($p[.] <= $p[.-1])] | length == 0' >/dev/null; }
+# add_exec <flowAlias> <providerId> <requirement> -> prints the new execution id; it goes LAST (the highest priority)
 add_exec() {
-  local f=$1 p=$2 req=$3 id
-  K create "authentication/flows/$(uri "$f")/executions/execution" -r "$REALM" -s provider="$p" >/dev/null || return 1
-  id=$(execs "$f" | jq -r --arg p "$p" '[.[]|select(.providerId==$p and .level==0)]|last|.id')
-  K update "authentication/flows/$(uri "$f")/executions" -r "$REALM" --no-merge -b "{\"id\":\"$id\",\"requirement\":\"$req\"}" >/dev/null || return 1
-  to_last "$f" "$id" || return 1
+  local f=$1 p=$2 req=$3 id prio
+  prio=$(next_prio "$f")
+  K create "authentication/flows/$(uri "$f")/executions/execution" -r "$REALM" -b "{\"provider\":\"$p\",\"priority\":$prio}" >/dev/null || return 1
+  id=$(execs "$f" | jq -r --arg p "$p" --argjson n "$prio" 'first(.[]|select(.providerId==$p and .level==0 and .priority==$n))|.id')
+  [ -n "$id" ] || return 1
+  K update "authentication/flows/$(uri "$f")/executions" -r "$REALM" --no-merge -b "{\"id\":\"$id\",\"requirement\":\"$req\",\"priority\":$prio}" >/dev/null || return 1
   echo "$id"
-}
-# to_last <flowAlias> <execId>: 26.8.1 can place a new execution FIRST (seen after deleting a sibling in a copied flow:
-# WebAuthn landed before the password form). Lower it until it is the last top-level entry of its flow.
-to_last() {
-  local f=$1 id=$2 n
-  for n in $(seq 20); do
-    [ "$(execs "$f" | jq -r '[.[]|select(.level==0)]|last|.id')" = "$id" ] && return 0
-    K create "authentication/executions/$id/lower-priority" -r "$REALM" -b '{}' >/dev/null 2>&1 || return 1
-  done
-  [ "$(execs "$f" | jq -r '[.[]|select(.level==0)]|last|.id')" = "$id" ]
 }
 # exec_config <execJson> <alias> <configObject>: create or update the execution's authenticator config
 exec_config() {
@@ -178,7 +193,7 @@ backup() {
   realm_json > "$d/realm.json" && K get users/profile -r "$REALM" > "$d/user-profile.json" \
     && K get "localization/en" -r "$REALM" > "$d/localization-en.json" \
     && K get authentication/required-actions -r "$REALM" > "$d/required-actions.json" \
-    && K get clients -r "$REALM" | jq '[.[]|{id,clientId,authenticationFlowBindingOverrides,protocolMappers:[.protocolMappers[]?|{id,name,protocolMapper}]}]' > "$d/clients.json" \
+    && K get clients -r "$REALM" | jq '[.[]|{id,clientId,authenticationFlowBindingOverrides,login_theme:(.attributes.login_theme // null),protocolMappers:[.protocolMappers[]?|{id,name,protocolMapper}]}]' > "$d/clients.json" \
     || die "backup incomplete in $d"
   for f in "$d"/*.json; do jq -e . "$f" >/dev/null || die "backup file $f is not JSON"; done
   chmod 600 "$d"/*.json
@@ -186,21 +201,24 @@ backup() {
 }
 
 step_profile() {
-  say "PID-2a user profile: phoneNumber (required for the person, E.164 +62), editUsernameAllowed, VERIFY_PROFILE"
+  say "PID-2a user profile: phoneNumber (E.164 +62$([ "$PHONE_REQUIRED" = 1 ] && echo ', required for the person, editUsernameAllowed, VERIFY_PROFILE'))"
   local cur want attr
   cur=$(K get users/profile -r "$REALM")
-  attr=$(jq -nc --arg pat "$PHONE_PATTERN" '{name:"phoneNumber",displayName:"Phone number",
+  attr=$(jq -nc --arg pat "$PHONE_PATTERN" --argjson req "$PHONE_REQUIRED" '{name:"phoneNumber",displayName:"Phone number",
     validations:{pattern:{pattern:$pat,"error-message":"Use the international form, starting +62, e.g. +628123456789"},length:{min:9,max:16}},
     annotations:{inputType:"html5-tel",inputTypePlaceholder:"+628123456789",autocomplete:"tel"},
-    required:{roles:["user"]},permissions:{view:["admin","user"],edit:["admin","user"]},multivalued:false}')
+    permissions:{view:["admin","user"],edit:["admin","user"]},multivalued:false}
+    + (if $req == 1 then {required:{roles:["user"]}} else {} end)')
   want=$(jq -c --argjson a "$attr" 'if any(.attributes[]; .name=="phoneNumber") then .attributes |= map(if .name=="phoneNumber" then $a else . end) else .attributes += [$a] end' <<<"$cur")
   if [ "$USERNAME_RULE" = 1 ]; then
     want=$(jq -c --arg p "$USERNAME_PATTERN" '.attributes |= map(if .name=="username" then .validations.pattern={pattern:$p,"error-message":"3 to 30 characters: letters, digits, dot or dash"} else . end)' <<<"$want")
   fi
   if [ "$(jq -S -c . <<<"$cur")" = "$(jq -S -c . <<<"$want")" ]; then say "user profile already as wanted"
   else say "user profile: phoneNumber attribute set$([ "$USERNAME_RULE" = 1 ] && echo ', username pattern set')"; WJ "$want" update users/profile -r "$REALM"; fi
-  realm_set '{"editUsernameAllowed":true}'
-  ensure_ra VERIFY_PROFILE "Verify Profile"
+  if [ "$PHONE_REQUIRED" = 1 ]; then
+    realm_set '{"editUsernameAllowed":true}'
+    ensure_ra VERIFY_PROFILE "Verify Profile"
+  else say "PHONE_REQUIRED=0: nobody is asked for a phone or a username yet; editUsernameAllowed and VERIFY_PROFILE untouched"; fi
 }
 
 step_webauthn() {
@@ -212,34 +230,80 @@ step_webauthn() {
   # the passwordless "Enable Passkeys" switch is deliberately left alone: the password stays, the passkey is the 2nd factor
 }
 
-forms_subflow() { # alias of the top-level subflow of $FLOW_BROWSER that holds the username-password form
+# client_set_theme <clientId> <theme or empty>: the client's login_theme attribute ("" = the realm's theme). The whole
+# attributes map is sent back, so no other client attribute can be lost whatever kcadm's merge does.
+client_set_theme() {
+  local c=$1 want=$2 cid cur
+  cid=$(client_id "$c"); [ -n "$cid" ] || die "client $c not found"
+  cur=$(K get "clients/$cid" -r "$REALM")
+  if [ "$(jq -r '.attributes.login_theme // ""' <<<"$cur")" = "$want" ]; then say "client $c login theme already '${want:-realm default}'"; return 0; fi
+  say "client $c login theme: '$(jq -r '.attributes.login_theme // ""' <<<"$cur")' -> '${want}'"
+  WJ "$(jq -c --arg t "$want" '{attributes:(.attributes + {login_theme:$t})}' <<<"$cur")" update "clients/$cid" -r "$REALM"
+}
+step_theme() {
+  say "PID-2h login theme '$LOGIN_THEME': a new password always signs out the other devices (PID-D15); 'Username or phone number'"
+  K get serverinfo | jq -e --arg t "$LOGIN_THEME" 'any(.themes.login[]; .name==$t)' >/dev/null \
+    || die "this Keycloak has no login theme '$LOGIN_THEME': it needs the gaiada-keycloak image (keycloak/, PID-2h)"
+  case "$BIND" in
+    realm) realm_set "{\"loginTheme\":\"$LOGIN_THEME\"}" ;;
+    client:*) client_set_theme "${BIND#client:}" "$LOGIN_THEME" ;;
+    none) say "BIND=none: login theme not selected" ;;
+  esac
+}
+
+forms_subflow() { # alias of the top-level subflow of $FLOW_BROWSER that holds a password form (stock or PID-2h)
   local s
   for s in $(execs "$FLOW_BROWSER" | jq -r '.[]|select(.level==0 and .authenticationFlow==true)|.displayName|@base64'); do
     s=$(base64 -d <<<"$s")
-    execs "$s" | jq -e 'any(.[]; .level==0 and .providerId=="auth-username-password-form")' >/dev/null && { echo "$s"; return 0; }
+    execs "$s" | jq -e --argjson f "$FORMS" 'any(.[]; .level==0 and (.providerId as $p | $f | index($p)))' >/dev/null && { echo "$s"; return 0; }
   done
   return 1
 }
+# forms_rebuild <subflow>: its top level becomes exactly [$LOGIN_FORM REQUIRED, WebAuthn REQUIRED]. Each execution's
+# config goes first (the amr references; exec_config re-creates them on the new executions).
+forms_rebuild() {
+  local fm=$1 id cid
+  for id in $(execs "$fm" | jq -r '.[]|select(.level==0)|.id'); do
+    cid=$(execs "$fm" | jq -r --arg id "$id" 'first(.[]|select(.id==$id))|.authenticationConfig // empty')
+    [ -n "$cid" ] && { K delete "authentication/config/$cid" -r "$REALM" || die "delete config $cid"; }
+    K delete "authentication/executions/$id" -r "$REALM" || die "delete execution $id"
+  done
+  add_exec "$fm" "$LOGIN_FORM" REQUIRED >/dev/null || die "add $LOGIN_FORM"
+  add_exec "$fm" webauthn-authenticator REQUIRED >/dev/null || die "add webauthn-authenticator"
+}
 step_browser() {
-  say "PID-2c browser flow $FLOW_BROWSER: copy of 'browser'; forms = Username Password Form REQUIRED -> WebAuthn REQUIRED"
-  local fm ex
+  say "PID-2c/2h browser flow $FLOW_BROWSER: copy of 'browser'; forms = $LOGIN_FORM REQUIRED -> WebAuthn REQUIRED"
+  local fm ex now
+  K get authentication/authenticator-providers -r "$REALM" | jq -e --arg p "$LOGIN_FORM" 'any(.[]; .id==$p)' >/dev/null \
+    || die "this Keycloak has no '$LOGIN_FORM' authenticator: the phone form needs the gaiada-keycloak image (keycloak/, PID-2h). On the stock image use LOGIN_FORM=auth-username-password-form"
   if [ -z "$(flow_json "$FLOW_BROWSER")" ]; then
-    if [ "$DRY" = 1 ]; then echo "   DRY-RUN would copy 'browser' to $FLOW_BROWSER, delete the conditional 2FA/OTP subflow in its forms, add webauthn-authenticator REQUIRED, set amr refs pwd/hwk"
+    if [ "$DRY" = 1 ]; then echo "   DRY-RUN would copy 'browser' to $FLOW_BROWSER, make its forms [$LOGIN_FORM REQUIRED, webauthn-authenticator REQUIRED] (the conditional 2FA/OTP subflow goes), set amr refs pwd/hwk"
     else
       K create authentication/flows/browser/copy -r "$REALM" -s newName="$FLOW_BROWSER" >/dev/null || die "copy of browser failed"
       fm=$(forms_subflow) || die "no forms subflow in the copy"
-      for id in $(execs "$fm" | jq -r '.[]|select(.level==0 and .authenticationFlow==true)|.id'); do K delete "authentication/executions/$id" -r "$REALM" || die "delete subflow $id"; done
-      add_exec "$fm" webauthn-authenticator REQUIRED >/dev/null || die "add webauthn-authenticator"
+      forms_rebuild "$fm"
       say "created $FLOW_BROWSER"
+    fi
+  else
+    fm=$(forms_subflow) || die "$FLOW_BROWSER has no forms subflow"
+    now=$(execs "$fm" | jq -r 'first(.[]|select(.level==0))|.providerId // empty')
+    if [ "$now" != "$LOGIN_FORM" ]; then
+      if [ "$DRY" = 1 ]; then echo "   DRY-RUN would swap the password form in $fm: $now -> $LOGIN_FORM (WebAuthn and the amr references re-made)"
+      else say "swap the password form in $fm: $now -> $LOGIN_FORM"; forms_rebuild "$fm"; fi
     fi
   fi
   if [ "$DRY" = 0 ] || [ -n "$(flow_json "$FLOW_BROWSER")" ]; then
     fm=$(forms_subflow) || die "$FLOW_BROWSER has no forms subflow"
     ex=$(execs "$fm")
-    [ "$(jq -c '[.[]|select(.level==0)|[.providerId,.requirement]]' <<<"$ex")" = '[["auth-username-password-form","REQUIRED"],["webauthn-authenticator","REQUIRED"]]' ] \
-      || die "$FLOW_BROWSER/$fm is not [password REQUIRED, webauthn REQUIRED]: $(jq -c '[.[]|[.level,.providerId // .displayName,.requirement]]' <<<"$ex")"
-    exec_config "$(jq -c 'first(.[]|select(.providerId=="auth-username-password-form"))' <<<"$ex")" pid-amr-pwd "$(ref_cfg pwd "$AMR_PWD_MAX_AGE")"
-    exec_config "$(jq -c 'first(.[]|select(.providerId=="webauthn-authenticator"))' <<<"$ex")" pid-amr-hwk "$(ref_cfg hwk "$AMR_HWK_MAX_AGE")"
+    if [ "$DRY" = 1 ] && [ "$(jq -r 'first(.[]|select(.level==0))|.providerId' <<<"$ex")" != "$LOGIN_FORM" ]; then
+      say "DRY-RUN: amr references are checked after the swap"
+    else
+      [ "$(jq -c '[.[]|select(.level==0)|[.providerId,.requirement]]' <<<"$ex")" = "[[\"$LOGIN_FORM\",\"REQUIRED\"],[\"webauthn-authenticator\",\"REQUIRED\"]]" ] \
+        || die "$FLOW_BROWSER/$fm is not [$LOGIN_FORM REQUIRED, webauthn REQUIRED]: $(jq -c '[.[]|[.level,.providerId // .displayName,.requirement]]' <<<"$ex")"
+      ordered "$fm" || die "$FLOW_BROWSER/$fm has executions with the same priority (no guaranteed order): $(jq -c '[.[]|select(.level==0)|[.providerId,.priority]]' <<<"$ex"). Revert from the backup, then apply again."
+      exec_config "$(jq -c --arg p "$LOGIN_FORM" 'first(.[]|select(.providerId==$p))' <<<"$ex")" pid-amr-pwd "$(ref_cfg pwd "$AMR_PWD_MAX_AGE")"
+      exec_config "$(jq -c 'first(.[]|select(.providerId=="webauthn-authenticator"))' <<<"$ex")" pid-amr-hwk "$(ref_cfg hwk "$AMR_HWK_MAX_AGE")"
+    fi
   fi
   ensure_ra webauthn-register "Webauthn Register"
   case "$BIND" in
@@ -264,10 +328,10 @@ step_reset() {
     else
       WJ "{\"alias\":\"$FLOW_RESET\",\"description\":\"PID-2d: forgot password proved with the passkey; no passkey, no reset\",\"providerId\":\"basic-flow\",\"topLevel\":true,\"builtIn\":false}" create authentication/flows -r "$REALM"
       add_exec "$FLOW_RESET" reset-credentials-choose-user REQUIRED >/dev/null || die "choose user"
-      K create "authentication/flows/$(uri "$FLOW_RESET")/executions/flow" -r "$REALM" -b "{\"alias\":\"$FLOW_RESET_PROOF\",\"type\":\"basic-flow\",\"description\":\"the passkey, else deny\"}" >/dev/null || die "proof subflow"
-      local sid; sid=$(execs "$FLOW_RESET" | jq -r --arg a "$FLOW_RESET_PROOF" 'first(.[]|select(.displayName==$a))|.id')
-      K update "authentication/flows/$(uri "$FLOW_RESET")/executions" -r "$REALM" --no-merge -b "{\"id\":\"$sid\",\"requirement\":\"REQUIRED\"}" >/dev/null || die "proof subflow requirement"
-      to_last "$FLOW_RESET" "$sid" || die "proof subflow order"
+      local sid prio; prio=$(next_prio "$FLOW_RESET")
+      K create "authentication/flows/$(uri "$FLOW_RESET")/executions/flow" -r "$REALM" -b "{\"alias\":\"$FLOW_RESET_PROOF\",\"type\":\"basic-flow\",\"description\":\"the passkey, else deny\",\"priority\":$prio}" >/dev/null || die "proof subflow"
+      sid=$(execs "$FLOW_RESET" | jq -r --arg a "$FLOW_RESET_PROOF" 'first(.[]|select(.displayName==$a))|.id')
+      K update "authentication/flows/$(uri "$FLOW_RESET")/executions" -r "$REALM" --no-merge -b "{\"id\":\"$sid\",\"requirement\":\"REQUIRED\",\"priority\":$prio}" >/dev/null || die "proof subflow requirement"
       add_exec "$FLOW_RESET_PROOF" webauthn-authenticator ALTERNATIVE >/dev/null || die "webauthn in proof"
       add_exec "$FLOW_RESET_PROOF" deny-access-authenticator ALTERNATIVE >/dev/null || die "deny in proof"
       add_exec "$FLOW_RESET" reset-password REQUIRED >/dev/null || die "reset password"
@@ -278,13 +342,18 @@ step_reset() {
     ex=$(execs "$FLOW_RESET")
     [ "$(jq -c '[.[]|[.level,(.providerId // .displayName),.requirement]]' <<<"$ex")" = "$want" ] \
       || die "$FLOW_RESET is not the expected shape: $(jq -c '[.[]|[.level,(.providerId // .displayName),.requirement]]' <<<"$ex")"
+    ordered "$FLOW_RESET" && ordered "$FLOW_RESET_PROOF" \
+      || die "$FLOW_RESET has executions with the same priority (no guaranteed order): $(jq -c '[.[]|[.level,(.providerId // .displayName),.priority]]' <<<"$ex"). Revert from the backup, then apply again."
     exec_config "$(jq -c 'first(.[]|select(.providerId=="webauthn-authenticator"))' <<<"$ex")" pid-amr-reset-hwk "$(ref_cfg hwk "$AMR_HWK_MAX_AGE")"
     exec_config "$(jq -c 'first(.[]|select(.providerId=="deny-access-authenticator"))' <<<"$ex")" pid-reset-deny "$(jq -nc --arg m "$DENY_MSG" '{denyErrorMessage:$m}')"
   fi
   if [ "$BIND" = realm ]; then
     realm_set "{\"resetCredentialsFlow\":\"$FLOW_RESET\"}"
-    # "Forgot password?" comes back ONLY with the passkey flow bound (plan §5.6)
+    # "Forgot password?" comes back ONLY with the passkey flow bound (plan §5.6), and only with the theme that makes a
+    # reset sign out the other devices (PID-D15: until it ships, the reset stays off for everyone)
     [ "$DRY" = 1 ] || [ "$(realm_json | jq -r .resetCredentialsFlow)" = "$FLOW_RESET" ] || die "reset flow not bound; leaving resetPasswordAllowed alone"
+    [ "$DRY" = 1 ] || [ "$(realm_json | jq -r '.loginTheme // ""')" = "$LOGIN_THEME" ] \
+      || die "the realm's login theme is not '$LOGIN_THEME' (run STEPS=theme first); leaving resetPasswordAllowed off (PID-D15)"
     realm_set '{"resetPasswordAllowed":true}'
   else say "BIND=$BIND: $FLOW_RESET not bound, resetPasswordAllowed untouched"; fi
 }
@@ -328,6 +397,8 @@ status() {
   echo "phoneNumber attribute: $(K get users/profile -r "$REALM" | jq -c 'first(.attributes[]|select(.name=="phoneNumber")) // "absent"')"
   echo "localization en.rememberMe: $(K get localization/en -r "$REALM" | jq -r '.rememberMe // "(default)"')"
   local c cid; for c in $AMR_CLIENTS; do cid=$(client_id "$c"); [ -n "$cid" ] && echo "amr mapper on $c: $(K get "clients/$cid/protocol-mappers/models" -r "$REALM" | jq -r 'any(.[]; .protocolMapper=="oidc-amr-mapper")')"; done
+  echo "clients with a browser override or a login theme: $(K get clients -r "$REALM" | jq -r '[.[]|select(.authenticationFlowBindingOverrides.browser or ((.attributes.login_theme // "") != ""))|"\(.clientId)(browser=\(.authenticationFlowBindingOverrides.browser // "-") theme=\(.attributes.login_theme // "-"))"]|join(" ") | if .=="" then "none" else . end')"
+  echo "PID-2h on this server: form $(K get authentication/authenticator-providers -r "$REALM" | jq -r 'any(.[]; .id=="gaiada-phone-username-password-form")'), theme $(K get serverinfo | jq -r --arg t "$LOGIN_THEME" 'any(.themes.login[]; .name==$t)')"
 }
 
 revert() {
@@ -335,14 +406,24 @@ revert() {
   [ -n "$d" ] && [ -f "$d/realm.json" ] || die "revert needs a backup dir made by apply (holding realm.json)"
   say "revert from $d"
   # 1. realm fields (flow bindings included) back to the backup's values
-  realm_set "$(jq -c --argjson k "$REALM_KEYS" '. as $r | reduce $k[] as $x ({}; if $r|has($x) then .[$x]=$r[$x] else . end)' "$d/realm.json")"
+  #    A realm that never chose a login theme has no loginTheme key; "" is how the admin API puts it back to the default.
+  realm_set "$(jq -c --argjson k "$REALM_KEYS" '. as $r | reduce $k[] as $x ({}; if $r|has($x) then .[$x]=$r[$x] else . end)
+    | if has("loginTheme") then . else .loginTheme="" end' "$d/realm.json")"
   # 2. client overrides pointing at our flow, and amr mappers the backup did not have
   local fid c cid bo
   fid=$(flow_json "$FLOW_BROWSER" | jq -r '.id // empty')
   for cid in $(K get clients -r "$REALM" | jq -r '.[].id'); do
     if [ -n "$fid" ] && [ "$(K get "clients/$cid" -r "$REALM" | jq -r '.authenticationFlowBindingOverrides.browser // empty')" = "$fid" ]; then
-      bo=$(jq -c --arg id "$cid" 'first(.[]|select(.id==$id))|.authenticationFlowBindingOverrides // {}' "$d/clients.json")
+      # Keycloak removes an override only when sent an empty value for its key ({} changes nothing)
+      bo=$(jq -c --arg id "$cid" 'first(.[]|select(.id==$id))|(.authenticationFlowBindingOverrides // {})|{browser:(.browser // "")}' "$d/clients.json")
       say "client $cid: browser override back to $bo"; WJ "{\"authenticationFlowBindingOverrides\":$bo}" update "clients/$cid" -r "$REALM"
+    fi
+    # the client's login theme, when it is ours and the backup had another (a backup older than PID-2h has no
+    # login_theme key: there it means "none")
+    c=$(K get "clients/$cid" -r "$REALM")
+    if [ "$(jq -r '.attributes.login_theme // ""' <<<"$c")" = "$LOGIN_THEME" ]; then
+      bo=$(jq -r --arg id "$cid" 'first(.[]|select(.id==$id))|.login_theme // ""' "$d/clients.json")
+      [ "$bo" != "$LOGIN_THEME" ] && client_set_theme "$(jq -r .clientId <<<"$c")" "$bo"
     fi
     for m in $(K get "clients/$cid/protocol-mappers/models" -r "$REALM" | jq -r '.[]|select(.protocolMapper=="oidc-amr-mapper")|.id'); do
       jq -e --arg m "$m" 'any(.[].protocolMappers[]; .id==$m)' "$d/clients.json" >/dev/null && continue
@@ -392,9 +473,11 @@ case "$MODE" in
   apply)
     [ -n "$RP_ID" ] || die "RP_ID is required (live: erp.gaiada.com). It can never change once anyone enrols."
     case "$BIND" in realm|none|client:?*) ;; *) die "BIND must be realm, client:<clientId> or none (live starts with client:<test client>, plan §6 risk 1)" ;; esac
+    jq -e --arg p "$LOGIN_FORM" 'index($p)' <<<"$FORMS" >/dev/null || die "LOGIN_FORM must be one of $FORMS"
+    case "$PHONE_REQUIRED" in 0|1) ;; *) die "PHONE_REQUIRED must be 0 or 1" ;; esac
     [ "$DRY" = 1 ] && echo "== DRY RUN: nothing is written"
-    echo "== apply to realm $REALM via $KC_CONTAINER ($KC_SERVER), RP_ID=$RP_ID, BIND=$BIND, steps: $STEPS"
+    echo "== apply to realm $REALM via $KC_CONTAINER ($KC_SERVER), RP_ID=$RP_ID, BIND=$BIND, LOGIN_FORM=$LOGIN_FORM, LOGIN_THEME=$LOGIN_THEME, PHONE_REQUIRED=$PHONE_REQUIRED, steps: $STEPS"
     backup
-    for s in profile webauthn browser reset rememberme amr bruteforce; do has_step "$s" && "step_$s"; done
+    for s in profile webauthn theme browser reset rememberme amr bruteforce; do has_step "$s" && "step_$s"; done
     echo "== done$([ "$DRY" = 1 ] && echo ' (dry run)')" ;;
 esac
