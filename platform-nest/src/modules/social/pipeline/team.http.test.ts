@@ -823,7 +823,13 @@ describe.skipIf(!TEST_URL)("SCP-5d · GET team (BFF §63.19)", () => {
   // ── 6. the cost ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
   it("costs the same statements for 5 posts and for 35: nothing is read per post or per person", async () => {
     config.socialSimulationEnabled = false;
-    const run = () => statementsOf(async () => { expect((await team("platformAdmin")).statusCode).toBe(200); });
+    // Each measured read follows an unmeasured one. The request hook's security caches (core/security, `TtlLoader`, 10 s) re-read on
+    // the first request after they go stale, so a measured read must never be that request: otherwise the count depends on how long
+    // the test before it, or the seeding between the two reads, took.
+    const run = async () => {
+      expect((await team("platformAdmin")).statusCode).toBe(200);
+      return statementsOf(async () => { expect((await team("platformAdmin")).statusCode).toBe(200); });
+    };
     const few = await run();
     for (let i = 0; i < 30; i++) await seed(A, E.calm, `Mock bulk ${i}`, ["proofread", "hod", "design", "client", "drafting"][i % 5]);
     const many = await run();
