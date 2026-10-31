@@ -1,0 +1,23 @@
+[Unit]
+# M5-P5b2: pulls AI-crawler access-log lines from every site we host, over SSH, and ingests them (runbook:
+# ../runbooks/ai-crawler-log.md). STATUS: PROTOTYPED. Not installed. Run by ai-crawler-pull.timer.
+#
+# Runs on the ERP host as root (owner decision 2026-10-31): the job needs the docker socket (docker exec into the
+# platform container) and reads its own key, /etc/gaiada/ai-crawler/id_ed25519, which is root-only. The key opens
+# READ access to the listed log files on the web hosts and nothing else; it is not an ERP credential.
+Description=Gaiada AI-crawler log pull (ssh to the web hosts, ingest into the ERP)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+# Installed copy of infra/scripts/ai-crawler-pull.sh (see the runbook's install step).
+ExecStart=/usr/local/sbin/ai-crawler-pull.sh
+# One run is bounded; a hung ssh must not pile up behind the timer.
+TimeoutStartSec=20min
+Nice=10
+# The script reads and writes only these. (Docker's socket is reached through the docker CLI.)
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
