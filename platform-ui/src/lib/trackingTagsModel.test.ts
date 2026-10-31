@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  PARTNER_ID_RE, TAGS_HELP, TrackingTagsShapeError, checkPartnerId, parsePutResponse, parseTrackingTags, savedSentence,
-  trackingReadSentence, trackingRefusalSentence,
+  ADS_HELP, PARTNER_ID_RE, TAGS_HELP, TrackingTagsShapeError, adsSavedSentence, checkGoogleAds, checkPartnerId, parseAdsPutResponse,
+  parsePutResponse, parseTrackingTags, savedSentence, splitAdsIds, trackingReadSentence, trackingRefusalSentence,
 } from "./trackingTagsModel";
 
 // M5-P4 (WSK-D92): the Tracking tags contract, strictly parsed, and every refusal as a sentence.
@@ -26,20 +26,33 @@ describe("checkPartnerId", () => {
   });
 });
 
+const NO_ADS = { ids: [], conversions: {} };
+
 describe("parseTrackingTags", () => {
   it("reads each state", () => {
-    expect(parseTrackingTags({ linkedin: { partnerId: "42" }, target, canManage: true, state: "ok" })).toEqual({ linkedin: { partnerId: "42" }, target, canManage: true, state: "ok", reason: null });
-    expect(parseTrackingTags({ linkedin: { partnerId: null }, target: null, canManage: false, state: "no_build_target", reason: "no repo" }).target).toBeNull();
-    expect(parseTrackingTags({ linkedin: { partnerId: null }, target, canManage: true, state: "github_unavailable", reason: "GitHub is down" }).reason).toBe("GitHub is down");
+    expect(parseTrackingTags({ linkedin: { partnerId: "42" }, googleAds: NO_ADS, target, canManage: true, state: "ok" })).toEqual({ linkedin: { partnerId: "42" }, googleAds: NO_ADS, target, canManage: true, state: "ok", reason: null });
+    expect(parseTrackingTags({ linkedin: { partnerId: null }, googleAds: NO_ADS, target: null, canManage: false, state: "no_build_target", reason: "no repo" }).target).toBeNull();
+    expect(parseTrackingTags({ linkedin: { partnerId: null }, googleAds: NO_ADS, target, canManage: true, state: "github_unavailable", reason: "GitHub is down" }).reason).toBe("GitHub is down");
+  });
+  it("reads the Google Ads ids and conversions", () => {
+    const googleAds = { ids: ["AW-123456789", "AW-987654321"], conversions: { lead: "AW-123456789/abc", email: "AW-987654321/e_1" } };
+    expect(parseTrackingTags({ linkedin: { partnerId: null }, googleAds, target, canManage: true, state: "ok" }).googleAds).toEqual(googleAds);
   });
   it("is strict: off-contract is a defect, never read as 'not set'", () => {
+    const base = { linkedin: { partnerId: null }, googleAds: NO_ADS, target, canManage: true, state: "ok" };
     for (const bad of [
       null, "x", {},
-      { linkedin: { partnerId: 5 }, target, canManage: true, state: "ok" },
-      { linkedin: { partnerId: null }, target, canManage: "yes", state: "ok" },
-      { linkedin: { partnerId: null }, target, canManage: true, state: "weird" },
-      { linkedin: { partnerId: null }, target, canManage: true, state: "github_unavailable" },
-      { linkedin: { partnerId: null }, target: { repo: 1 }, canManage: true, state: "ok" },
+      { ...base, linkedin: { partnerId: 5 } },
+      { ...base, canManage: "yes" },
+      { ...base, state: "weird" },
+      { ...base, state: "github_unavailable" },
+      { ...base, target: { repo: 1 } },
+      { ...base, googleAds: undefined },
+      { ...base, googleAds: { ids: "AW-123456789", conversions: {} } },
+      { ...base, googleAds: { ids: ["bad"], conversions: {} } },
+      { ...base, googleAds: { ids: [], conversions: null } },
+      { ...base, googleAds: { ids: [], conversions: { fax: "AW-123456789/a" } } },
+      { ...base, googleAds: { ids: [], conversions: { lead: "nope" } } },
     ]) expect(() => parseTrackingTags(bad), JSON.stringify(bad)).toThrow(TrackingTagsShapeError);
   });
 });
@@ -102,5 +115,61 @@ describe("sentences", () => {
       + "The tag loads only after a visitor accepts marketing cookies, and only once the site's tracking is live. "
       + "A change takes effect on the next rebuild of the site.",
     );
+  });
+});
+
+const draft = (over: { ids?: string; lead?: string; whatsapp?: string; phone?: string; email?: string } = {}) => ({
+  ids: over.ids ?? "", conversions: { lead: over.lead ?? "", whatsapp: over.whatsapp ?? "", phone: over.phone ?? "", email: over.email ?? "" },
+});
+
+describe("Google Ads (M5-P4g)", () => {
+  it("splitAdsIds takes commas, spaces and new lines", () => {
+    expect(splitAdsIds(" AW-111111,AW-222222\nAW-333333  AW-444444 ,, ")).toEqual(["AW-111111", "AW-222222", "AW-333333", "AW-444444"]);
+    expect(splitAdsIds("  ")).toEqual([]);
+  });
+
+  it("checkGoogleAds accepts the server's shapes and returns trimmed values", () => {
+    expect(checkGoogleAds(draft({ ids: " AW-123456789,\nAW-987654321 ", lead: " AW-123456789/abc ", email: "AW-987654321/x_y-Z" }))).toEqual({
+      ok: true, ids: ["AW-123456789", "AW-987654321"], conversions: { lead: "AW-123456789/abc", email: "AW-987654321/x_y-Z" },
+    });
+    expect(checkGoogleAds(draft())).toEqual({ ok: true, ids: [], conversions: {} });
+    expect(checkGoogleAds(draft({ ids: "AW-111111,AW-222222,AW-333333,AW-444444,AW-555555" })).ok).toBe(true);
+  });
+
+  it("checkGoogleAds refuses with a plain message, mirroring the server", () => {
+    const msg = (d: ReturnType<typeof draft>) => { const r = checkGoogleAds(d); return r.ok ? "ok" : r.message; };
+    for (const ids of ["aw-123456789", "AW-12345", "AW-1234567890123456", "123456789", "AW-12a456"]) expect(msg(draft({ ids })), ids).toMatch(/is not a Google Ads tag id/);
+    expect(msg(draft({ ids: "AW-123456789 AW-123456789" }))).toMatch(/listed twice/);
+    expect(msg(draft({ ids: "AW-111111,AW-222222,AW-333333,AW-444444,AW-555555,AW-666666" }))).toMatch(/at most 5/);
+    expect(msg(draft({ ids: "AW-123456789", lead: "AW-123456789" }))).toMatch(/Form lead.*is not a conversion/);
+    expect(msg(draft({ ids: "AW-123456789", phone: "AW-123456789/a b" }))).toMatch(/Phone click/);
+    expect(msg(draft({ ids: "AW-123456789", whatsapp: "AW-123456789/" + "a".repeat(65) }))).toMatch(/WhatsApp click/);
+    expect(msg(draft({ ids: "AW-123456789", email: "AW-999999999/x" }))).toMatch(/Email click.*not one of the tag ids/);
+    expect(msg(draft({ lead: "AW-123456789/x" }))).toMatch(/not one of the tag ids/); // a conversion without any id
+    for (const bad of [draft({ ids: "x" }), draft({ ids: "AW-123456789", lead: "z" })]) expect(msg(bad)).toMatch(/Nothing was saved/);
+  });
+
+  it("parseAdsPutResponse is strict", () => {
+    const ads = { ids: ["AW-123456789"], conversions: { lead: "AW-123456789/abc" } };
+    const tg = { repo: target.repo, variables: ["PUBLIC_GOOGLE_ADS_IDS", "PUBLIC_GOOGLE_ADS_CONVERSIONS"] };
+    expect(parseAdsPutResponse({ googleAds: ads, target: tg, result: "set", takesEffect: "next_rebuild" })).toEqual({ googleAds: ads, result: "set", repo: target.repo });
+    expect(() => parseAdsPutResponse({ googleAds: ads, target: tg, result: "ok" })).toThrow(TrackingTagsShapeError);
+    expect(() => parseAdsPutResponse({ googleAds: ads, target: null, result: "set" })).toThrow(TrackingTagsShapeError);
+    expect(() => parseAdsPutResponse({ target: tg, result: "set" })).toThrow(TrackingTagsShapeError);
+  });
+
+  it("the help text and the save sentences say next rebuild and never 'done'", () => {
+    expect(ADS_HELP).toBe("Takes effect on the site's next rebuild. Google Ads loads only for visitors who accept marketing cookies.");
+    const ads = { ids: ["AW-123456789"], conversions: { lead: "AW-123456789/abc" } };
+    expect(adsSavedSentence("set", ads, target.repo)).toMatch(/1 tag id, 1 conversion.*next rebuild/);
+    expect(adsSavedSentence("cleared", { ids: [], conversions: {} }, target.repo)).toMatch(/removed.*next rebuild/);
+    expect(adsSavedSentence("unchanged", ads, target.repo)).toMatch(/Nothing changed/);
+    for (const r of ["set", "cleared", "unchanged"] as const) expect(adsSavedSentence(r, ads, target.repo)).not.toMatch(/\bdone\b/i);
+  });
+
+  it("each Google Ads refusal token is a sentence that says nothing was saved", () => {
+    for (const reason of ["ads_body_invalid", "ads_id_invalid", "ads_conversion_invalid"]) {
+      expect(trackingRefusalSentence(400, reason)).toMatch(/Google Ads.*Nothing was saved/);
+    }
   });
 });

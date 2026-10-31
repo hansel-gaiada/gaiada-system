@@ -23,7 +23,7 @@ const sitesMock = vi.mocked(listSites);
 const readMock = vi.mocked(readSiteAnalytics);
 const statusMock = vi.mocked(readStatus);
 const tagsMock = vi.mocked(readTrackingTags);
-const tagsOk = (partnerId: string | null, canManage = true) => ({ state: "ok" as const, data: { linkedin: { partnerId }, target: { repo: "gaiadabali/gaiada-web-revamp", variable: "PUBLIC_LINKEDIN_PARTNER_ID" }, canManage, state: "ok" as const, reason: null } });
+const tagsOk = (partnerId: string | null, canManage = true) => ({ state: "ok" as const, data: { linkedin: { partnerId }, googleAds: { ids: [], conversions: {} }, target: { repo: "gaiadabali/gaiada-web-revamp", variable: "PUBLIC_LINKEDIN_PARTNER_ID" }, canManage, state: "ok" as const, reason: null } });
 const meOf = (role: string) => ({ userId: "u", name: "U", email: "u@x.com", title: null, assurance: "high", companies: [], roles: [{ role, scopeType: "company", scopeId: "co-1" }] });
 const botsOk = (total: number) => ({ state: "ok" as const, data: { state: "ok" as const, message: null, configured: true, enabled: true, lastOkIngestAt: null, lastRunAt: null, lastOutcome: null, bots: { from: "2026-09-14", to: "2026-10-13", days: 30, total, byReason: { ua: total - 2, asn: 2 } } } });
 const ctxMock = vi.mocked(requireWebsiteCtx);

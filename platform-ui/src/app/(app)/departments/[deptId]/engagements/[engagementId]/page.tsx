@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -5,6 +6,10 @@ import { getActiveTenant } from "@/lib/tenant";
 import { getDepartment } from "@/lib/departments";
 import { can } from "@/lib/rbac";
 import { Card, StatusBadge, KpiTile } from "@/components/ui";
+import { TrackingTagsCard } from "@/components/webdesk/analytics/TrackingTagsCard";
+import { listSites } from "@/lib/webdeskContent";
+import { readTrackingTags } from "@/lib/trackingTags";
+import { matchProperty } from "@/lib/websiteAnalyticsModel";
 import { ScopeEditor } from "@/components/search/ScopeEditor";
 import { ProviderModeStatement, SimulatedBadge } from "@/components/search/SimulatedBadge";
 import {
@@ -19,6 +24,39 @@ import {
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string; engagementId: string }>;
+
+const NOT_BUILT_BY_ERP =
+  "This client's website is not built by the ERP, so its Google Ads and LinkedIn tags are set on the website itself.";
+
+/**
+ * M5-P4g: the client's tracking tags (Google Ads and LinkedIn) for this engagement's search property. The card needs the WebDesk site whose
+ * environment domains match the property's domain: the SAME rule as Website -> Analytics (`matchProperty`: lower-case, no scheme, no path,
+ * `www.` ignored), over the sites `listSites` returns. Nothing here may break the page: a refused or failed site read is a sentence in the
+ * card's place, never a blank and never a thrown error; no matching site is a plain note.
+ */
+async function trackingTagsSection(
+  userId: string, tenant: string, property: SearchProperty, canEdit: boolean,
+): Promise<ReactNode> {
+  let sites: Awaited<ReturnType<typeof listSites>>;
+  try {
+    sites = await listSites(userId, tenant);
+  } catch {
+    sites = { kind: "unavailable", code: "network", reason: "The websites could not be read." };
+  }
+  if (sites.kind !== "ok") {
+    const text = sites.kind === "forbidden"
+      ? "You do not have access to this client's website, so its tracking tags are not shown here."
+      : "This client's website could not be looked up just now, so its tracking tags are not shown. Reload the page to try again.";
+    return <Card title="Tracking tags"><p className="wa-note" role="status" data-testid="engagement-tags-unavailable">{text}</p></Card>;
+  }
+  for (const t of sites.data.tenants) {
+    const site = t.sites.find((x) => matchProperty([{ id: property.id, domain: property.domain, umamiSiteId: null }], x.environments.map((e) => e.domain)));
+    if (!site) continue;
+    const read = await readTrackingTags(userId, tenant, property.id, t.slug, site.siteId);
+    return <TrackingTagsCard propertyId={property.id} webdeskTenant={t.slug} site={site.siteId} read={read} canEdit={canEdit} />;
+  }
+  return <Card title="Tracking tags"><p className="wa-note" data-testid="engagement-tags-not-built">{NOT_BUILT_BY_ERP}</p></Card>;
+}
 
 // Engagement detail — the drill-down from the engagements list (SM-11). This
 // page exists to answer one question a client-facing person will actually ask:
@@ -122,6 +160,13 @@ export default async function EngagementDetailPage({ params }: { params: Params 
           initialProjection={projection}
         />
       </Card>
+
+      {/* 3b. Tracking tags (M5-P4g): Google Ads and LinkedIn for this client's website, when the ERP builds it. */}
+      {property ? (
+        <div style={{ marginTop: 16 }}>
+          {await trackingTagsSection(userId, tenant, property, can(me, "search.tags.manage", tenant))}
+        </div>
+      ) : null}
 
       {/* 4. Stop-loss warning — only when the PERSISTED projection actually says so (the editor
           above shows its own live warning while unsaved edits are in progress). */}
