@@ -125,9 +125,12 @@ A note is free text, and free text can name a client the reader may not open. Th
 guards stand in front of it:
 
 1. **Link the record.** When a note is about one record, the person links it with the record picker. Linkable records
-   are the kinds `filterReadableHits` already checks: projects, tasks, clients, deliverables and files. Reports, people
-   and org stay withheld, as in DW-D26. A linked note is listed and fed **only to readers who pass that record's read
-   check**, run as the chatting person at the time of the turn.
+   are the kinds `filterReadableHits` already checks: clients, projects, both kinds of task, deliverables, meetings,
+   project documents and files. Reports, people and org stay withheld, as in DW-D26. A linked note is listed and fed
+   **only to readers who pass that record's read check**, run as the chatting person at the time of the turn.
+   - **The one exception is the author.** They always see their own note in their list, so they can still withdraw it
+     after losing access to the record.
+   - A link shows only the record's kind and id, never its title, so the author learns nothing new from it.
 2. **The name guard.** When a note is suggested and again when it is approved, the server matches the text against the
    company's client and project names (whole words, case-insensitive, names of 4 or more characters). If a name matches
    and the note is not linked to that record, the server refuses it: "This note names <record>; link it." If the text
@@ -154,7 +157,8 @@ does catch.
 
 ### 4.7 Data model
 
-One table, `assistant_dept_notes`, FORCE RLS under the `assistant` module (the 0079 loop's policy):
+One table, `assistant_dept_notes`, with FORCE RLS in the core shape of AIP-13b's `assistant_dept_preambles`: one
+`tenant_isolation` policy with no module term. As built in AIP-23b:
 
 | Column | Holds |
 |---|---|
@@ -220,7 +224,7 @@ They are on the board under AIP-P5. Seats follow the house rule. The build start
 | Ticket | What | Size | Seat |
 |---|---|---|---|
 | **AIP-23a** | This plan and the owner's rulings, on main | S | This session |
-| **AIP-23b** | The table, the erasure function, the Cerbos kind (six artifacts) and the routes (list, suggest, withdraw, decide, delete, pin) | M | Opus for the IAM part, Sonnet for the rest |
+| **AIP-23b** | The table, the Cerbos kind (six artifacts) and the routes (list, suggest, withdraw, decide, delete, pin). No erasure function: the stored names and `ON DELETE SET NULL` cover AIP-D23 (§4.4). PERMISSION-CONTRACT §59, BFF §67 | M | Opus |
 | **AIP-23c** | Notes in the prompt: which department, the record check, the name guard, the budget and the switch. Adversarial tests: another department, an unreadable linked record, an unlinked client name, a withdrawn note, a rejected note, an erased person, a client contact, a bot, and a note that says "ignore your instructions" | M | Sonnet, Opus review |
 | **AIP-23d** | The two screens and the notices; axe, light and dark, phone width | M | Sonnet |
 | **AIP-23e** | The live walk as the owner, a head, the GM, a member, another department's member and a client placeholder; test notes removed | S | This session |
