@@ -25,6 +25,8 @@ export interface SocialSettings {
   bufferWorkingDays: number;
   boostCandidateFactor: number;
   holidayCalendar: { known: boolean; name: string | null };
+  /** The company's onboarding template (BFF §63.29.2): a PM project template, or none chosen. */
+  onboardingTemplate: { id: string; name: string } | null;
   canPlan: boolean;
 }
 
@@ -148,6 +150,7 @@ export function asSocialSettings(raw: unknown): SocialSettings {
   return {
     bufferWorkingDays: buffer, boostCandidateFactor: factor,
     holidayCalendar: { known: cal.known === true, name: str(cal.name) },
+    onboardingTemplate: isObj(raw.onboardingTemplate) && typeof raw.onboardingTemplate.id === "string" ? { id: raw.onboardingTemplate.id, name: str(raw.onboardingTemplate.name) ?? "" } : null,
     canPlan: raw.canPlan === true,
   };
 }

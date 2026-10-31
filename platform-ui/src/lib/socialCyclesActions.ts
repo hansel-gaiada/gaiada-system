@@ -28,7 +28,7 @@ async function run<T>(fn: (c: { userId: string; tenant: string }) => Promise<T>)
 
 /** `PUT settings`: only the fields given are changed; the server recomputes every open cycle's ready-by in the same call. */
 export async function saveSocialSettings(
-  body: { bufferWorkingDays?: number; boostCandidateFactor?: number },
+  body: { bufferWorkingDays?: number; boostCandidateFactor?: number; onboardingTemplateId?: string | null },
 ): Promise<CyclesActionResult<{ settings: SocialSettings; cyclesRecomputed: number }>> {
   return run(async (c) => {
     const raw = await platformFetch<unknown>(`${base(c.tenant)}/settings`, c.userId, { method: "PUT", body: JSON.stringify(body) });

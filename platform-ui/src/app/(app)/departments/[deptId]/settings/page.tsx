@@ -12,6 +12,7 @@ import { getCycleTable, getSocialSettings } from "@/lib/socialCycles-data";
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { getReportSchedules } from "@/lib/socialReportSchedules-data";
 import { getRules } from "@/lib/socialRules-data";
+import { getProjectTemplates } from "@/lib/socialOnboardingTemplate-data";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { SocialSettingsForm } from "@/components/social/SocialSettingsForm";
@@ -69,6 +70,8 @@ export default async function SocialSettingsPage({ params, searchParams }: { par
   const schedules = settings.data.canPlan ? await getReportSchedules(userId, tenant) : null;
   // SCP-5 W5-C5 (BFF §63.30): the company's rules, read by the whole team (`social_post` · `read`) and edited by the four (`canEdit`). A refused or failed read draws "cannot tell", never the defaults.
   const rules = await getRules(userId, tenant);
+  // SCP-5 W5-C5 (BFF §63.29.1): the project templates the Onboarding picker offers (PM's own gate), read only for a person who may choose one.
+  const templates = settings.data.canPlan ? await getProjectTemplates(userId, tenant) : null;
   const clients = allocation.kind === "ok" ? allocation.data.filter((r) => r.status !== "closed").map((r) => ({ engagementId: r.engagementId, clientName: r.clientName })) : null;
 
   const prev = shiftMonth(month, -1);
@@ -124,7 +127,7 @@ export default async function SocialSettingsPage({ params, searchParams }: { par
         </section>
 
         {/* SCP-5 W5-C5 (BFF §63.30.5): the company's rules, one section each, in their own component. */}
-        <CompanyRules rules={rules} clients={clients} />
+        <CompanyRules rules={rules} clients={clients} onboarding={{ canEdit: settings.data.canPlan, chosen: settings.data.onboardingTemplate, templates }} />
 
         {/* SCP-5 W5-A6 (BFF §63.24.9): Report automation, in its own component. It draws nothing for a person the server does not let read schedules. */}
         <ReportAutomation

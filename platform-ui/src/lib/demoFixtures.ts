@@ -17,6 +17,7 @@ import { socialPortalPostsDemo } from "./demoSocialPortal";
 import { demoPortalSpendRoute } from "./demoSocialBoosts";
 import { demoAssetLibraryRead } from "./demoSocialPipelineRun";
 import { demoOnboardingPmRoute } from "./demoSocialOnboarding";
+import { demoOnboardingTemplateRoute } from "./demoSocialOnboardingTemplate";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { requestsDemo } from "./demoRequests";
 import { agencyLeadsDemo } from "./demoAgencyLeads";
@@ -2517,6 +2518,9 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // SCP-5h: PM's two routes client onboarding uses (a tick, the kickoff move), for onboarding's own tasks and applications (lib/demoSocialOnboarding.ts).
   const onboardingPm = demoOnboardingPmRoute(m, p, body, userId);
   if (onboardingPm) return onboardingPm;
+  // SCP-5 W5-C5: the company's onboarding template, a PM project template the rules page lists and edits (lib/demoSocialOnboardingTemplate.ts).
+  const onboardingTemplate = demoOnboardingTemplateRoute(m, p, url.searchParams, body, userId);
+  if (onboardingTemplate) return onboardingTemplate;
 
   // PM surface + task comments — stateful in-memory store (lib/demoPm.ts).
   const pm = pmDemo(method, p, url.searchParams, body);

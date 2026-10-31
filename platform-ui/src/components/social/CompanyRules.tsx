@@ -9,34 +9,40 @@ import { RulesReports } from "@/components/social/RulesReports";
 import { RulesCycle } from "@/components/social/RulesCycle";
 import { RulesAudit } from "@/components/social/RulesAudit";
 import { RulesSaved } from "@/components/social/RulesSaved";
+import { RulesOnboarding } from "@/components/social/RulesOnboarding";
+import type { ProjectTemplate } from "@/lib/socialOnboardingTemplate";
 import "@/components/social/cycles.css";
 import "@/components/social/rules.css";
 
-export function CompanyRules({ rules, clients }: {
+export function CompanyRules({ rules, clients, onboarding }: {
   /** `GET rules` as the page read it. */
   rules: ReadResult<RulesAnswer>;
   /** The open clients of the company, for the previews that name one; null when they could not be read. */
   clients: ClientChoice[] | null;
+  /** The onboarding template: not a rules section (PM keeps it), so it has its own reads. `canEdit` is the settings read's `canPlan`. */
+  onboarding: { canEdit: boolean; chosen: { id: string; name: string } | null; templates: ReadResult<ProjectTemplate[]> | null };
 }) {
-  if (rules.kind !== "ok") {
-    return (
-      <section aria-labelledby="rules-title" className="scp-slot" data-slot="company-rules">
-        <h3 className="scp-slot__title" id="rules-title">Company rules</h3>
-        <p className="scp-note" role="status" style={{ marginTop: 0 }}>
-          {rules.kind === "forbidden"
-            ? "The company's rules cannot be shown to you: reading them needs a Social Media read tier."
-            : `The company's rules cannot be shown right now (${rules.reason}). They are not lost, and they are not the defaults; try again in a moment.`}
-        </p>
-      </section>
-    );
-  }
-  const a = rules.data;
+  const a = rules.kind === "ok" ? rules.data : null;
   return (
     <div className="rules" data-slot="company-rules">
-      <RulesReports answer={a} clients={clients} />
-      <RulesCycle answer={a} clients={clients} />
-      <RulesAudit answer={a} clients={clients} />
-      <RulesSaved answer={a} />
+      {a ? (
+        <>
+          <RulesReports answer={a} clients={clients} />
+          <RulesCycle answer={a} clients={clients} />
+          <RulesAudit answer={a} clients={clients} />
+          <RulesSaved answer={a} />
+        </>
+      ) : (
+        <section aria-labelledby="rules-title" className="scp-slot" data-slot="company-rules-unavailable">
+          <h3 className="scp-slot__title" id="rules-title">Company rules</h3>
+          <p className="scp-note" role="status" style={{ marginTop: 0 }}>
+            {rules.kind === "forbidden"
+              ? "The company's rules cannot be shown to you: reading them needs a Social Media read tier."
+              : `The company's rules cannot be shown right now (${rules.kind === "unavailable" ? rules.reason : ""}). They are not lost, and they are not the defaults; try again in a moment.`}
+          </p>
+        </section>
+      )}
+      <RulesOnboarding canEdit={onboarding.canEdit} chosen={onboarding.chosen} templates={onboarding.templates} />
     </div>
   );
 }
