@@ -13534,7 +13534,7 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 4. the call to action's first line (`title_from_cta`);
 5. a generated `<Format> <d Mon>`, such as `Story 6 Nov` (`title_generated`). The word is `Feed`, `Carousel`, `Reel` or `Story`, and `Post` when the row has no format.
 - A line is cut at 80 characters.
-- A second, third and later generated title that is the same on the same client and date takes ` (2)`, ` (3)` in row order, so two stories of one day are two posts and a replay finds the same ids. The suffix is counted among the rows read, ticked or not.
+- A second, third and later title taken from the text on the design, from the call to action or from the generator that is the same (after `normalizeName`) on the same client and date takes ` (2)`, ` (3)` in row order, so two stories of one day that both say "Discover more" are two posts and a replay finds the same ids. The suffix is counted among the rows read, ticked or not. A title from the title column or the caption keeps 63.23.8's rule: the same title on the same date is one post (`same_title_in_cycle`).
 - `missing_title` is left for a row with no date to build the generated title from; that row is refused for its date first.
 
 **7. Formats.**
