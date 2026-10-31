@@ -1,8 +1,12 @@
-**DRAFT — not legal advice. For review by qualified counsel before use.**
+**APPROVED BY THE OWNER on 2026-10-31 (WSK-D93) in place of counsel's review. Not legal advice, and not reviewed by counsel.**
 
 # Website-Visitor and Website-Lead Addendum to the Legal Pack
 
 > ⚠️ **DRAFTS — NOT LEGAL ADVICE.** This document is a working draft to accelerate and reduce the cost of legal review. **A qualified data-protection lawyer in the applicable jurisdiction(s) must review, localize, and sign off before any visitor or lead data is collected on a live site.** Nothing here is a ruling. Facts not established by the sources are marked «ASSUMPTION: …» for counsel or the owner to confirm.
+
+## Changes in v1.0
+
+The owner approved this addendum on 2026-10-31 in place of counsel's review (WSK-D93). The controller is Gaia Digital Agency (Jl. Raya Mas, Ubud, Gianyar, Bali, Indonesia); the privacy contact is info@gaiada.com; every retention period in §5 is approved as written; the other open items in §11 stand at their proposed defaults. The final visitor notice is the site's `src/config/privacy.ts` (proof line), finalized from these facts; §10 below is the draft it came from.
 
 ## Changes in v0.3
 
@@ -19,12 +23,12 @@ v0.2 works in the phase 5 design (`docs/plans/2026-10-12-m5-phase5-design.md`, �
 
 | §7 item | Change | Where in this file |
 |---|---|---|
-| 1 | Placement of F7–F9 fixed: a 72-hour buffer and 30-day recordings on `sumopod`; profiles in the ERP on `gda-aicenter`. R-V18 narrows. | F7, F8, F9 (§2.2); §5; R-V18 (§6); RoPA W5–W7 (§8.1) |
+| 1 | ~~Placement of F7–F9 fixed: a 72-hour buffer and 30-day recordings on `sumopod`; profiles in the ERP on `gda-aicenter`. R-V18 narrows.~~ | **RESOLVED by WSK-D93 (owner 2026-10-31): Gaia Digital Agency, Jl. Raya Mas, Ubud, Gianyar, Bali, Indonesia.** |
 | 2 | F6, LIA A and LIA C: Umami receives a daily-keyed pseudonym, not the IP. R-V6 improves. | F6 (§2.2); §3.2; §3.4; R-V6 (§6) |
 | 3 | F7: the network name is shown as a network; company identification only after owner decision O-12 and counsel's answer to item 5. | F7 (§2.2); open item 5 (§11) |
 | 4 | F8: forms blocked, nothing typed recorded, 30 days, not backed up; the O-5 wording. | F8 (§2.2); §5; open item 10 (§11) |
 | 5 | F9: with a visitor id, consent; the session-only arm needs counsel on device storage. | F9 (§2.2); open item 21 (§11) |
-| 6 | Retention rows (buffer 72 h; tombstones 14 months; bot counts and experiment results are aggregate) and rights rows (profile and recordings by visitor id, consent id, or a lead's consent id). | §5; §9.1 |
+| 6 | ~~Retention rows (buffer 72 h; tombstones 14 months; bot counts and experiment results are aggregate) and rights rows (profile and recordings by visitor id, consent id, or a lead's consent id).~~ | **RESOLVED by WSK-D93 (owner 2026-10-31): the privacy contact is info@gaiada.com (not a designated DPO).** |
 | 7 | Rows for rrweb and rrweb-player (MIT). The DB-IP row (footnote 11 of `docs/blueprints/vendor-exit-register.md`) already covers the ASN edition. | §8.2 |
 
 ---
@@ -34,18 +38,18 @@ v0.2 works in the phase 5 design (`docs/plans/2026-10-12-m5-phase5-design.md`, �
 | Field | Value |
 |---|---|
 | Document | Website-visitor and website-lead addendum (DPIA + LIA + RoPA rows + notice + DSR changes) |
-| Version / status | v0.3 — DRAFT, pending counsel review and owner decisions (v0.1 was 2026-10-11, v0.2 2026-10-13) |
-| Date | 2026-10-29 |
-| Controller | [CONTROLLER ENTITY] — the Gaiada group / relevant child company «ASSUMPTION: confirm which legal entity operates gaiada.com and its ad accounts» |
+| Version / status | v1.0 — APPROVED BY THE OWNER 2026-10-31 (WSK-D93), in place of counsel's review (v0.1 was 2026-10-11, v0.2 2026-10-13, v0.3 2026-10-29) |
+| Date | 2026-10-31 |
+| Controller | Gaia Digital Agency, Jl. Raya Mas, Ubud, Gianyar, Bali, Indonesia (WSK-D93) |
 | Primary jurisdiction | Indonesia (UU PDP No. 27/2022); drafted to GDPR-grade for EU/SG exposure. See [JURISDICTION] «ASSUMPTION: confirm jurisdictions» |
-| DPO / contact | [DPO NAME/EMAIL] |
+| DPO / contact | info@gaiada.com, a privacy contact, not a designated DPO (WSK-D93) |
 | Lawful bases used | Legitimate interests (narrow, listed in §3) and consent (everything individual-level, all ad platforms) |
 | Sources | `docs/plans/2026-10-12-m5-phase5-design.md` (§3–§7, §10; the v0.2 changes), `gaiada-web-revamp/docs/TRACKING.md`, `docs/CMS_PLAN.md`; ERP `docs/plans/2026-10-10-gaiada-com-website-cms-analytics.md`; `webdesk/migrations/0003_forms.sql`, `0007_privacy_dsr.sql`, `webdesk/api/src/forms/`, `webdesk/api/src/privacy/`; `platform-nest/migrations/202609050857_agency_discovery_intake.sql` |
 | Basis of scope | Owner rulings of 2026-10-11 (Umami first-party store; everything in the plan, phased; consent table binding) |
 
 **How to read this alongside the pack.** The existing pack (`README-NOTES.md`, `lia.md`, `dpia.md`, `ropa.md`, `privacy-notice.md`, `retention-and-dsr-procedure.md`) covers the WhatsApp work-summary bot and its employees. It does **not** cover website visitors. This addendum is separate and stands on its own, but:
 
-- It reuses the pack's conventions: «ASSUMPTION» markers, [CONTROLLER ENTITY] / [JURISDICTION] / [DPO] placeholders, the Likelihood / Severity / Residual risk table.
+- It reuses the pack's conventions: «ASSUMPTION» markers, Gaia Digital Agency / [JURISDICTION] / [DPO] placeholders, the Likelihood / Severity / Residual risk table.
 - §8 holds RoPA rows in the format of `ropa.md`, ready to paste.
 - One interaction needs counsel's eye: staff receive lead alerts on WhatsApp through the ERP's bot, which sits inside the existing bot's estate (see R-V13 and open item 12).
 - Lawful basis differs from the bot. The bot cannot use consent (employer power imbalance). Visitors are not employees, so consent is available and is used for everything individual-level.
@@ -365,7 +369,7 @@ Re-run when: client sites on WebDesk get the same analytics; a new vendor is add
 
 ## 8. RoPA entries (rows for `ropa.md`)
 
-Format follows `ropa.md`: one block per processing activity, with the §1–§11 fields compressed. Controller, DPO and jurisdiction are [CONTROLLER ENTITY], [DPO NAME/EMAIL], [JURISDICTION].
+Format follows `ropa.md`: one block per processing activity, with the §1–§11 fields compressed. Controller, DPO and jurisdiction are Gaia Digital Agency, info@gaiada.com, [JURISDICTION].
 
 ### 8.1 Processing activities
 
@@ -448,7 +452,7 @@ Format follows `ropa.md`: one block per processing activity, with the §1–§11
 | 5 | Fan-out: one request creates one `dsr_requests` row and one checklist across WebDesk, platform-nest, profile store, Google/Meta/Microsoft/LinkedIn manual steps, mailbox and WhatsApp | Governance workspace |
 | 6 | Withdrawal hook: banner withdrawal calls a profile-delete endpoint | Site + collector |
 | 7 | Attribution on `agency_leads` (landing page, UTMs, click ids) stored with the same retention and included in export/erase; consent snapshot columns | platform-nest |
-| 8 | Retention: `retention_days` (or an expiry) on `agency_leads` and AD-1 tables; WebDesk's submission purge already runs hourly (WSK-61) | platform-nest, WebDesk |
+| 8 | ~~Retention: `retention_days` (or an expiry) on `agency_leads` and AD-1 tables; WebDesk's submission purge already runs hourly (WSK-61)~~ | **RESOLVED by WSK-D93 (owner 2026-10-31): every period in §5 approved as written.** |
 | 9 | Suppression list: after erasure, store a hashed contact so the person is not re-imported or re-uploaded to ad platforms | ERP |
 
 ---
@@ -467,11 +471,11 @@ Format follows `ropa.md`: one block per processing activity, with the §1–§11
 - If you accept **marketing**, Google Ads, Meta and LinkedIn measure our adverts. If you then contact us, we may tell Google, Meta and LinkedIn that your visit became an enquiry or a client, using scrambled (hashed) contact details.
 - If you send us a form, we use what you send to reply to you.
 - You can change your choice at any time: **Cookie settings** in the footer.
-- Questions or requests: [DPO NAME/EMAIL].
+- Questions or requests: info@gaiada.com.
 
 ### Full text
 
-**1. Who we are.** [CONTROLLER ENTITY], part of the Gaiada group, [CONTROLLER ADDRESS]. Contact for privacy: [DPO NAME/EMAIL]. «ASSUMPTION: confirm entity.»
+**1. Who we are.** Gaia Digital Agency, part of the Gaiada group, Jl. Raya Mas, Ubud, Gianyar, Bali, Indonesia. Contact for privacy: info@gaiada.com. «ASSUMPTION: confirm entity.»
 
 **2. What we collect and why.**
 
@@ -521,7 +525,7 @@ Google, Meta and LinkedIn decide for themselves how to use some of the data for 
 
 «ASSUMPTION: every period above is a proposed default.»
 
-**9. Your rights.** You may ask for access, correction, deletion, restriction, a copy of your data, and to object to processing based on legitimate interests or to profiling, and you may withdraw consent at any time. Write to [DPO NAME/EMAIL]. We reply within [30] days «ASSUMPTION: confirm the UU PDP time limit». To find your analytics profile, give us your visitor id (shown at [location on this page]). You can also complain to [Indonesian authority / lead EU authority] «ASSUMPTION: authority name for [JURISDICTION]».
+**9. Your rights.** You may ask for access, correction, deletion, restriction, a copy of your data, and to object to processing based on legitimate interests or to profiling, and you may withdraw consent at any time. Write to info@gaiada.com. We reply within [30] days «ASSUMPTION: confirm the UU PDP time limit». To find your analytics profile, give us your visitor id (shown at [location on this page]). You can also complain to [Indonesian authority / lead EU authority] «ASSUMPTION: authority name for [JURISDICTION]».
 
 **10. Children.** This site is for businesses and is not aimed at children. «ASSUMPTION.»
 
@@ -542,7 +546,7 @@ Google, Meta and LinkedIn decide for themselves how to use some of the data for 
 | 3 | ~~**GA4 advanced vs basic Consent Mode.** Advanced sends cookieless pings to Google before consent, which conflicts with the "before consent only our own counts" ruling (R-V2). Basic means no Google contact until consent~~ | **RESOLVED by WSK-D85 (owner 2026-10-13): basic Consent Mode.** BUILT on the site proof line `032cfac` (2026-10-31). The site makes no Google request before consent. Analytics consent configures GA4. Marketing consent configures only the Google Ads ids, so a marketing-only visitor sends no cookieless GA4 pings (the stricter reading of the ruling, for the owner to confirm). Events reach Google only while their category is granted; nothing is queued from before consent |
 | 4 | **UU PDP cross-border transfer basis** for Google, Meta, Microsoft, LinkedIn and Cloudflare (adequacy, adequate safeguards, or consent); also the EU/SG equivalent for visitors there | Per-vendor mechanism; whether banner consent also covers transfer |
 | 5 | **Company identification of consented B2B visitors:** is banner consent enough, or is a separate, more specific notice or control required? Does it matter that sole traders are individuals? **v0.2:** until the owner decides the company-identification source (O-12) and counsel answers this item, a profile shows only the network name, labelled "Network". For a large organisation the network name already names the employer, so counsel should say whether that alone needs the extra notice | Counsel opinion; possibly a separate "company identification" toggle; owner decision O-12 |
-| 6 | **DPO / contact:** appoint or designate; whether UU PDP requires a DPO here; publish the address | Name and email for [DPO NAME/EMAIL] |
+| 6 | **DPO / contact:** appoint or designate; whether UU PDP requires a DPO here; publish the address | Name and email for info@gaiada.com |
 | 7 | **Phase-4 conversion consent:** may the banner's marketing category (given earlier, on a visit) support a server-side upload at a later lead stage? Or add a separate unticked form checkbox (§3.6 option 5)? Is storing a consent snapshot on the lead enough? | Pick rule A or B |
 | 8 | **Retention values** in §5, especially `agency_leads` 24 months, profile 14 months, buffer 72 hours, tombstones 14 months, replay 30 days, logs 14 days, submissions 90 days | Confirm or change |
 | 9 | **Pre-launch gaps in the ERP:** no retention on `agency_leads` or AD-1; no consent or attribution fields on `agency_leads`; WSK-38 does not cover them (R-V10, R-V12) | Owner to schedule the work (§9.3) before phase 3 |
