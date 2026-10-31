@@ -113,8 +113,10 @@ Two facts the owner should know:
 
 ## 5. How it is built (built-in Keycloak, plus one small extension for phone sign-in)
 
-**Steps 2, 4 to 8 are one script, PROTOTYPED and DEV-VERIFIED on sumopod (PID-2, 2026-10-30):**
-`infra/scripts/keycloak-passkey-realm.sh` (`apply [--dry-run]`, `revert <backup>`, `status`).
+**Steps 2 to 8 are one script and one image, PROTOTYPED and DEV-VERIFIED on sumopod** (PID-2 2026-10-30; the phone
+form and the theme, PID-2h, 2026-10-31): `infra/scripts/keycloak-passkey-realm.sh` (`apply [--dry-run]`,
+`revert <backup>`, `status`) and the gaiada-keycloak image (`keycloak/`). The live order is
+`infra/runbooks/keycloak-passkey-rollout.md` (PID-2g).
 - **Proof:** `keycloak-passkey-realm-test.sh all` with the Playwright suite `keycloak-passkey-realm.e2e.cjs`. A Chrome
   virtual authenticator stands in for the phone. The test realm is upgraded from 26.0.8 to 26.8.1, like live.
   - dry run wrote nothing;
@@ -124,6 +126,12 @@ Two facts the owner should know:
   - kcadm signed in with the container's own admin, with no password on the host (the live way).
 - **The script takes `RP_ID` and `BIND`.** On live, `BIND=client:<test client>` comes first (§6 risk 1);
   `BIND=realm` switches everyone over.
+  - With `BIND=client:…`, the flow and the theme go on that client only.
+  - `PHONE_REQUIRED=0` keeps the profile change invisible: nobody is asked for a number, and VERIFY_PROFILE and
+    `editUsernameAllowed` are left alone. The profile is realm-wide, so a required number would reach everyone
+    through any client (§6 risk 20).
+  - Proved (PID-2h): only the test client changed; another client kept the stock form, theme and sign-in; the revert
+    of that apply was identical.
 
 1. **Upgrade** Keycloak 26.0 to the newest 26.x patch at the time (26.4 or later), after a rehearsal on sumopod.
 2. **User profile:**
@@ -137,12 +145,27 @@ Two facts the owner should know:
      the field is required.
    - **Uniqueness:** Keycloak does not enforce unique attributes. Our invite and IT screens refuse a number already
      in use, and a nightly check reports duplicates.
-3. **Phone sign-in extension** (the only custom code; PID-D9):
-   - A sign-in form that accepts username, email or phone and finds the person by the normalised number.
-   - **Fail-closed:** if two accounts hold the same number, it refuses with the same generic "wrong username or
-     password" message.
-   - It ships as a small Keycloak image built in CI (`FROM` the pinned Keycloak tag + the jar), with tests.
+3. **Phone sign-in extension** (the only custom code; PID-D9). **DEV-VERIFIED on sumopod, PID-2h (2026-10-31).**
+   - `gaiada-phone-username-password-form`: Keycloak's own Username Password Form. A username or an email goes to the
+     stock code. A phone-shaped entry (08…, 62…, +62…, with spaces, dots or dashes) is converted to `+62…` and looked
+     up in `phoneNumber`. The stock checks then run in the stock order.
+   - **Fail-closed:** a number two accounts hold, or a number that is one account's phone and another account's
+     username, names nobody. Every refusal is the same "Invalid username, phone number or password.".
+   - **The brute-force trap it closes:** Keycloak counts a failed password against the account it finds from the
+     attempted-username note, by username or email. With the typed number in that note, guesses by phone would never
+     lock anyone out. The form puts the account's username there once the number matches. Proved: one wrong password
+     by number raised the account's failure count; three locked it, also for sign-in by email.
+   - **The theme** (`gaiada`, keycloak.v2 + three texts and one template) makes the field "Username or phone number".
+     It makes a new password always sign out the other devices (§6 risk 18). A locked account reads exactly like a
+     wrong password.
+   - It ships as the gaiada-keycloak image: `FROM` the pinned Keycloak tag + the jar + the theme. The Dockerfile runs
+     the unit tests.
+     - `ci.yml` job `keycloak` runs the tests, checks the theme template against upstream, and builds the image.
+     - `keycloak-image.yml` pushes and signs it on main as `gaiada-keycloak:<version>-<tree of keycloak/>`.
+     - It is not in `release.yml`: a per-release tag would restart Keycloak at every release.
    - Every Keycloak upgrade rebuilds and re-tests it.
+   - **Revert:** `STEPS=browser LOGIN_FORM=auth-username-password-form`. That puts the stock form back (proved: sign-in
+     by number stops, username and email go on), with the passkey step and the amr references re-made.
    - **Rejected:** a community phone plugin (more than we need, and a new vendor). Also rejected: having our
      `/login` turn a phone into a username, which would show anyone whose username belongs to a number.
 4. **Passkey policy:**
@@ -168,8 +191,11 @@ Two facts the owner should know:
      with no passkey, and an unknown name, both get the same "This account cannot reset its password here. Ask IT to
      reset your sign-in." That leaves nothing to enumerate.
    - `resetPasswordAllowed` comes back **only** with this flow bound, never with the email one.
-   - **Other sessions do NOT end on their own** (§6 risk 18). Keycloak's "Sign out from other devices" box is unticked
-     by default. The fix rides PID-2h: a login-theme override, so a reset always signs the other devices out.
+   - **Other sessions do NOT end on their own with Keycloak's own page** (§6 risk 18). Its "Sign out from other
+     devices" box is unticked by default.
+     - The gaiada theme (PID-2h) sends `logout-sessions=on` instead. Proved: a reset ended the remembered 7-day session
+       on another browser.
+     - The script turns `resetPasswordAllowed` on only when the realm's login theme is `gaiada` (PID-D15).
 7. **Remember me** (PID-D10): the sign-in form gets a "This is my own device" box, which is Keycloak's remember-me,
    reworded. The remember-me lifespans are 7 days. Unticked sessions keep today's 10 h. The ERP's own session
    follows: 7 days when remembered, 12 h otherwise.
@@ -202,21 +228,24 @@ Two facts the owner should know:
 | 8 | **Computers without Bluetooth, or older systems.** | Sign in on the phone itself; a USB Bluetooth adapter; or a second passkey on the laptop (Windows Hello / Touch ID). A device check is part of the proof (§8, PID-4). |
 | 9 | **The phone has no screen lock or is offline.** | Passkeys require a screen lock. The cross-device step needs the phone online with Bluetooth on. The first-sign-in screen says both, in plain words. |
 | 10 | **Bots and services break.** | They never use the browser flow (client credentials, service tokens), so they are unaffected. The proof includes a check that each one still works. |
-| 11 | **Custom code inside the identity provider** (the phone sign-in extension). | Kept to one form and one lookup. It fails closed on a duplicate number and gives the same message for every failure. Tests run in CI, the image is pinned, and it is rebuilt and re-tested at every Keycloak upgrade. If it ever fails, binding back the stock form restores username and email sign-in (a written revert). |
+| 11 | **Custom code inside the identity provider** (the phone sign-in extension). | Kept to one form and one lookup (§5.3). It fails closed on a shared number and on a number that is another account's username, and gives the same message for every failure, a lockout included. It keeps brute-force detection working for sign-in by number (proved). Tests run in CI, the image is pinned and named by its contents, and it is rebuilt and re-tested at every Keycloak upgrade (the theme template is checked against upstream). If it ever fails, the script puts the stock form back (`LOGIN_FORM=auth-username-password-form`, proved): username and email sign-in go on. |
 | 12 | **The phone number is not proved** (PID-D8). Someone could register another person's number, or mistype their own. | Invite only, so only invited people can register. A number already in use is refused. IT can correct a number on the IT Accounts page (audited). Nobody gets access through a number: they still need the password and the passkey. |
 | 13 | **Brute-force protection is off on live** (measured 2026-10-30). Username or phone + password can be guessed with no slow-down. The passkey stops a guessed password from getting in, but only once it is required. | Turn on Keycloak's brute-force detection with **temporary** lockouts (never permanent: a permanent lockout of the owner is itself a lockout incident), in the first live realm step (PID-2i). Every headless test login stays a single attempt, as already ruled. |
 | 14 | **Usernames have always equalled emails** (all 75 live accounts). | Only one reader of `preferred_username` exists (a fallback display name). The proof checks that the IT Accounts page, the invite adoption (`findUserByEmail` with `exact=true`) and `sso-login.sh` all key on email or `sub`, never on the username. |
 | 15 | **The image bump upgrades live in whichever release carries it.** `deploy.yml`'s `up -d` recreates Keycloak, because the `auth` profile is deployed. Keycloak has no down-migration. | The compose change stays on its own branch until the owner picks a window. The backup (runbook §1) is taken first; then it rides a train **alone**. Revert = restore the dump **and** the old tag together. Never re-run an older release's deploy job afterwards (it would start 26.0 on the migrated database); `rollback-to.sh` is safe. |
 | 16 | **"Forgot password?" takes over an account that has no passkey** (proved on 26.8.1: Keycloak skips a REQUIRED step the person has not set up, so a naive reset flow let a stranger set the password and enrol their own passkey). | The reset flow's proof step is [passkey | else Deny access] (§5.6). An account without a passkey and an unknown name get the same refusal. The e2e suite keeps both the naive-flow observation (d0) and the refusal (d2), so a later Keycloak or flow change cannot reopen it unseen. |
 | 17 | **A person can delete their only passkey** in the account console (Keycloak's `delete_credential` action is enabled after the upgrade). Their next sign-in then enrols a new passkey with the password alone, so anyone holding the password and a session could swap the passkey. | **Accepted by the owner (PID-D14, 2026-10-30): self-service deletion stays.** What limits it: deleting needs a signed-in session, which already needs the passkey; the re-enrolment that follows still needs the password. What is still missing: live records only LOGIN, LOGIN_ERROR and LOGOUT (DW-7h), so a removed or added passkey leaves no event today; PID-3d adds the credential events (`REMOVE_CREDENTIAL`, `UPDATE_CREDENTIAL`) and shows them on IT's pages. Revisit before real client data. |
-| 18 | **A password reset leaves the other signed-in devices signed in** (Keycloak's "Sign out from other devices" box is unticked by default, and the theme cannot be configured otherwise). A remembered 7-day session on a lost or stolen device would survive the reset. | A login-theme override in the PID-2h image makes a reset always sign the other devices out. Until then, the reset is not offered to everyone (it is bound only with `BIND=realm`), and IT's "Reset sign-in" ends every session (PID-3d). **Ruled PID-D15 (owner, 2026-10-30): always.** |
+| 18 | **A password reset leaves the other signed-in devices signed in** (Keycloak's "Sign out from other devices" box is unticked by default, and the theme cannot be configured otherwise). A remembered 7-day session on a lost or stolen device would survive the reset. | **Ruled PID-D15 (owner, 2026-10-30): always.** The gaiada theme (PID-2h) replaces the box with a hidden `logout-sessions=on`. Proved: the remembered session on another browser ended at the reset. The script turns "Forgot password?" on only with that theme on the realm. IT's "Reset sign-in" ends every session (PID-3d). Limit: it is the page that sends the field, so a hand-made request could leave it out, and only the person who just passed the passkey check can make one. |
+| 19 | **A flow's steps run in no guaranteed order.** Found by PID-2h in Keycloak 26.8.1's source: editing an execution resets its priority to the one in the request (0 when absent), and executions with the same priority run in database-row order. The first version of the script could leave ties, so the order it was proved in was luck. | Every execution the script writes gets an explicit priority (10, 20, 30…). The script refuses a flow of ours that holds a tie. Live never had the flows (only brute force was applied), so nothing live is affected. |
+| 20 | **A realm-wide step reaches everyone during the test-client phase.** Keycloak binds flows to clients, not people, but the user profile and its required-field check are realm-wide. A required phone number would ask every person at their next sign-in, through any client. | `PHONE_REQUIRED=0` for PID-5b and 5c: the number exists but nobody is asked. The owner and QA drive the new sign-in through the test client (there is no per-person switch). `PHONE_REQUIRED=1` comes with `BIND=realm` at the staff wave. |
 
 ## 7. Rollout order
 
 1. sumopod: the upgrade rehearsal and every flow.
 2. Live upgrade (owner approves the window).
 3. Live flows bound to a test client; **the owner enrols**; break-glass proved.
-4. QA accounts (with software passkeys) and the owner's own sign-in switched.
+4. QA accounts (with software passkeys) and the owner drive the new sign-in through the test client. Keycloak binds
+   flows to clients, not people, so nobody can be switched alone (§6 risk 20).
 5. Staff, in one wave, after a notice. Each person enrols at their next sign-in.
 6. Contributors, then clients (PID-D12).
 7. MFA simulation off. That is the "Before real clients use the portal" line, coordinated, not done here.
@@ -231,7 +260,9 @@ Two facts the owner should know:
 - 1c live upgrade with a DB dump, a window and a revert (owner approves).
 
 **PID-2 · Realm setup, on sumopod:**
-PROTOTYPED and DEV-VERIFIED on sumopod 2026-10-30 except 2h (§5, script `infra/scripts/keycloak-passkey-realm.sh`).
+PROTOTYPED and DEV-VERIFIED on sumopod: 2026-10-30, and 2h on 2026-10-31 (§5, script
+`infra/scripts/keycloak-passkey-realm.sh`, image `keycloak/`). 2g is the live runbook,
+`infra/runbooks/keycloak-passkey-rollout.md`.
 - 2a user profile (username rules, phone number in one form; existing people asked at next sign-in);
 - 2h the phone sign-in extension and the Keycloak image built in CI (§5.3);
 - 2b passkey policy with the fixed RP ID;
@@ -263,6 +294,6 @@ PROTOTYPED and DEV-VERIFIED on sumopod 2026-10-30 except 2h (§5, script `infra/
 **PID-5 · Live rollout:**
 - 5a the live upgrade done and checked;
 - 5b flows on the test client, the owner enrolled, break-glass proved;
-- 5c QA accounts + the owner switched; a live drive;
+- 5c QA accounts + the owner on the test client; a live drive;
 - 5d staff wave;
 - 5e contributors and clients (PID-D12).
