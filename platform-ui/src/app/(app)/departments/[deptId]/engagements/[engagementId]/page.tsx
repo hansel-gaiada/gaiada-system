@@ -7,9 +7,7 @@ import { getDepartment } from "@/lib/departments";
 import { can } from "@/lib/rbac";
 import { Card, StatusBadge, KpiTile } from "@/components/ui";
 import { TrackingTagsCard } from "@/components/webdesk/analytics/TrackingTagsCard";
-import { listSites } from "@/lib/webdeskContent";
-import { readTrackingTags } from "@/lib/trackingTags";
-import { matchProperty } from "@/lib/websiteAnalyticsModel";
+import { findTrackingSite, readTrackingTags } from "@/lib/trackingTags";
 import { ScopeEditor } from "@/components/search/ScopeEditor";
 import { ProviderModeStatement, SimulatedBadge } from "@/components/search/SimulatedBadge";
 import {
@@ -29,33 +27,22 @@ const NOT_BUILT_BY_ERP =
   "This client's website is not built by the ERP, so its Google Ads and LinkedIn tags are set on the website itself.";
 
 /**
- * M5-P4g: the client's tracking tags (Google Ads and LinkedIn) for this engagement's search property. The card needs the WebDesk site whose
- * environment domains match the property's domain: the SAME rule as Website -> Analytics (`matchProperty`: lower-case, no scheme, no path,
- * `www.` ignored), over the sites `listSites` returns. Nothing here may break the page: a refused or failed site read is a sentence in the
- * card's place, never a blank and never a thrown error; no matching site is a plain note.
+ * M5-P4g: the client's tracking tags (Google Ads and LinkedIn) for this engagement's search property. Which WebDesk site is the property's is
+ * answered by the server (`findTrackingSite`, GET tracking-tags/site: `search_property . read`, company-scoped, the same domain rule as the
+ * save path's binding), so a search manager with no Web Dev role still gets the card. Nothing here may break the page: a refused or failed
+ * lookup is a sentence in the card's place, never a blank and never a thrown error; `site: null` is a plain note.
  */
 async function trackingTagsSection(
   userId: string, tenant: string, property: SearchProperty, canEdit: boolean,
 ): Promise<ReactNode> {
-  let sites: Awaited<ReturnType<typeof listSites>>;
-  try {
-    sites = await listSites(userId, tenant);
-  } catch {
-    sites = { kind: "unavailable", code: "network", reason: "The websites could not be read." };
+  const found = await findTrackingSite(userId, tenant, property.id);
+  if (found.kind !== "ok") {
+    return <Card title="Tracking tags"><p className="wa-note" role="status" data-testid="engagement-tags-unavailable">{found.message}</p></Card>;
   }
-  if (sites.kind !== "ok") {
-    const text = sites.kind === "forbidden"
-      ? "You do not have access to this client's website, so its tracking tags are not shown here."
-      : "This client's website could not be looked up just now, so its tracking tags are not shown. Reload the page to try again.";
-    return <Card title="Tracking tags"><p className="wa-note" role="status" data-testid="engagement-tags-unavailable">{text}</p></Card>;
-  }
-  for (const t of sites.data.tenants) {
-    const site = t.sites.find((x) => matchProperty([{ id: property.id, domain: property.domain, umamiSiteId: null }], x.environments.map((e) => e.domain)));
-    if (!site) continue;
-    const read = await readTrackingTags(userId, tenant, property.id, t.slug, site.siteId);
-    return <TrackingTagsCard propertyId={property.id} webdeskTenant={t.slug} site={site.siteId} read={read} canEdit={canEdit} />;
-  }
-  return <Card title="Tracking tags"><p className="wa-note" data-testid="engagement-tags-not-built">{NOT_BUILT_BY_ERP}</p></Card>;
+  const site = found.data.site;
+  if (!site) return <Card title="Tracking tags"><p className="wa-note" data-testid="engagement-tags-not-built">{NOT_BUILT_BY_ERP}</p></Card>;
+  const read = await readTrackingTags(userId, tenant, property.id, site.webdeskTenant, site.site);
+  return <TrackingTagsCard propertyId={property.id} webdeskTenant={site.webdeskTenant} site={site.site} read={read} canEdit={canEdit} />;
 }
 
 // Engagement detail — the drill-down from the engagements list (SM-11). This

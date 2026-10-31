@@ -6528,7 +6528,10 @@ A refusal never writes. A WebDesk outage while resolving the site is the ordinar
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
+| BUILT | GET | `…/properties/:id/tracking-tags/site` | `read` (plain search staff included). Which WebDesk site is this property's. See below. |
 | BUILT | PUT | `…/properties/:id/tracking-tags/google-ads` | `manage_tags`. Body EXACTLY `{ webdeskTenant: string, site: string, ids: string[] \| null, conversions: { lead?, whatsapp?, phone?, email?: string \| null } }`. |
+
+**GET `…/tracking-tags/site` (the engagement page's lookup).** Cerbos `resource_search_property` · `read` only, so the SEO workspace can show the card to anyone who may read the property; no WebDesk or Web Dev permission is involved. The site is resolved **on the server** from the company's own WebDesk tenants (`tenantsOf(company)`, the same company-scoped data the PUT's binding check uses; webdev stays a lazy dependency of search), skipping a tenant whose `status` is present and not `active` and a site whose `status` is `archived`. **200** `{ site: { webdeskTenant: string, site: string, name: string } | null }`: the FIRST site, in WebDesk's order, whose environment domain equals the property's domain (the binding rule: lower-cased, scheme, path and a leading `www.` ignored); `site: null` is an answer (no site of this company has that domain; the website is not built by the ERP). Refusals: **404** `property_not_found`; **403** (Cerbos `read`); **503** `tracking_sites_unavailable` when WebDesk cannot be read (never `site: null`: an empty answer is a claim). `Cache-Control: no-store`. The UI then calls the GET above with that `webdeskTenant` and `site`.
 
 **GET response, new field.** `googleAds: { ids: string[], conversions: { lead?: string, whatsapp?: string, phone?: string, email?: string } }` (additive; every existing field keeps its meaning). A conversion value is the full `AW-<digits>/<label>`. For `state: "ok"` it is read with the rule above (empty ids and `{}` mean not set, confirmed against the repository as for the partner id; the repository is confirmed at most once per request). For `no_build_target` and `github_unavailable` it is `{ ids: [], conversions: {} }` **and that is not "not set"**: render the `reason`.
 
@@ -6536,6 +6539,7 @@ A refusal never writes. A WebDesk outage while resolving the site is the ordinar
 
 | Status | `reason` | Meaning |
 |---|---|---|
+| 503 | `tracking_sites_unavailable` | `GET …/tracking-tags/site` only: the ERP could not list this company's websites just now. |
 | 400 | `ads_body_invalid` | Not exactly `{ webdeskTenant, site, ids, conversions }`, `ids` not a list or null, `conversions` not an object, or a conversions key or value of the wrong kind. |
 | 400 | `ads_id_invalid` | An id that is not `AW-` plus 6 to 15 digits, more than 5 ids, or a duplicate. |
 | 400 | `ads_conversion_invalid` | A conversion that is not `AW-<digits>/<label>`, whose AW id is not in `ids`, or any conversion while `ids` is empty. |
@@ -6544,7 +6548,7 @@ The other refusals are those of the table above (`tracking_query_invalid`, 403, 
 
 **The audit rows.** One `activities` row per variable that **actually changed** (so up to two per save): verb `tracking_tag_set` or `tracking_tag_cleared`, entity `search_property`, metadata `{ tag: "google_ads", repo, variable, from, to, webdeskTenant, site }`. If the second write fails after the first landed, the first is still audited and the typed error is returned; re-sending the same body then writes only what is still missing.
 
-**UI** (`platform-ui`): the "Tracking tags" card gets a **Google Ads** section under LinkedIn: one field for the tag ids (commas or new lines), four conversion fields (Form lead, WhatsApp click, Phone click, Email click, each `AW-…/label`), one Save with the same client-side checks as the server, the help text, and every refusal in words; read-only (values or "Not set") without `canManage`. The same card is shown in the SEO workspace on each client's engagement page (Accounts → Engagements), for the site whose environment domain matches the engagement's search property; with no matching site a note says the website is not built by the ERP.
+**UI** (`platform-ui`): the "Tracking tags" card gets a **Google Ads** section under LinkedIn: one field for the tag ids (commas or new lines), four conversion fields (Form lead, WhatsApp click, Phone click, Email click, each `AW-…/label`), one Save with the same client-side checks as the server, the help text, and every refusal in words; read-only (values or "Not set") without `canManage`. The same card is shown in the SEO workspace on each client's engagement page (Accounts → Engagements), for the site `GET …/tracking-tags/site` names (the WebDesk site whose environment domain matches the engagement's search property); with no matching site a note says the website is not built by the ERP.
 
 ## 29. Conversation — client and staff (PV4-03, 2026-10-12) — `platform-nest/src/core/{portal-conversation,conversation}.controller.ts`, `conversation-core.ts`; predicates in `portal-visibility.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (HTTP suite `conversation.controller.test.ts` runs against real Postgres + Cerbos on the Linux CI gate; portal UI BUILT by PV4-08, PROTOTYPED (vitest, a demo-mode Playwright spec and a stub-BFF Playwright spec; not run against a live platform-nest); staff UI BUILT by PV4-09 (§29f), PROTOTYPED (vitest and demo-mode Playwright specs))**
 

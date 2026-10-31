@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  ADS_HELP, PARTNER_ID_RE, TAGS_HELP, TrackingTagsShapeError, adsSavedSentence, checkGoogleAds, checkPartnerId, parseAdsPutResponse,
+  ADS_HELP, PARTNER_ID_RE, TAGS_HELP, TrackingTagsShapeError, adsSavedSentence, checkGoogleAds, checkPartnerId, parseAdsPutResponse, parseFoundSite, siteLookupSentence,
   parsePutResponse, parseTrackingTags, savedSentence, splitAdsIds, trackingReadSentence, trackingRefusalSentence,
 } from "./trackingTagsModel";
 
@@ -171,5 +171,21 @@ describe("Google Ads (M5-P4g)", () => {
     for (const reason of ["ads_body_invalid", "ads_id_invalid", "ads_conversion_invalid"]) {
       expect(trackingRefusalSentence(400, reason)).toMatch(/Google Ads.*Nothing was saved/);
     }
+  });
+});
+
+describe("parseFoundSite and siteLookupSentence (M5-P4g)", () => {
+  it("reads a site or null and refuses anything else", () => {
+    expect(parseFoundSite({ site: null })).toEqual({ site: null });
+    expect(parseFoundSite({ site: { webdeskTenant: "g", site: "s", name: "n", extra: 1 } })).toEqual({ site: { webdeskTenant: "g", site: "s", name: "n" } });
+    for (const bad of [null, {}, "x", { site: 5 }, { site: { webdeskTenant: "g", site: "s" } }, { site: { webdeskTenant: "", site: "s", name: "n" } }]) {
+      expect(() => parseFoundSite(bad), JSON.stringify(bad)).toThrow(TrackingTagsShapeError);
+    }
+  });
+  it("every failure is a sentence", () => {
+    expect(siteLookupSentence(403, null)).toMatch(/do not have access/);
+    expect(siteLookupSentence(503, "tracking_sites_unavailable")).toMatch(/could not list/);
+    expect(siteLookupSentence(404, "property_not_found")).toMatch(/not found/);
+    expect(siteLookupSentence(0, null)).toMatch(/could not be looked up/);
   });
 });

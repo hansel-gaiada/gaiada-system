@@ -86,6 +86,19 @@ export function parsePutResponse(b: unknown): { partnerId: string | null; result
   return { partnerId: parsePartnerId(b.linkedin), result, repo: target.repo };
 }
 
+export interface TrackingSiteRef { webdeskTenant: string; site: string; name: string }
+
+/** `GET …/tracking-tags/site` 200 body, strict: a site, or `null` (a real answer: no site of this company has the property's domain). */
+export function parseFoundSite(b: unknown): { site: TrackingSiteRef | null } {
+  if (!isObj(b) || !("site" in b)) return bad("tracking site: expected {site}");
+  const s = b.site;
+  if (s === null) return { site: null };
+  if (!isObj(s) || typeof s.webdeskTenant !== "string" || typeof s.site !== "string" || typeof s.name !== "string" || !s.webdeskTenant || !s.site) {
+    return bad("site: expected {webdeskTenant, site, name} or null");
+  }
+  return { site: { webdeskTenant: s.webdeskTenant, site: s.site, name: s.name } };
+}
+
 /** `PUT …/tracking-tags/google-ads` 200 body, strict. */
 export function parseAdsPutResponse(b: unknown): { googleAds: GoogleAds; result: PutResult; repo: string } {
   if (!isObj(b)) return bad("google ads save: expected an object");
@@ -193,4 +206,12 @@ export function adsSavedSentence(result: PutResult, ads: GoogleAds, repo: string
   if (result === "cleared") return `Google Ads was removed from ${repo}. The site stops loading it at its next rebuild.`;
   const n = Object.keys(ads.conversions).length;
   return `Google Ads (${ads.ids.length} tag id${ads.ids.length === 1 ? "" : "s"}, ${n} conversion${n === 1 ? "" : "s"}) was saved to ${repo}. It reaches the site at its next rebuild.`;
+}
+
+/** A failed site lookup as one sentence for the engagement page (a 403 is about seeing the client's website, not about changing it). */
+export function siteLookupSentence(status: number, reason: string | null): string {
+  if (status === 403) return "You do not have access to this client's property, so its website's tracking tags are not shown here.";
+  if (reason === "tracking_sites_unavailable") return "The ERP could not list this company's websites just now, so this client's tracking tags are not shown. Reload the page to try again.";
+  if (status === 404) return "This client's property was not found, so its website's tracking tags are not shown here.";
+  return "This client's website could not be looked up just now, so its tracking tags are not shown. Reload the page to try again.";
 }

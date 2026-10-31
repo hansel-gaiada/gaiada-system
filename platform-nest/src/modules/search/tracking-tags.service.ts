@@ -33,6 +33,7 @@
 //
 // TENANCY. The property is read through withTenants([tenant], fn, {modules:['search']}); the GitHub call runs under the org tenant the
 // GHT-1 resolver names for this company (never the URL tenant), as every GitHub write in this codebase does.
+import { HttpException } from "@nestjs/common";
 import { withTenants } from "../../db";
 import { authorize, writeActivity } from "../../core/http";
 import type { Principal } from "../../rbac/principal";
@@ -66,6 +67,7 @@ export type TrackingRefusal =
   | "ads_id_invalid"
   | "ads_conversion_invalid"
   | "tracking_site_mismatch"
+  | "tracking_sites_unavailable"
   | "no_build_target"
   | "github_org_unavailable"
   | "github_not_configured"
@@ -83,6 +85,7 @@ const STATUS: Record<TrackingRefusal, 400 | 404 | 409 | 503> = {
   ads_id_invalid: 400,
   ads_conversion_invalid: 400,
   tracking_site_mismatch: 409,
+  tracking_sites_unavailable: 503,
   no_build_target: 409,
   github_org_unavailable: 503,
   github_not_configured: 503,
@@ -111,6 +114,7 @@ export const TRACKING_WORDS: Record<TrackingRefusal, string> = {
   ads_id_invalid: "Each Google Ads tag id must look like AW-123456789 (AW- and 6 to 15 digits). Use at most 5 ids and no duplicates.",
   ads_conversion_invalid: "Each conversion must look like AW-123456789/label (letters, digits, - and _ in the label), and its AW id must be one of the tag ids. Conversions need at least one tag id.",
   tracking_site_mismatch: "This property is not the one for that website: the property's domain is not one of the website's environment domains.",
+  tracking_sites_unavailable: "The ERP could not list this company's websites just now, so it cannot tell which one belongs to this client. Try again in a moment.",
   no_build_target: "This website has no build repository the ERP can write to yet, so there is nowhere to store the tag. Provision or link the site first.",
   github_org_unavailable: "GitHub cannot be reached for this company: its GitHub organization is not configured or is not registered for this company's group.",
   github_not_configured: "GitHub is not set up on this server yet (the ERP GitHub App is not configured), so the tag cannot be read or saved.",
@@ -300,6 +304,11 @@ export interface TrackingDeps {
   loadProperty(tenantId: string, propertyId: string): Promise<{ id: string; domain: string } | null>;
   /** The environment domains of the site, or null when `(webdeskTenant, site)` is not this company's (the cross-company wall). */
   siteDomains(tenantId: string, a: SiteRefQuery): Promise<string[] | null>;
+  /**
+   * M5-P4g: every ACTIVE site of this company (tenant active, site not archived) with its environment domains, in Zone B's order. Company-scoped
+   * server data, like `siteDomains`: no user permission on WebDesk is involved. Throws the typed HTTP error when Zone B cannot be read.
+   */
+  companySites(tenantId: string): Promise<CompanySite[]>;
   /** The STAGING build target's repo, or why there is none. */
   stagingRepo(tenantId: string, a: SiteRefQuery): Promise<TargetAnswer>;
   resolveOrg(tenantId: string): Promise<GithubOrgTenantResolution>;
@@ -309,6 +318,8 @@ export interface TrackingDeps {
   authorizePush(principal: Principal, orgTenantId: string): Promise<void>;
   audit(tenantId: string, actorId: string | null, verb: string, propertyId: string, meta: Record<string, unknown>): Promise<void>;
 }
+
+export interface CompanySite { webdeskTenant: string; site: string; name: string; domains: string[] }
 
 const realDeps: TrackingDeps = {
   async loadProperty(tenantId, propertyId) {
@@ -330,6 +341,19 @@ const realDeps: TrackingDeps = {
       if (e instanceof WebdeskProblem && e.getStatus() === 404) return null;
       throw e;
     }
+  },
+  async companySites(tenantId) {
+    const { webdeskZoneB } = await import("../webdev/webdesk-content.service");
+    const tenants = await webdeskZoneB.tenantsOf(tenantId);
+    const out: CompanySite[] = [];
+    for (const t of tenants) {
+      if (t.status !== undefined && t.status !== "active") continue;
+      for (const s of t.sites) {
+        if (s.status === "archived") continue;
+        out.push({ webdeskTenant: t.slug, site: s.siteId, name: s.name, domains: environmentDomains(s.environments) });
+      }
+    }
+    return out;
   },
   async stagingRepo(tenantId, a) {
     const { resolveSiteBuildTarget } = await import("../webdev/site-builds.service");
@@ -608,4 +632,27 @@ export async function putGoogleAds(principal: Principal, tenantId: string, prope
   await auditWrites();
   const result: PutResult = writes.length === 0 ? "unchanged" : wantIds === null ? "cleared" : "set";
   return { googleAds: { ids: body.ids, conversions: body.conversions }, target: shown, result, takesEffect: "next_rebuild" };
+}
+
+export interface FoundTrackingSite { site: { webdeskTenant: string; site: string; name: string } | null }
+
+/**
+ * GET properties/:id/tracking-tags/site (M5-P4g): which of this company's WebDesk sites belongs to the property, by the SAME domain rule the
+ * binding check uses. Resolved on the server from company-scoped data, so a search manager with no Web Dev role can still reach the card.
+ * `site: null` is an answer (no site of this company has the property's domain). A Zone B outage is 503 `tracking_sites_unavailable`,
+ * never `null` (an empty answer is a claim). The caller was authorized for `read` on the property by the controller.
+ */
+export async function findTrackingSite(tenantId: string, propertyId: string): Promise<FoundTrackingSite> {
+  const property = await deps.loadProperty(tenantId, propertyId);
+  if (!property) throw new TrackingTagsError("property_not_found", TRACKING_WORDS.property_not_found);
+  let sites: CompanySite[];
+  try {
+    sites = await deps.companySites(tenantId);
+  } catch (err) {
+    // Zone B's read failures are typed HTTP errors (WebdeskProblem, BadGateway, ...). Anything else is a bug and stays loud.
+    if (err instanceof HttpException) throw new TrackingTagsError("tracking_sites_unavailable", TRACKING_WORDS.tracking_sites_unavailable);
+    throw err;
+  }
+  const hit = sites.find((x) => propertyMatchesSite(property.domain, x.domains));
+  return { site: hit ? { webdeskTenant: hit.webdeskTenant, site: hit.site, name: hit.name } : null };
 }
