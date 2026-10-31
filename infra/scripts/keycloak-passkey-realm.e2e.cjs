@@ -1,5 +1,6 @@
-// PID-2 proof (docs/plans/2026-10-30-phone-identity.md §5, tickets 2a-2f, 2i): drives a throwaway Keycloak 26.8.1
-// that holds the repo realm + infra/scripts/keycloak-passkey-realm.sh, in a real Chromium with Chrome's DevTools
+// PID-2 proof (docs/plans/2026-10-30-phone-identity.md §5, tickets 2a-2i): drives a throwaway Keycloak 26.8.1 built
+// as the gaiada-keycloak image (keycloak/: the phone sign-in form + the gaiada login theme, PID-2h), that holds the repo
+// realm + infra/scripts/keycloak-passkey-realm.sh, in a real Chromium with Chrome's DevTools
 // VIRTUAL AUTHENTICATOR standing in for "the passkey on the person's phone" (ctap2, internal transport, resident
 // keys, user verification). Run by keycloak-passkey-realm-test.sh `e2e`, never by hand against a real server.
 //
@@ -9,6 +10,8 @@
 //   docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp -v ~/kc-pid2/pw:/w -w /w mcr.microsoft.com/playwright:v1.56.0-noble \
 //     sh -c 'npm init -y >/dev/null && npm i --no-audit --no-fund playwright-core@1.56.0'
 // Env: KC_BASE, ADMPW (the throwaway bootstrap admin), PW_<USER> per seed user. Nothing secret is printed.
+// E2E_PART: main (default; the realm-bound flow) | client (the flow and theme bound to pid-test only, PHONE_REQUIRED=0)
+// | stock (the stock password form swapped back in by the script: the revert of the phone sign-in).
 "use strict";
 const { chromium } = require("playwright-core");
 const crypto = require("node:crypto");
@@ -20,6 +23,11 @@ const CB = "http://localhost:8080/pid-cb/";
 const REDIRECT = CB + "done";
 const DENY_MSG = "This account cannot reset its password here";
 const LABEL = "This is my own device";
+// the gaiada login theme's texts (keycloak/theme/gaiada/login/messages/messages_en.properties)
+const FIELD_LABEL = "Username or phone number";
+const STOCK_FIELD_LABEL = "Username or email";
+const INVALID = "Invalid username, phone number or password.";
+const PART = process.env.E2E_PART || "main";
 const pw = (u) => process.env["PW_" + u.toUpperCase()];
 const email = (u) => `pid.${u}@example.invalid`;
 const results = [];
@@ -55,6 +63,11 @@ async function userByName(u) {
   const r = await admin("GET", `/users?username=${encodeURIComponent(u)}&exact=true`);
   return r.json[0];
 }
+// the phone number as IT will set it (PID-3d): the whole representation back, so nothing else is lost
+async function setPhone(id, phone) {
+  const u = (await admin("GET", `/users/${id}`)).json;
+  return admin("PUT", `/users/${id}`, { ...u, attributes: { ...(u.attributes || {}), phoneNumber: phone ? [phone] : [] } });
+}
 const bf = async (id) => (await admin("GET", `/attack-detection/brute-force/users/${id}`)).json;
 
 // ── tokens ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -68,6 +81,9 @@ function authUrl(p, extra = {}) {
     state: b64u(crypto.randomBytes(8)), code_challenge: p.challenge, code_challenge_method: "S256", ...extra });
   return `${BASE}/realms/${REALM}/protocol/openid-connect/auth?${q}`;
 }
+// Keycloak's own account console: a client that is NOT pid-test, i.e. "everyone else" while BIND=client:pid-test
+const ACCOUNT = `${BASE}/realms/${REALM}/account/`;
+const accountAuthUrl = (p) => authUrl(p, { client_id: "account-console", redirect_uri: ACCOUNT });
 async function exchange(code, verifier) {
   const r = await fetch(`${BASE}/realms/${REALM}/protocol/openid-connect/token`, {
     method: "POST",
@@ -141,6 +157,18 @@ async function kind(st) {
 async function text(page) {
   return (await page.locator("body").innerText().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 240);
 }
+const fieldLabel = async (page) => (await page.locator("label[for=username]").innerText().catch(() => "")).trim();
+const fieldError = async (page) => (await page.locator("#input-error-username").innerText().catch(() => "")).trim();
+// one sign-in attempt in a fresh request: the page it lands on, the field error, what the field shows afterwards
+async function tryLogin(st, username, password, url = authUrl(pkce())) {
+  await st.page.goto(url);
+  await st.page.fill("#username", username);
+  await st.page.fill("#password", password);
+  await act(st.page, () => st.page.click("#kc-login"));
+  const k = await kind(st);
+  return { kind: k, error: k === "login" ? await fieldError(st.page) : "", shown: await st.page.inputValue("#username").catch(() => null),
+    html: await st.page.content() };
+}
 async function act(page, fn) {
   await Promise.all([page.waitForNavigation({ timeout: 20000 }).catch(() => null), fn()]);
   await page.waitForLoadState("domcontentloaded").catch(() => {});
@@ -176,8 +204,12 @@ async function drive(st, a, { stopAt = [], max = 12 } = {}) {
       await page.waitForURL((u) => u.toString() !== u0, { timeout: 3000 }).catch(() => null);
       if ((await kind(st)) === "webauthn-auth") await act(page, () => page.click("#authenticateWebAuthnButton"));
     } else if (k === "update-password") {
-      st.logoutSessionsChecked = await page.locator("#logout-sessions").isChecked().catch(() => null);
-      if (a.logoutOthers) await page.check("#logout-sessions");
+      // PID-D15: the gaiada theme sends logout-sessions=on as a hidden field instead of Keycloak's unticked checkbox
+      st.logoutSessions = {
+        checkbox: await page.locator("input[type=checkbox]#logout-sessions").count(),
+        hidden: await page.locator("input[type=hidden][name=logout-sessions][value=on]").count(),
+        notice: (await page.locator("#kc-logout-sessions-notice").innerText().catch(() => "")).trim(),
+      };
       await page.fill("#password-new", a.newPassword);
       await page.fill("#password-confirm", a.newPassword);
       await submit(page);
@@ -198,9 +230,51 @@ async function signIn(st, a, opts) {
 }
 const amrOf = (r) => (r.tokens && r.tokens.access_token ? JSON.stringify(claims(r.tokens.access_token).amr) : "no token");
 
-// ── scenarios ────────────────────────────────────────────────────────────────────────────────────────────────────
-async function main() {
-  browser = await chromium.launch({ args: ["--no-sandbox"] });
+// ── E2E_PART=client: the flow + theme on pid-test only, PHONE_REQUIRED=0 (PID-5b's shape, plan §6 risk 1) ─────────
+async function clientPart() {
+  // cleo: password only, her number set by the admin API (+6281234567009), no passkey yet
+  {
+    const st = await device([]);
+    const p = pkce();
+    await st.page.goto(authUrl(p));
+    const fl = await fieldLabel(st.page);
+    const forgot = await st.page.locator('a[href*="reset-credentials"]').count();
+    const r = await drive(st, { username: "0812-3456-7009", password: pw("cleo") });
+    const tok = r.kind === "callback" && st.code ? await exchange(st.code, p.verifier) : null;
+    rec("client: pid-test has the theme", fl === FIELD_LABEL && forgot === 0, `pid-test login page: field "${fl}"; "Forgot password?" links ${forgot} (not bound with BIND=client)`);
+    rec("client: phone sign-in, then the passkey is created", r.kind === "callback" && r.trail.includes("webauthn-register") && !r.trail.includes("profile"),
+      `pages ${r.trail.join(" -> ")} (no profile page: PHONE_REQUIRED=0); amr=${tok && tok.access_token ? JSON.stringify(claims(tok.access_token).amr) : "no token"}`);
+    await st.context.close();
+  }
+  // everyone else: another client (Keycloak's account console) keeps the realm's flow and theme
+  {
+    const st = await device([]);
+    await st.page.goto(accountAuthUrl(pkce()));
+    const fl = await fieldLabel(st.page);
+    const byPhone = await tryLogin(st, "081234567009", pw("cleo"), accountAuthUrl(pkce()));
+    const byEmail = await tryLogin(st, email("cleo"), pw("cleo"), accountAuthUrl(pkce()));
+    const left = st.page.url();
+    rec("client: other clients unchanged", fl === STOCK_FIELD_LABEL && byPhone.kind === "login" && !["login", "webauthn-auth", "webauthn-register", "profile"].includes(byEmail.kind) && left.startsWith(ACCOUNT),
+      `account-console: field "${fl}"; by number -> ${byPhone.kind} "${byPhone.error}" (the stock form knows no numbers); by email + password alone -> ${byEmail.kind}, at ${left.split("?")[0]} (no passkey asked)`);
+    await st.context.close();
+  }
+}
+
+// ── E2E_PART=stock: LOGIN_FORM=auth-username-password-form swapped back in by the script ────────────────────────────
+async function stockPart() {
+  // cleo: her number +6281234567009 and a passkey (from the client part); her password is unchanged
+  const st = await device([]);
+  const byPhone = await tryLogin(st, "081234567009", pw("cleo"));
+  const byEmail = await tryLogin(st, email("cleo"), pw("cleo"));
+  const cleo = await userByName(email("cleo"));
+  await admin("DELETE", `/attack-detection/brute-force/users/${cleo.id}`);
+  rec("stock form: phone sign-in off, username/email on", byPhone.kind === "login" && byPhone.error === INVALID && byEmail.kind === "webauthn-auth",
+    `by number -> ${byPhone.kind} "${byPhone.error}"; by email -> ${byEmail.kind} (the passkey step is still there)`);
+  await st.context.close();
+}
+
+// ── E2E_PART=main: the realm-bound flow ──────────────────────────────────────────────────────────────────────────
+async function mainPart() {
   const alice = await userByName(email("alice"));
 
   // (a) existing-style user: password only, no phone, username = email
@@ -210,6 +284,8 @@ async function main() {
     await st.page.goto(authUrl(p0));
     const label = (await st.page.locator("label[for=rememberMe]").innerText().catch(() => "")).trim();
     rec("2e label", label === LABEL, `login page remember-me label = "${label}"`);
+    const fl = await fieldLabel(st.page);
+    rec("2h field label", fl === FIELD_LABEL, `login page sign-in field label = "${fl}" (the gaiada theme)`);
     const forgot = await st.page.locator('a[href*="reset-credentials"]').count();
     rec("2d link", forgot > 0, `"Forgot password?" link on the login page: ${forgot}`);
     // a wrong-format phone first: the profile page must refuse it
@@ -302,7 +378,71 @@ async function main() {
       `pages ${r.trail.join(" -> ")}; no code; "try another way": ${other}; page: "${(r.text || (await text(st.page))).slice(0, 140)}"`);
     await st.context.close();
   }
-  info("c phone sign-in: out of scope here (PID-2h, the Java extension); username and email only");
+
+  // (h) PID-2h: sign-in by phone number. alice's number is +6281234567001 (set at her first sign-in, above).
+  {
+    const st = await device(aliceCreds);
+    const r = await signIn(st, { username: "081234567001", password: pw("alice") });
+    await keep(st);
+    rec("2h phone 08… + passkey", r.kind === "callback" && amrOf(r) === '["pwd","hwk"]', `"081234567001": pages ${r.trail.join(" -> ")}; amr=${amrOf(r)}`);
+    await st.context.close();
+  }
+  {
+    const seen = [];
+    for (const typed of ["+62 812-3456-7001", "6281234567001", "0812.3456.7001", "+62 0812 3456 7001"]) {
+      const st = await device([]); // the right password is enough to reach the passkey step
+      const r = await signIn(st, { username: typed, password: pw("alice") }, { stopAt: ["webauthn-auth"], max: 3 });
+      seen.push(`"${typed}" -> ${r.kind}`);
+      await st.context.close();
+    }
+    rec("2h phone forms", seen.every((x) => x.endsWith("webauthn-auth")), seen.join("; "));
+  }
+  {
+    const st = await device([]);
+    const before = (await bf(alice.id)).numFailures || 0;
+    const wrong = await tryLogin(st, "0812 3456 7001", "wrong-" + crypto.randomBytes(4).toString("hex"));
+    const after = (await bf(alice.id)).numFailures || 0;
+    const unknownPhone = await tryLogin(st, "+6281299999999", "whatever-1");
+    const unknownName = await tryLogin(st, "nobody.at.all", "whatever-1");
+    await admin("DELETE", `/attack-detection/brute-force/users/${alice.id}`);
+    rec("2h wrong password by phone", wrong.kind === "login" && wrong.error === INVALID && wrong.shown === "0812 3456 7001" && !/pid\.alice/.test(wrong.html),
+      `page ${wrong.kind}; error "${wrong.error}"; the field shows "${wrong.shown}" (what was typed); alice's username on the page: ${/pid\.alice/.test(wrong.html)}`);
+    rec("2h brute force counts phone attempts", after === before + 1,
+      `alice's brute-force failures ${before} -> ${after} after one wrong password typed as a phone number (the note holds her username)`);
+    rec("2h unknown number = unknown name", unknownPhone.kind === "login" && unknownPhone.error === INVALID && unknownName.error === INVALID,
+      `unknown number: "${unknownPhone.error}"; unknown name: "${unknownName.error}"`);
+    await st.context.close();
+  }
+  {
+    // a number two accounts hold: ivan gets bob's number (bob: +6281234567002 from (a2), no passkey yet)
+    const bob = await userByName(email("bob")), ivan = await userByName(email("ivan"));
+    const num = ((await admin("GET", `/users/${bob.id}`)).json.attributes || {}).phoneNumber;
+    const set = await setPhone(ivan.id, num && num[0]);
+    const st = await device([]);
+    const shared = await tryLogin(st, "081234567002", pw("bob"));
+    const byName = await tryLogin(st, email("bob"), pw("bob"));
+    const cleared = await setPhone(ivan.id, null);
+    const alone = await tryLogin(st, "081234567002", pw("bob"));
+    rec("2h shared number refused", set.status === 204 && shared.kind === "login" && shared.error === INVALID && byName.kind === "webauthn-register" && cleared.status === 204 && alone.kind === "webauthn-register",
+      `bob's number ${JSON.stringify(num)} also on ivan (PUT ${set.status}): by number + bob's right password -> ${shared.kind} "${shared.error}"; by bob's email -> ${byName.kind}; ivan's number cleared (PUT ${cleared.status}): by number -> ${alone.kind}`);
+    await st.context.close();
+  }
+  {
+    // one account's number is another account's username
+    const c = await admin("POST", "/users", { username: "081234567001", email: "pid.digits@example.invalid", firstName: "Pid", lastName: "Digits", enabled: true, emailVerified: true });
+    const id = c.location ? c.location.split("/").pop() : null;
+    const dpw = "Dg" + crypto.randomBytes(8).toString("hex") + "1!";
+    const p = id ? await admin("PUT", `/users/${id}/reset-password`, { type: "password", value: dpw, temporary: false }) : { status: 0 };
+    const st = await device([]);
+    const asAlice = await tryLogin(st, "081234567001", pw("alice"));
+    const asDigits = await tryLogin(st, "081234567001", dpw);
+    if (id) await admin("DELETE", `/users/${id}`);
+    const again = await tryLogin(st, "081234567001", pw("alice"));
+    if (id) await admin("DELETE", `/attack-detection/brute-force/users/${alice.id}`);
+    rec("2h number = another account's username: refused", c.status === 201 && p.status === 204 && asAlice.error === INVALID && asDigits.error === INVALID && again.kind === "webauthn-auth",
+      `user "081234567001" created ${c.status}: with alice's password -> "${asAlice.error}"; with its own password -> "${asDigits.error}"; once deleted, alice by number -> ${again.kind}`);
+    await st.context.close();
+  }
 
   // (e) remember-me ticked: ~7-day cookies, then SSO without any page
   let remembered;
@@ -354,29 +494,25 @@ async function main() {
     await admin("DELETE", `/authentication/flows/${f.id}`);
   }
 
-  // (d1) forgot password WITH the passkey: passkey -> new password. Twice: once as Keycloak shows the form (the
-  // "sign out from other devices" box unticked), once ticked. The remembered browser from (e) shows whether it ended.
-  const resetPw = [1, 2].map((i) => "New" + crypto.randomBytes(8).toString("hex") + i + "!");
-  const newAlicePw = resetPw[1];
-  for (const [i, tick] of [[0, false], [1, true]]) {
+  // (d1) forgot password WITH the passkey: passkey -> new password, the form as the gaiada theme shows it (nothing
+  // ticked by the test). PID-D15: the remembered browser from (e) must be signed out by the reset itself. (Keycloak's
+  // own form left its "sign out from other devices" box unticked and the session SURVIVED: the PID-2 finding.)
+  const newAlicePw = "New" + crypto.randomBytes(8).toString("hex") + "1!";
+  {
     const st = await device(aliceCreds);
     const pr = pkce();
     await st.page.goto(authUrl(pr));
     await act(st.page, () => st.page.click('a[href*="reset-credentials"]'));
-    const r = await drive(st, { resetUser: "pid.alice", newPassword: resetPw[i], logoutOthers: tick });
+    const r = await drive(st, { resetUser: "pid.alice", newPassword: newAlicePw });
     await keep(st);
     const sess = (await admin("GET", `/users/${alice.id}/sessions`)).json;
     const oldGone = !!rememberedSessionId && !sess.some((x) => x.id === rememberedSessionId);
     const r2 = await signIn(remembered, {}, { stopAt: ["login"], max: 1 });
-    if (!tick) {
-      rec("d1 reset with passkey", r.trail.includes("webauthn-auth") && r.trail.includes("update-password") && r.kind === "callback",
-        `pages ${r.trail.join(" -> ")}; amr of the reset sign-in=${r.kind === "callback" && st.code ? amrOf({ tokens: await exchange(st.code, pr.verifier) }) : "n/a"}`);
-      rec("d1 box left as shown: other sessions SURVIVE (finding)", true,
-        `"sign out from other devices" pre-ticked: ${st.logoutSessionsChecked}; remembered session ${oldGone ? "ended" : "STILL ACTIVE"}; the remembered browser -> ${r2.kind}`);
-    } else {
-      rec("d1 box ticked: other sessions end", oldGone && r2.kind !== "callback",
-        `ticked: remembered session ${oldGone ? "ended" : "STILL ACTIVE"}; sessions now ${sess.length}; the remembered browser -> ${r2.kind}`);
-    }
+    rec("d1 reset with passkey", r.trail.includes("webauthn-auth") && r.trail.includes("update-password") && r.kind === "callback",
+      `pages ${r.trail.join(" -> ")}; amr of the reset sign-in=${r.kind === "callback" && st.code ? amrOf({ tokens: await exchange(st.code, pr.verifier) }) : "n/a"}`);
+    const ls = st.logoutSessions || {};
+    rec("d1 a reset signs out the other devices (PID-D15)", ls.checkbox === 0 && ls.hidden === 1 && !!ls.notice && oldGone && r2.kind !== "callback",
+      `new-password page: checkbox ${ls.checkbox}, hidden logout-sessions=on ${ls.hidden}, notice "${ls.notice}"; remembered session ${oldGone ? "ended" : "STILL ACTIVE"}; sessions now ${sess.length}; the remembered browser -> ${r2.kind}`);
     await st.context.close();
   }
   await remembered.context.close();
@@ -409,32 +545,38 @@ async function main() {
     rec("d2 unknown name = same answer", ru.kind === rb.kind && ru.text === rb.text, `unknown name: pages ${ru.trail.join(" -> ")}; page "${ru.text.slice(0, 150)}"`);
   }
 
-  // (f) brute force: 3 wrong passwords -> temporary lockout (TEST realm: failureFactor 3, waits 15 s) -> recovers
+  // (f) brute force: 3 wrong passwords -> temporary lockout (TEST realm: failureFactor 3, waits 15 s) -> recovers.
+  // Typed as carl's PHONE NUMBER throughout (PID-2h): the lockout must not be escapable by naming him another way.
   {
     const carl = await userByName(email("carl"));
+    const CARL = "0812-3456-7006";
+    const sp = await setPhone(carl.id, "+6281234567006");
     const st = await device([]);
     await st.page.goto(authUrl(pkce()));
     for (let i = 0; i < 3; i++) {
-      await st.page.fill("#username", email("carl"));
+      await st.page.fill("#username", CARL);
       await st.page.fill("#password", "wrong-" + i);
       await act(st.page, () => st.page.click("#kc-login"));
       await sleep(1300); // slower than quickLoginCheckMilliSeconds, so this counts failures, not the quick-login rule
     }
     const s1 = await bf(carl.id);
-    await st.page.fill("#username", email("carl"));
+    await st.page.fill("#username", CARL);
     await st.page.fill("#password", pw("carl"));
     await act(st.page, () => st.page.click("#kc-login"));
     const lockedKind = await kind(st), lockedText = await text(st.page);
     const u1 = (await admin("GET", `/users/${carl.id}`)).json;
-    rec("f locked", lockedKind === "login" && s1.disabled === true && u1.enabled === true,
-      `after 3 wrong: status ${JSON.stringify(s1)}; right password refused with "${(lockedText.match(/Invalid[^.]*\./) || [lockedText.slice(0, 60)])[0]}"; user.enabled=${u1.enabled} (temporary, not permanent)`);
+    const lockedMsg = await fieldError(st.page);
+    rec("f locked (by phone)", sp.status === 204 && lockedKind === "login" && s1.disabled === true && u1.enabled === true && lockedMsg === INVALID,
+      `carl's number set (PUT ${sp.status}); after 3 wrong by number: status ${JSON.stringify(s1)}; right password by number refused with "${lockedMsg}" (the same text as a wrong password: a lockout reveals nothing); user.enabled=${u1.enabled} (temporary, not permanent)`);
+    const byEmail = await tryLogin(st, email("carl"), pw("carl"));
+    rec("f locked whatever the name", byEmail.kind === "login" && byEmail.error === INVALID, `while locked, the right password by email -> ${byEmail.kind} "${byEmail.error}"`);
     await sleep(17000);
     await st.page.goto(authUrl(pkce()));
-    await st.page.fill("#username", email("carl"));
+    await st.page.fill("#username", CARL);
     await st.page.fill("#password", pw("carl"));
     await act(st.page, () => st.page.click("#kc-login"));
     const k2 = await kind(st);
-    rec("f recovers", k2 !== "login", `17 s later the right password passes to: ${k2}; status ${JSON.stringify(await bf(carl.id))}`);
+    rec("f recovers", k2 !== "login", `17 s later the right password by number passes to: ${k2}; status ${JSON.stringify(await bf(carl.id))}`);
     await st.context.close();
   }
 
@@ -565,7 +707,14 @@ async function main() {
     rec("2e client session rule", x.status >= 400 || true,
       `realm clientSessionIdle/Max now ${realm.clientSessionIdleTimeout}/${realm.clientSessionMaxLifespan} (0 = follow SSO); setting clientSessionMaxLifespan 700000 > sso max ${realm.ssoSessionMaxLifespan} -> HTTP ${x.status} ${typeof x.json === "object" ? JSON.stringify(x.json).slice(0, 160) : ""}`);
   }
+}
 
+async function main() {
+  browser = await chromium.launch({ args: ["--no-sandbox"] });
+  const parts = { main: mainPart, client: clientPart, stock: stockPart };
+  if (!parts[PART]) throw new Error(`unknown E2E_PART ${PART}`);
+  console.log(`E2E PART ${PART}`);
+  await parts[PART]();
   await browser.close();
   const failed = results.filter((r) => !r.ok);
   console.log(`E2E RESULT: ${failed.length === 0 ? "PASS" : "FAIL"} (${results.length - failed.length}/${results.length})${failed.length ? " failed: " + failed.map((f) => f.id).join(", ") : ""}`);

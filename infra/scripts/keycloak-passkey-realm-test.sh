@@ -3,23 +3,26 @@
 # (nothing can call out), the repo realm file (no live data), then keycloak-passkey-realm.sh and a Playwright run with
 # Chrome's virtual authenticator. Never touches live.
 #
-#   keycloak-passkey-realm-test.sh all          # up, apply, e2e, revert-check, down (one run, cleans up on exit)
-#   keycloak-passkey-realm-test.sh up|apply|e2e|revert-check|down   # the same steps one at a time (iteration)
+#   keycloak-passkey-realm-test.sh all          # up, client-check, apply, e2e, stockform-check, revert-check, down
+#                                               # (one run, cleans up on exit)
+#   keycloak-passkey-realm-test.sh up|client-check|apply|e2e|stockform-check|revert-check|down   # one at a time
 #
 # Files expected next to it in ~/kc-pid2: keycloak-passkey-realm.sh, keycloak-passkey-realm.e2e.cjs,
-# gaiada-realm.json (the repo's infra/compose/keycloak/gaiada-realm.json), pw/node_modules/playwright-core (1.56.0,
-# installed once: see the e2e file's header). The lock ~/e2e.lock is held from `up` to `down`.
+# gaiada-realm.json (the repo's infra/compose/keycloak/gaiada-realm.json), keycloak/ (the repo's keycloak/ component:
+# `up` builds the gaiada-keycloak image from it, PID-2h), pw/node_modules/playwright-core (1.56.0, installed once: see
+# the e2e file's header). The lock ~/e2e.lock is held from `up` to `down`.
 #
-# Like live, the realm is born on 26.0.8 and upgraded to 26.8.1 (so the copied `browser` flow has live's shape).
+# Like live, the realm is born on 26.0.8 and upgraded, here to the gaiada-keycloak image (26.8.1 + the phone sign-in
+# form + the gaiada login theme), so the copied `browser` flow has live's shape.
 # The test realm uses SHORT brute-force waits (15 s instead of 60/900 s) and failureFactor 3, so the lockout and its
 # recovery can be driven in a minute; the script's defaults are the live values.
 set -uo pipefail
 MODE=${1:?usage: keycloak-passkey-realm-test.sh all|up|apply|e2e|revert-check|down}
 D=$HOME/kc-pid2; ST=$D/state.env; LOCK=$HOME/e2e.lock
 NET=pid2-net; PGC=pid2-pg; KC=pid2-kc
-OLD=quay.io/keycloak/keycloak:26.0.8; NEW=quay.io/keycloak/keycloak:26.8.1; PGI=postgres:15.18
+OLD=quay.io/keycloak/keycloak:26.0.8; NEW=pid2-kc:test; PGI=postgres:15.18
 PWI=mcr.microsoft.com/playwright:v1.56.0-noble
-USERS="alice bob nina carl sam tess ivan"
+USERS="alice bob nina carl sam tess ivan cleo"
 pass() { echo "PASS $*"; }
 fail() { echo "FAIL $*"; }
 
@@ -43,13 +46,15 @@ script_env() { # the realm script with the test parameters
   "$@"
 }
 export_norm() { # normalised partial export of the realm (sorted keys) -> stdout
-  # -o: kcadm create prints the response body only with -o (an empty export must never compare equal)
-  K create realms/gaiada/partial-export -q exportClients=true -q exportGroupsAndRoles=true -o | jq -e -S 'del(.clients[]?.secret)' \
+  # -o: kcadm create prints the response body only with -o (an empty export must never compare equal).
+  # loginTheme "" = no theme: once a realm has had a login theme, the admin API can only set it back to "", never absent.
+  K create realms/gaiada/partial-export -q exportClients=true -q exportGroupsAndRoles=true -o \
+    | jq -e -S 'del(.clients[]?.secret) | if .loginTheme == "" then del(.loginTheme) else . end' \
     || { echo "FAIL partial export empty or not JSON" >&2; return 1; }
 }
 
 down() {
-  docker rm -f "$KC" "$PGC" pid2-pw >/dev/null 2>&1; docker network rm "$NET" >/dev/null 2>&1
+  docker rm -f "$KC" "$PGC" pid2-pw >/dev/null 2>&1; docker network rm "$NET" >/dev/null 2>&1; docker image rm "$NEW" >/dev/null 2>&1
   [ -f "$ST" ] && shred -u "$ST"; rm -rf "$D/backups" "$D/exports"
   [ -d "$LOCK" ] && grep -q PID-2 "$LOCK/owner" 2>/dev/null && rm -rf "$LOCK"
   echo "down: $(docker ps -a --filter name=pid2- --format '{{.Names}}' | wc -l) pid2 containers left, network $(docker network ls --filter name=$NET -q | wc -l), lock $([ -d "$LOCK" ] && echo held || echo free)"
@@ -58,7 +63,10 @@ down() {
 up() {
   mkdir "$LOCK" 2>/dev/null || { echo "STOP: $LOCK is held by: $(cat "$LOCK"/* 2>/dev/null)"; exit 2; }
   echo "PID-2 passkey realm proof by $(whoami), $(date -u +%FT%TZ) (containers pid2-*)" > "$LOCK/owner"
-  for i in "$OLD" "$NEW" "$PGI" "$PWI"; do docker image inspect "$i" >/dev/null 2>&1 || docker pull -q "$i" >/dev/null || { echo "STOP: cannot pull $i"; exit 2; }; done
+  for i in "$OLD" "$PGI" "$PWI"; do docker image inspect "$i" >/dev/null 2>&1 || docker pull -q "$i" >/dev/null || { echo "STOP: cannot pull $i"; exit 2; }; done
+  # the gaiada-keycloak image, from the same Dockerfile release.yml builds (its unit tests run inside the build)
+  docker build -q -t "$NEW" "$D/keycloak" >/dev/null && pass "gaiada-keycloak image built ($(docker run --rm --entrypoint ls "$NEW" /opt/keycloak/providers /opt/keycloak/themes | tr '\n' ' '))" \
+    || { fail "image build (docker build $D/keycloak)"; exit 1; }
   ( umask 077; : > "$ST" )
   PGPW=$(openssl rand -hex 16); ADMPW=$(openssl rand -hex 16)
   { echo "PGPW=$PGPW"; echo "ADMPW=$ADMPW"; for u in $USERS; do echo "PW_${u^^}=$(openssl rand -hex 10)Aa1!"; done; } >> "$ST"
@@ -72,9 +80,9 @@ up() {
     K create users -r gaiada -s username="pid.$u@example.invalid" -s email="pid.$u@example.invalid" -s firstName=Pid -s lastName="${u^}" -s enabled=true -s emailVerified=true >/dev/null || fail "user $u"
     v=PW_${u^^}; docker exec -e P="${!v}" -e U="pid.$u@example.invalid" "$KC" sh -c '/opt/keycloak/bin/kcadm.sh set-password -r gaiada --username "$U" --new-password "$P" --config /tmp/h.cfg' >/dev/null || fail "password $u"
   done
-  pass "7 seed users (username = email, password only, no phone), like live's 75"
+  pass "$(wc -w <<<"$USERS") seed users (username = email, password only, no phone), like live's 75"
   docker rm -f "$KC" >/dev/null
-  kc_up "$NEW" && kc_login && pass "upgraded to 26.8.1 (schema migrated)" || { fail "26.8.1 up"; docker logs "$KC" 2>&1 | grep -E 'ERROR|Exception' | head; exit 1; }
+  kc_up "$NEW" && kc_login && pass "upgraded to 26.8.1 + PID-2h (schema migrated)" || { fail "26.8.1 up"; docker logs "$KC" 2>&1 | grep -E 'ERROR|Exception' | head; exit 1; }
   K create clients -r gaiada -b '{"clientId":"pid-test","publicClient":true,"standardFlowEnabled":true,"directAccessGrantsEnabled":false,"redirectUris":["http://localhost:8080/pid-cb/*"],"webOrigins":["+"],"attributes":{"pkce.code.challenge.method":"S256"}}' >/dev/null \
     && pass "test client pid-test (public, standard flow, PKCE S256)" || fail "test client"
   echo "browser flow as migrated from 26.0.8:"; K get authentication/flows/browser/executions -r gaiada | jq -r '.[]|"  \("  "*.level)\(.displayName) \(.requirement)"'
@@ -107,7 +115,7 @@ e2e() {
   load
   # shellcheck disable=SC2046
   docker run --rm --name pid2-pw --network container:"$KC" --memory 1500m -v "$D/pw":/w:ro -v "$D":/e2e:ro -e NODE_PATH=/w/node_modules \
-    -e ADMPW -e PW_ALICE -e PW_BOB -e PW_NINA -e PW_CARL -e PW_SAM -e PW_TESS -e PW_IVAN -e KC_BASE=http://localhost:8080/idp \
+    -e ADMPW -e PW_ALICE -e PW_BOB -e PW_NINA -e PW_CARL -e PW_SAM -e PW_TESS -e PW_IVAN -e PW_CLEO -e E2E_PART -e KC_BASE=http://localhost:8080/idp \
     "$PWI" node /e2e/keycloak-passkey-realm.e2e.cjs
 }
 
@@ -125,8 +133,61 @@ revert_check() {
   [ "$rc" = 0 ]
 }
 
+realm_view() { K get realms/gaiada | jq -c '{browserFlow,resetCredentialsFlow,loginTheme,resetPasswordAllowed,editUsernameAllowed}'; }
+vp_view() { K get authentication/required-actions -r gaiada | jq -c '[.[]|select(.alias=="VERIFY_PROFILE")|.enabled]'; }
+
+# PID-5b's shape (plan §6 risk 1): the flow and the theme on ONE client, PHONE_REQUIRED=0, nothing anyone else sees
+# changes; cleo signs in through that client by phone; then the revert of exactly that apply.
+client_check() {
+  load; kc_login || { fail "admin login"; exit 1; }
+  mkdir -p "$D/exports"; export_norm > "$D/exports/before-client.json"
+  local r0 v0 r1 v1 cl fid cleo b rc
+  r0=$(realm_view); v0=$(vp_view)
+  script_env env BIND=client:pid-test PHONE_REQUIRED=0 STEPS="profile webauthn theme browser amr" bash "$D/keycloak-passkey-realm.sh" apply; rc=$?
+  [ $rc = 0 ] && pass "client apply (BIND=client:pid-test, PHONE_REQUIRED=0)" || { fail "client apply rc $rc"; return 1; }
+  fid=$(K get authentication/flows -r gaiada | jq -r '.[]|select(.alias=="gaiada-passkey-browser")|.id')
+  cl=$(K get clients -r gaiada -q clientId=pid-test | jq -c '.[0]|{browser:.authenticationFlowBindingOverrides.browser,theme:.attributes.login_theme}')
+  r1=$(realm_view); v1=$(vp_view)
+  [ "$cl" = "{\"browser\":\"$fid\",\"theme\":\"gaiada\"}" ] && [ "$r1" = "$r0" ] && [ "$v1" = "$v0" ] \
+    && pass "only pid-test changed: $cl; realm $r1 unchanged; VERIFY_PROFILE $v1 unchanged" \
+    || fail "client bind: pid-test $cl (flow $fid); realm $r0 -> $r1; VERIFY_PROFILE $v0 -> $v1"
+  K get users/profile -r gaiada | jq -e 'first(.attributes[]|select(.name=="phoneNumber")) | has("required") | not' >/dev/null \
+    && pass "phoneNumber attribute present and NOT required (nobody is asked for it)" || fail "phoneNumber required with PHONE_REQUIRED=0"
+  # "IT" sets cleo's phone (the admin API; PID-3d's page later), then the browser part
+  cleo=$(K get users -r gaiada -q username=pid.cleo@example.invalid -q exact=true | jq -r '.[0].id')
+  K update "users/$cleo" -r gaiada -s 'attributes.phoneNumber=["+6281234567009"]' >/dev/null && pass "cleo's phone set by the admin API" || fail "set cleo's phone"
+  E2E_PART=client e2e; rc=$?
+  b=$(ls -d "$D"/backups/pid2-gaiada-* | sort | tail -1)
+  script_env bash "$D/keycloak-passkey-realm.sh" revert "$b" || rc=1
+  export_norm > "$D/exports/after-client-revert.json"
+  if diff <(jq -S 'del(.users)' "$D/exports/before-client.json") <(jq -S 'del(.users)' "$D/exports/after-client-revert.json") > "$D/exports/diff-client.txt"; then
+    pass "client revert: partial export identical to before the client apply"
+  else fail "client revert: $(grep -c '^[<>]' "$D/exports/diff-client.txt") differing lines:"; cut -c1-220 "$D/exports/diff-client.txt" | head -40; rc=1; fi
+  [ "$rc" = 0 ]
+}
+
+# The revert of the phone sign-in alone (plan §6 risk 11): the script swaps the stock form back; phone sign-in stops,
+# username sign-in goes on; then forward again. The amr references must follow the form each time.
+stockform_check() {
+  load; kc_login || { fail "admin login"; exit 1; }
+  local shape n rc=0
+  form_shape() { K get "authentication/flows/gaiada-passkey-browser%20forms/executions" -r gaiada | jq -c '[.[]|select(.level==0)|[.providerId,.requirement,(.authenticationConfig != null)]]'; }
+  pwd_cfgs() { export_norm | jq '[.authenticatorConfig[]?|select(.alias=="pid-amr-pwd")]|length'; }
+  script_env env STEPS=browser LOGIN_FORM=auth-username-password-form bash "$D/keycloak-passkey-realm.sh" apply | grep -E 'swap|STOP|config'; rc=${PIPESTATUS[0]}
+  shape=$(form_shape); n=$(pwd_cfgs)
+  [ "$rc" = 0 ] && [ "$shape" = '[["auth-username-password-form","REQUIRED",true],["webauthn-authenticator","REQUIRED",true]]' ] && [ "$n" = 1 ] \
+    && pass "stock form back: $shape; pid-amr-pwd configs $n" || { fail "swap to the stock form: rc $rc, $shape, pid-amr-pwd configs $n"; rc=1; }
+  E2E_PART=stock e2e || rc=1
+  script_env bash "$D/keycloak-passkey-realm.sh" apply | grep -E 'swap|STOP'; [ "${PIPESTATUS[0]}" = 0 ] || rc=1
+  shape=$(form_shape); n=$(pwd_cfgs)
+  [ "$shape" = '[["gaiada-phone-username-password-form","REQUIRED",true],["webauthn-authenticator","REQUIRED",true]]' ] && [ "$n" = 1 ] \
+    && pass "phone form forward again: $shape; pid-amr-pwd configs $n" || { fail "swap back to the phone form: $shape, configs $n"; rc=1; }
+  [ "$rc" = 0 ]
+}
+
 case "$MODE" in
-  up) up ;; apply) apply ;; e2e) e2e ;; revert-check) revert_check ;; down) down ;;
-  all) trap down EXIT; up && apply && { e2e; e=$?; revert_check; r=$?; echo "RESULT: e2e exit $e, revert-check exit $r"; [ "$e" = 0 ] && [ "$r" = 0 ]; } ;;
+  up) up ;; client-check) client_check ;; apply) apply ;; e2e) e2e ;; stockform-check) stockform_check ;; revert-check) revert_check ;; down) down ;;
+  all) trap down EXIT; up && client_check && apply && { e2e; e=$?; stockform_check; s=$?; revert_check; r=$?
+       echo "RESULT: client-check passed, e2e exit $e, stockform-check exit $s, revert-check exit $r"; [ "$e" = 0 ] && [ "$s" = 0 ] && [ "$r" = 0 ]; } ;;
   *) echo "unknown mode"; exit 2 ;;
 esac

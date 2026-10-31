@@ -1,0 +1,114 @@
+# PID-2h: builds, signs and pushes ghcr.io/<owner>/gaiada-keycloak:<KEYCLOAK_VERSION>-<tree>, the stock Keycloak image
+# + the phone sign-in form + the gaiada login theme (keycloak/, docs/plans/2026-10-30-phone-identity.md §5.3).
+#
+# Why not release.yml: every release gives every release.yml image a new tag, and compose recreates a container whose
+# image reference changes, so Keycloak (the sign-in for everyone) would restart at every release, and a rollback to an
+# older release would ask for a tag that was never built. This image is named by its CONTENT instead:
+#   <tree> = the first 12 characters of `git rev-parse HEAD:keycloak`, the git tree id of the keycloak/ directory.
+# The same sources always give the same tag; compose pins that tag like any third-party image (postgres, cerbos), so
+# Keycloak restarts only when keycloak/ changes and the compose line is moved on purpose (risk 15: in the owner's window).
+#
+# Signed like release.yml's images (cosign keyless + SBOM attestation + SLSA provenance). Verify before deploy:
+#   cosign verify ghcr.io/<owner>/gaiada-keycloak:<tag> \
+#     --certificate-identity-regexp "https://github.com/<owner>/.+/.github/workflows/keycloak-image.yml@.+" \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+name: keycloak-image
+
+on:
+  push:
+    branches: [main]
+    paths: ["keycloak/**", ".github/workflows/keycloak-image.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: keycloak-image
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write # push to GHCR
+  id-token: write # Sigstore keyless signing + provenance (OIDC)
+  attestations: write # actions/attest-build-provenance
+
+jobs:
+  build-sign:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/gaiada-keycloak
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag from the sources
+        id: tag
+        run: |
+          set -euo pipefail
+          ver=$(sed -n 's/^ARG KEYCLOAK_VERSION=//p' keycloak/Dockerfile)
+          tree=$(git rev-parse HEAD:keycloak | cut -c1-12)
+          [ -n "$ver" ] && [ -n "$tree" ]
+          echo "tag=${ver}-${tree}" >> "$GITHUB_OUTPUT"
+          echo "gaiada-keycloak:${ver}-${tree}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same sources, same tag: an image that already exists is never rebuilt or re-pushed, so a pinned tag never
+      # moves to a new digest under a running deploy.
+      - name: Already published?
+        id: exists
+        run: |
+          if docker manifest inspect "$IMAGE:${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"; echo "$IMAGE:${{ steps.tag.outputs.tag }} exists: nothing to do"
+          else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Set up Buildx
+        if: steps.exists.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push (the Dockerfile runs the unit tests)
+        id: build
+        if: steps.exists.outputs.exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./keycloak
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+          provenance: false # the SLSA attestation below
+          sbom: false # generated and attested below
+
+      - name: Install cosign
+        if: steps.exists.outputs.exists == 'false'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Generate SBOM (SPDX)
+        if: steps.exists.outputs.exists == 'false'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Sign image (keyless)
+        if: steps.exists.outputs.exists == 'false'
+        run: cosign sign --yes ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+
+      - name: Attest SBOM to the image (keyless)
+        if: steps.exists.outputs.exists == 'false'
+        run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+
+      - name: SLSA build provenance attestation
+        if: steps.exists.outputs.exists == 'false'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Summary
+        run: |
+          echo "### gaiada-keycloak" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$IMAGE:${{ steps.tag.outputs.tag }}\` (already published: ${{ steps.exists.outputs.exists }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "Compose pins this tag when the owner moves Keycloak onto it (PID-2h, infra/runbooks/keycloak-passkey-rollout.md)." >> "$GITHUB_STEP_SUMMARY"

@@ -24,6 +24,7 @@ deploy). Nothing is shared through packages; contracts are shared through HTTP +
 | `ai-agents/` | WS8 specialist + supervisor agent framework | ✅ |
 | `automation/` | n8n compose + versioned workflow JSON | ✅ |
 | `infra/` | compose files, nginx, observability, backup/restore, runbooks | ✅ |
+| `keycloak/` | the Keycloak image: stock Keycloak + the phone sign-in form (Java) + the gaiada login theme | ✅ |
 | `search-crawl-go/` | owned crawler for the SEO/SEM department | — |
 | `report-renderer/` | Playwright PDF sidecar for the reporting program | — |
 | `hermes-gateway/`, `meeting-bot/`, `capture-helper/`, `creative-grading-trainer/` | edge/side services | — |
