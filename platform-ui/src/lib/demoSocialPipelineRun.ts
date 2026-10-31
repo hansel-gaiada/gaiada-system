@@ -463,7 +463,17 @@ function targetOf(a: FxAction, p: PipePost, params: Record<string, unknown>): En
 
 // ── One stage action, in the server's order ────────────────────────────────────────────────────────────────────────────────
 
-interface Req { postId: string; action: string; params: Record<string, unknown>; expectedStatus?: string; actionId?: string; requireExpectedStatus?: boolean }
+/**
+ * SCP-5e (BFF §63.26.3): what a post edit that carries `savedItemIds` asks of the demo's Saved store, which this module cannot import (it imports this one). `judge` is the server's two checks, in its
+ * place: after the gate (the body of the action is judged) and before the machine's own guards, the list must be 1 to 10 distinct ids (400 `savedItemIds`) and each a live item of the post's client
+ * (the same 400); null goes on. `count` runs only when the edit applied (never for a replay): one more use for each item, in the same step.
+ */
+export interface SavedUse {
+  judge: (engagementId: string, raw: unknown) => DemoResult | null;
+  count: (engagementId: string, raw: unknown) => void;
+}
+
+interface Req { postId: string; action: string; params: Record<string, unknown>; expectedStatus?: string; actionId?: string; requireExpectedStatus?: boolean; saved?: { raw: unknown; use: SavedUse } }
 
 function stage(r: Req, userId: string, composer: boolean): Out {
   // 1
@@ -507,12 +517,19 @@ function stage(r: Req, userId: string, composer: boolean): Out {
     const problem = paramRule(a.action, name, prose)(name, r.params[name], r.params);
     if (problem) return refuse(problem.code, { field: problem.field });
   }
+  // 10b: SCP-5e, the saved items of an edit are judged here, after the gate and before the machine's own guards (the server judges them before the lock's guards)
+  if (r.saved) {
+    const bad = r.saved.use.judge(p.engagementId, r.saved.raw);
+    if (bad) return { ok: false, result: bad };
+  }
   // 11
   const now = new Date();
   const g = guards(a, p, r, userId, now);
   if (g.fail) return g.fail;
   // 12
-  return commit(a, p, r, userId, now, g.skipped);
+  const done = commit(a, p, r, userId, now, g.skipped);
+  if (r.saved && done.ok && !done.alreadyApplied) r.saved.use.count(p.engagementId, r.saved.raw);
+  return done;
 }
 
 function guards(a: FxAction, p: PipePost, r: Req, userId: string, now: Date): { fail: Out | null; skipped: { codes: string[]; reason: string } | null } {
@@ -683,7 +700,9 @@ const BULK = new Set(["send_to_proofread", "approve_copy"]);
  * Every other write of the section, by route: edit, suggestions, designs and bulk. Returns null for a path that is none of them (the caller falls through).
  * `tail` is the path after `modules/social/`; `isComposer(id)` says whether an id is a Composer post of the legacy store.
  */
-export function runDemoPipelineWrite(method: string, tail: string, body: unknown, userId: string, isComposer: (id: string) => boolean = () => false): DemoResult | null {
+export function runDemoPipelineWrite(
+  method: string, tail: string, body: unknown, userId: string, isComposer: (id: string) => boolean = () => false, savedUse?: SavedUse,
+): DemoResult | null {
   const b = isObj(body) ? body : {};
   const split = () => { const { expectedStatus, actionId, ...rest } = b; return { expectedStatus: ctrl(expectedStatus), actionId: ctrl(actionId), rest }; };
 
@@ -706,7 +725,9 @@ export function runDemoPipelineWrite(method: string, tail: string, body: unknown
   let m = /^posts\/([^/]+)\/pipeline$/.exec(tail);
   if (m && method === "PATCH") {
     const s = split();
-    return answered("edit", stage({ postId: m[1], action: "edit", params: { fields: b.fields }, expectedStatus: s.expectedStatus }, userId, isComposer(m[1])), userId);
+    // SCP-5e: `savedItemIds` rides the edit (present and not undefined: a JSON null is judged, and refused, like the server's).
+    const saved = savedUse && b.savedItemIds !== undefined ? { raw: b.savedItemIds, use: savedUse } : undefined;
+    return answered("edit", stage({ postId: m[1], action: "edit", params: { fields: b.fields }, expectedStatus: s.expectedStatus, actionId: s.actionId, ...(saved ? { saved } : {}) }, userId, isComposer(m[1])), userId);
   }
 
   m = /^posts\/([^/]+)\/suggestions\/([^/]+)$/.exec(tail);

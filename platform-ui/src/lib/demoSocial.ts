@@ -19,7 +19,7 @@ import { demoBoostsRoute } from "./demoSocialBoosts";
 import { demoReportsRoute } from "./demoSocialReports";
 import { demoReportRunsRoute } from "./demoSocialReportRuns";
 import { demoIdeasRoute } from "./demoSocialIdeas";
-import { demoSavedRoute } from "./demoSocialSaved";
+import { demoSavedRoute, demoSavedUse } from "./demoSocialSaved";
 import { demoAuditRoute } from "./demoSocialAudit";
 import { demoOnboardingRoute } from "./demoSocialOnboarding";
 import { demoReportSchedulesRoute } from "./demoSocialReportSchedules";
@@ -1051,7 +1051,7 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   // SCP-3c (BFF §63.10): a post's metrics, the read and the officer's entry (`demoSocialMetrics.ts`).
   const metricsAnswer = demoSocialMetrics(m, tail, body, userId, isComposerPost); if (metricsAnswer) return metricsAnswer;
   if (m !== "GET" && /^posts\/(actions$|[^/]+\/(pipeline$|suggestions\/|designs))/.test(tail)) {
-    const piped = runDemoPipelineWrite(m, tail, b(), userId, isComposerPost);
+    const piped = runDemoPipelineWrite(m, tail, b(), userId, isComposerPost, demoSavedUse);
     if (piped) return piped;
   }
 

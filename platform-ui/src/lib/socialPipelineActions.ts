@@ -63,9 +63,15 @@ export async function runSimulatedPublishNow(postId: string): Promise<WriteResul
   return run((c) => platformFetch<unknown>(`${base(c.tenant)}/posts/${encodeURIComponent(postId)}/simulated-publish-now`, c.userId, { method: "POST", body: JSON.stringify({}) }));
 }
 
-/** `PATCH posts/:postId/pipeline`: the fields the post's status allows (409 `field_locked` for any other). */
-export async function savePostFields(postId: string, expectedStatus: string, fields: Record<string, unknown>): Promise<WriteResult> {
-  return run((c) => platformFetch<unknown>(`${base(c.tenant)}/posts/${encodeURIComponent(postId)}/pipeline`, c.userId, { method: "PATCH", body: JSON.stringify({ expectedStatus, fields }) }));
+/**
+ * `PATCH posts/:postId/pipeline`: the fields the post's status allows (409 `field_locked` for any other). SCP-5e (BFF §63.26.3): `extra.savedItemIds` (1 to 10 stored Saved items of the post's client)
+ * makes the server count one use for each in the edit's own transaction, only when the edit applies (400 `{field: 'savedItemIds'}` for an item of another client); `extra.actionId` is the click's replay key.
+ */
+export async function savePostFields(
+  postId: string, expectedStatus: string, fields: Record<string, unknown>, extra: { savedItemIds?: string[]; actionId?: string } = {},
+): Promise<WriteResult> {
+  const body = { expectedStatus, fields, ...(extra.savedItemIds ? { savedItemIds: extra.savedItemIds } : {}), ...(extra.actionId ? { actionId: extra.actionId } : {}) };
+  return run((c) => platformFetch<unknown>(`${base(c.tenant)}/posts/${encodeURIComponent(postId)}/pipeline`, c.userId, { method: "PATCH", body: JSON.stringify(body) }));
 }
 
 /** `PUT posts/:postId/suggestions/:field`: the Copywriter's suggestion on one copy field, while the post is in proofread. */

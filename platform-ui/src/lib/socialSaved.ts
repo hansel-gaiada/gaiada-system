@@ -31,7 +31,7 @@ export const POSTS_KEY = "posts";
 export const HASHTAGS_KEY = "hashtags";
 
 /** The server's lengths (BFF §63.26.1), mirrored for the forms' own checks. */
-export const SAVED_LIMITS = { title: 120, body: 5000, url: 500, pillar: 60, aiNote: 1000, pageDefault: 30 } as const;
+export const SAVED_LIMITS = { title: 120, body: 5000, url: 500, pillar: 60, aiNote: 1000, useIds: 10, pageDefault: 30 } as const;
 
 export const HOLDS_LABEL: Readonly<Record<SavedHolds, string>> = { asset: "Asset Library photo", link: "Link", text: "Text" };
 export const MEDIA_LABEL: Readonly<Record<SavedMedia, string>> = { photo: "Photo", video: "Video" };
