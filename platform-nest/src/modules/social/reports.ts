@@ -234,6 +234,26 @@ export function withShortKindFacts(frozen: FrozenSocialReportMetrics, x: ShortKi
   };
 }
 
+/** SCP-5 W5-B2 (BFF §63.25.1): one idea marked shared with the client, the three fields the report prints. */
+export interface SharedIdeaFact { saw: string; metric: string | null; suggestion: string }
+
+/**
+ * The monthly report's "Ideas we shared" table: the client's ideas marked shared since the previous monthly report, when the company's
+ * rules print them (`ideas.sharedInMonthlyReport`, the caller's decision). It rides in the frozen snapshot beside the other tables, so the
+ * page, the PDF and a sent report all read the same rows. No table when there is no idea: the document is then the one it always was.
+ */
+export function withSharedIdeas(frozen: FrozenSocialReportMetrics, ideas: SharedIdeaFact[]): FrozenSocialReportMetrics {
+  if (ideas.length === 0) return frozen;
+  return {
+    ...frozen,
+    tables: [...frozen.tables, {
+      key: "ideas_shared", label: "Ideas we shared",
+      columns: [{ key: "saw", label: "What we saw" }, { key: "metric", label: "Metric" }, { key: "suggestion", label: "What we suggest" }],
+      rows: ideas.map((i) => ({ saw: i.saw, metric: i.metric, suggestion: i.suggestion })),
+    }],
+  };
+}
+
 function seriesFor(
   key: string, label: string, unit: ReportSeries["unit"], daily: DailyMetricInput[], rangeStart: string, rangeEnd: string,
   pick: (d: DailyMetricInput) => number | null | undefined,

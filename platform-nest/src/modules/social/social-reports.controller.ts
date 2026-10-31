@@ -57,10 +57,10 @@ import { aiAttribution } from "../ai-usage/gateway-usage";
 import { queryBrandKnowledge } from "./knowledge-client";
 import { buildReportNarrativePrompt, findUngroundedNumbers, parseReportNarrativeDraft, type ReportNarrativeGroundingFacts } from "./ai-drafts";
 import {
-  periodDateRange, buildSocialReportSnapshot, buildSocialReportDocument, withShortKindFacts,
+  periodDateRange, buildSocialReportSnapshot, buildSocialReportDocument, withShortKindFacts, withSharedIdeas,
   type ReportKind, type FrozenSocialReportMetrics,
 } from "./reports";
-import { readReportInputs, readShortKindExtras } from "./report-data";
+import { readReportInputs, readSharedIdeas, readShortKindExtras } from "./report-data";
 import {
   buildMonthlyReportDraftPrompt, parseMonthlyReportDraft, readStoredActionPlan, readStoredNotes,
   type ReportAction, type ReportNotes,
@@ -80,7 +80,7 @@ import { PdfRendererNotConfiguredError, mintPrintJobToken, renderPdfViaSidecar }
 // SCP-1b / SCP-5a (PERMISSION-CONTRACT §53.7, BFF §63.18): every social_report call site sends `module: "social"` and the
 // company's seat approvers (`approverIds`), because `approve` and `deliver` belong to the four social approvers only.
 import { loadSocialApproverIds, socialReportResource } from "./pipeline-authz";
-import { reportKindRules, rulesByRef, rulesRefFor, socialRules, type ReportKindRules } from "./pipeline/rules";
+import { ideasSettings, reportKindRules, rulesByRef, rulesRefFor, socialRules, type ReportKindRules } from "./pipeline/rules";
 import { periodRange } from "./pipeline/rules-periods";
 import { closeReportStepsOnDelivery } from "./pipeline/cycle-steps";
 // PV7-04a (BFF §55.2): delivery publishes the report to the client, in the same transaction.
@@ -199,12 +199,17 @@ async function loadReport(c: PoolClient, id: string): Promise<ReportRow | null> 
 
 /** SCP-5 W5-A2 (BFF §63.30): the rules a report was MADE under, for its whole life: its kind's block of the document its `rules_ref`
  *  names, as the content rules the routes below decide by. A campaign or ad hoc report has no kind block (SMM-23's own). */
-interface ReportRules { kindRules: ReportKindRules | null; content: ReportContent; fiscalYearStartMonth: number }
+interface ReportRules {
+  kindRules: ReportKindRules | null; content: ReportContent; fiscalYearStartMonth: number;
+  /** `ideas.sharedInMonthlyReport` of the report's own rules (BFF §63.25.1). */
+  sharedIdeas: boolean;
+}
 
 async function rulesOfReport(c: PoolClient, tenantId: string, r: Pick<ReportRow, "kind" | "rulesRef">): Promise<ReportRules> {
   const company = await rulesByRef(c, tenantId, r.rulesRef);
   const kindRules = isPeriodicKind(r.kind) ? reportKindRules(company.rules, r.kind) : null;
-  return { kindRules, content: contentOf(r.kind, kindRules), fiscalYearStartMonth: company.rules.reports.fiscalYearStartMonth };
+  return { kindRules, content: contentOf(r.kind, kindRules), fiscalYearStartMonth: company.rules.reports.fiscalYearStartMonth,
+    sharedIdeas: ideasSettings(company.rules).sharedInMonthlyReport };
 }
 
 /** A report and the rules it was made under, in one read; null when there is no such report. */
@@ -227,7 +232,13 @@ function rangeOfReport(r: Pick<ReportRow, "kind" | "period">, rules: ReportRules
  * create, a draft's live read and the submit that freezes them, so the three can never disagree.
  */
 async function snapshotOf(
-  c: PoolClient, a: { tenantId: string; engagementId: string; clientId: string; kind: ReportKind; range: { start: string; end: string } },
+  c: PoolClient,
+  a: {
+    tenantId: string; engagementId: string; clientId: string; kind: ReportKind; range: { start: string; end: string };
+    /** SCP-5 W5-B2 (§63.25.1): set only when the report's own rules print shared ideas; a monthly report then lists them (its id and period
+     *  tell which monthly report came before). Any other kind never lists ideas. */
+    sharedIdeas?: { reportId: string | null; period: string | null } | null;
+  },
 ): Promise<{ frozen: FrozenSocialReportMetrics; simulated: boolean }> {
   const includeSimulated = isSocialSimulationEnabled();
   const inputs = await readReportInputs(c, {
@@ -247,6 +258,9 @@ async function snapshotOf(
     frozen = withShortKindFacts(frozen, { approvedPosts: x.approvedPosts, bestPost: x.bestPost, nextPosts: x.nextPosts, nextLabel: next.label });
     simulated = includeSimulated && (simulated || x.simulated);
   }
+  if (a.kind === "monthly" && a.sharedIdeas) {
+    frozen = withSharedIdeas(frozen, await readSharedIdeas(c, { tenantId: a.tenantId, engagementId: a.engagementId, ...a.sharedIdeas }));
+  }
   return { frozen, simulated };
 }
 
@@ -259,6 +273,7 @@ async function currentNumbers(
   if (!isLiveWhile(rules.content, report.status) || !range) return { metrics: report.metrics, simulated: report.simulated, live: false };
   const snap = await withTenants([tenantId], (c) => snapshotOf(c, {
     tenantId, engagementId: report.engagementId, clientId: report.clientId, kind: report.kind, range,
+    sharedIdeas: rules.sharedIdeas ? { reportId: report.id, period: report.period } : null,
   }), SOCIAL);
   const keep = { ...(report.metrics.narrativeSource ? { narrativeSource: report.metrics.narrativeSource } : {}), ...(report.metrics.narrativeModel ? { narrativeModel: report.metrics.narrativeModel } : {}) };
   return { metrics: { ...snap.frozen, ...keep }, simulated: snap.simulated, live: true };
@@ -403,7 +418,10 @@ export async function createSocialReport(
   // simulated rows only while the simulator switch is on, as GET overview counts them (report-data.ts's header).
   const snap = await withTenants(
     [tenantId],
-    (c) => snapshotOf(c, { tenantId, engagementId, clientId: engRow.client_id, kind, range: { start, end } }),
+    (c) => snapshotOf(c, {
+      tenantId, engagementId, clientId: engRow.client_id, kind, range: { start, end },
+      sharedIdeas: company?.rules.ideas.sharedInMonthlyReport ? { reportId: null, period } : null,
+    }),
     { modules: ["social"] },
   );
   const frozen = snap.frozen;
@@ -693,7 +711,10 @@ export class SocialReportsController {
         if (freezeRange) {
           // The numbers freeze here, in the status change's own transaction (a rollback leaves the live draft). The summary the four
           // will check, and the client will receive, may state only numbers this snapshot holds.
-          const snap = await snapshotOf(c, { tenantId, engagementId: report.engagementId, clientId: report.clientId, kind: report.kind, range: freezeRange });
+          const snap = await snapshotOf(c, {
+            tenantId, engagementId: report.engagementId, clientId: report.clientId, kind: report.kind, range: freezeRange,
+            sharedIdeas: rules.sharedIdeas ? { reportId: report.id, period: report.period } : null,
+          });
           const summary = narrativeMd ?? report.narrativeMd;
           const moved = findUngroundedNumbers(summary, groundingFactsOf(snap.frozen, { engagementName: report.engagementName, clientName: report.clientName }, []));
           if (moved.length > 0) throw new BadRequestException({ message: "summary_numbers_changed", detail: { numbers: moved } });
