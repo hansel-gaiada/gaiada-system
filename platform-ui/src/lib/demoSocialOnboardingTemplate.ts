@@ -8,7 +8,7 @@ import "server-only";
 // PM's gate is `pm_task` · `manage`; in the demo that is the four approvers (a client contact and the other staff are refused with PM's own 403 words). A template already applied keeps its own copy
 // (63.29.1), so editing the steps here changes no running onboarding in the demo either. The list answers only `kind=project`, and the PATCH only this store's templates: any other is left to PM's own demo.
 import { isDemoSocialApprover, type DemoResult } from "./demoSocialPipeline";
-import { DEMO_ONBOARDING_PHASES, DEMO_ONBOARDING_ROLES, DEMO_ONBOARDING_STEPS, DEMO_ONBOARDING_TEMPLATE } from "./demoSocialOnboarding";
+import { DEMO_ONBOARDING_PHASES, DEMO_ONBOARDING_ROLES, DEMO_ONBOARDING_STEPS, DEMO_ONBOARDING_TEMPLATE, setDemoOnboardingTemplateReader, type DemoTemplateRef } from "./demoSocialOnboarding";
 import { TEMPLATE_LIMITS, type TemplatePayload } from "./socialOnboardingTemplate";
 
 interface DemoTemplate { id: string; name: string; updatedAt: string; payload: TemplatePayload }
@@ -43,6 +43,19 @@ export function demoChooseTemplate(id: unknown): boolean {
   s.chosen = id;
   return true;
 }
+
+/** SCP-5 W5-H2: the chosen template with its steps, for `GET onboarding` and a start (an application copies it; null when none is chosen or the choice is gone). */
+export function demoChosenTemplateRef(): DemoTemplateRef | null {
+  const s = store();
+  const t = s.templates.find((x) => x.id === s.chosen);
+  if (!t) return null;
+  return {
+    id: t.id, name: t.name, phases: t.payload.phases.map((p) => ({ key: p.key, title: p.title })),
+    roles: Object.fromEntries(t.payload.roles.map((r) => [r.key, r.label])),
+    steps: t.payload.tasks.map((x) => ({ key: x.key, title: x.title, phase: x.phase, role: x.role, offset: x.dueOffsetWorkingDays })),
+  };
+}
+setDemoOnboardingTemplateReader(demoChosenTemplateRef);
 
 // ── PM's `validateProjectTemplatePayload`, for the demo ─────────────────────────────────────────────────────────────────────
 

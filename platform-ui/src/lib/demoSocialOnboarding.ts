@@ -32,7 +32,7 @@ export const DEMO_ONBOARDING_PHASES = [
   { key: "baseline", title: "Baseline audit" }, { key: "strategy", title: "Strategy" }, { key: "first", title: "First cycle" },
 ] as const;
 export const DEMO_ONBOARDING_ROLES: Readonly<Record<string, string>> = { lead: "Lead", officer: "Officer", client: "Client" };
-interface TemplateStep { key: string; title: string; phase: string; role: string; offset: number }
+export interface TemplateStep { key: string; title: string; phase: string; role: string; offset: number }
 export const DEMO_ONBOARDING_STEPS: readonly TemplateStep[] = [
   { key: "meet", title: "Kickoff meeting held and its notes shared", phase: "kickoff", role: "lead", offset: 0 },
   { key: "chat", title: "Chat groups opened with the client", phase: "kickoff", role: "lead", offset: 0 },
@@ -51,6 +51,12 @@ export const DEMO_ONBOARDING_STEPS: readonly TemplateStep[] = [
   { key: "scheduled", title: "The first posts scheduled", phase: "first", role: "officer", offset: 20 },
 ];
 
+/** The seeded template, as a ref. */
+const SEED_REF: DemoTemplateRef = { ...DEMO_ONBOARDING_TEMPLATE, phases: DEMO_ONBOARDING_PHASES, roles: DEMO_ONBOARDING_ROLES, steps: DEMO_ONBOARDING_STEPS };
+/** The company's chosen template (Settings), which the template store registers here (it imports this file, so this file cannot import it). Unregistered, the seeded one; `null` is "no template chosen". */
+let templateReader: () => DemoTemplateRef | null = () => SEED_REF;
+export function setDemoOnboardingTemplateReader(fn: () => DemoTemplateRef | null): void { templateReader = fn; }
+
 // ── dates (Monday to Friday; the demo has no holiday data) ───────────────────────────────────────────────────────────────────
 
 const dow = (iso: string): number => new Date(`${iso}T00:00:00Z`).getUTCDay();
@@ -68,17 +74,21 @@ export function demoDueDate(kickoff: string, n: number): string {
 // ── the store ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 interface DemoStep { key: string; taskId: string; done: boolean; dueDate: string }
-interface DemoApplication { id: string; engagementId: string; kickoff: string; steps: DemoStep[] }
+/** The template as an application copies it at the start (63.29.1: a running onboarding keeps its own copy, later edits change nothing in it). */
+export interface DemoTemplateRef {
+  id: string; name: string; phases: ReadonlyArray<{ key: string; title: string }>; roles: Readonly<Record<string, string>>; steps: readonly TemplateStep[];
+}
+interface DemoApplication { id: string; engagementId: string; kickoff: string; templateId: string; copy: DemoTemplateRef; steps: DemoStep[] }
 interface DemoClient { engagementId: string; clientId: string; clientName: string; status: string; officerId: string; projectId: string | null; auditId: string | null }
 interface Store { clients: DemoClient[]; apps: DemoApplication[]; auditSeq: number }
 
 const STORE = Symbol.for("gaiada.demoSocialOnboarding.store");
 type G = typeof globalThis & { [STORE]?: Store };
 
-function appFor(id: string, engagementId: string, kickoff: string, doneKeys: readonly string[]): DemoApplication {
+function appFor(id: string, engagementId: string, kickoff: string, doneKeys: readonly string[], tpl: DemoTemplateRef = SEED_REF): DemoApplication {
   return {
-    id, engagementId, kickoff,
-    steps: DEMO_ONBOARDING_STEPS.map((s) => ({ key: s.key, taskId: `onb-t-${id}-${s.key}`, done: doneKeys.includes(s.key), dueDate: demoDueDate(kickoff, s.offset) })),
+    id, engagementId, kickoff, templateId: tpl.id, copy: tpl,
+    steps: tpl.steps.map((s) => ({ key: s.key, taskId: `onb-t-${id}-${s.key}`, done: doneKeys.includes(s.key), dueDate: demoDueDate(kickoff, s.offset) })),
   };
 }
 
@@ -104,14 +114,15 @@ export function resetDemoOnboarding(): void { delete (globalThis as G)[STORE]; }
 
 const lateOf = (dueDate: string | null, done: boolean, today: string): boolean => !done && dueDate !== null && dueDate < today;
 
-function itemOf(c: DemoClient, today: string): OnboardingItem {
-  const app = store().apps.find((a) => a.engagementId === c.engagementId) ?? null;
+/** `tpl` is the company's chosen template: only an application made from it is listed (the server's `readTemplateApplicationsInTx({templateId})`). */
+function itemOf(c: DemoClient, today: string, tpl: DemoTemplateRef | null): OnboardingItem {
+  const app = tpl ? store().apps.find((a) => a.engagementId === c.engagementId && a.templateId === tpl.id) ?? null : null;
   const steps: OnboardingStep[] = app
     ? app.steps.map((s) => {
-      const t = DEMO_ONBOARDING_STEPS.find((x) => x.key === s.key)!;
+      const t = app.copy.steps.find((x) => x.key === s.key)!;
       return {
-        key: s.key, taskId: s.taskId, title: t.title, phase: t.phase, phaseTitle: DEMO_ONBOARDING_PHASES.find((p) => p.key === t.phase)!.title, role: t.role,
-        roleLabel: DEMO_ONBOARDING_ROLES[t.role], dueDate: s.dueDate, done: s.done, late: lateOf(s.dueDate, s.done, today),
+        key: s.key, taskId: s.taskId, title: t.title, phase: t.phase, phaseTitle: app.copy.phases.find((p) => p.key === t.phase)?.title ?? t.phase, role: t.role,
+        roleLabel: app.copy.roles[t.role] ?? t.role, dueDate: s.dueDate, done: s.done, late: lateOf(s.dueDate, s.done, today),
       };
     })
     : [];
@@ -123,7 +134,7 @@ function itemOf(c: DemoClient, today: string): OnboardingItem {
     applicationId: app?.id ?? null, kickoff: app?.kickoff ?? null, progress: { done: steps.length - open.length, total: steps.length },
     next: next ? { taskId: next.taskId, title: next.title, dueDate: next.dueDate, late: next.late } : null,
     baselineAudit: c.auditId ? { auditId: c.auditId, status: "draft", overall: null } : null,
-    steps, doneStatusId: "done", startBlock: app ? null : c.projectId ? null : "no_project",
+    steps, doneStatusId: "done", startBlock: app ? null : !c.projectId ? "no_project" : !tpl ? "onboarding_template_not_set" : null,
   };
 }
 
@@ -142,7 +153,8 @@ function sorted(items: OnboardingItem[]): OnboardingItem[] {
 
 export function demoOnboarding(userId: string): Onboarding {
   const today = todayIsoInDisplayZone();
-  return { template: DEMO_ONBOARDING_TEMPLATE, items: sorted(store().clients.map((c) => itemOf(c, today))), canStart: isDemoSocialApprover(userId) };
+  const tpl = templateReader();
+  return { template: tpl ? { id: tpl.id, name: tpl.name } : null, items: sorted(store().clients.map((c) => itemOf(c, today, tpl))), canStart: isDemoSocialApprover(userId) };
 }
 
 /** The checklist's phases, for a test. */
@@ -181,12 +193,14 @@ function start(engagementId: string, body: string | undefined, userId: string): 
     return err(400, "invalid_field", { field: "kickoff" });
   }
   if (!c.projectId) return err(409, "no_project");
+  const tpl = templateReader();
+  if (!tpl) return err(409, "onboarding_template_not_set");
   const s = store();
   const same = s.apps.find((a) => a.id === o.id);
   if (same && same.engagementId === c.engagementId) return ok({ applicationId: same.id, tasks: same.steps.map((t) => ({ key: t.key, taskId: t.taskId, dueDate: t.dueDate })), milestones: [] });
-  const already = s.apps.find((a) => a.engagementId === c.engagementId);
+  const already = s.apps.find((a) => a.engagementId === c.engagementId && a.templateId === tpl.id);
   if (already) return err(409, "template_already_applied", { detail: { applicationId: already.id } });
-  const app = appFor(o.id, c.engagementId, o.kickoff, []);
+  const app = appFor(o.id, c.engagementId, o.kickoff, [], tpl);
   s.apps.push(app);
   return ok({ applicationId: app.id, tasks: app.steps.map((t) => ({ key: t.key, taskId: t.taskId, dueDate: t.dueDate })), milestones: [] }, 201);
 }
@@ -217,11 +231,11 @@ export function demoOnboardingPmRoute(m: string, path: string, body: string | un
     app.kickoff = o.kickoff;
     for (const s of app.steps) {
       if (s.done) continue;
-      const t = DEMO_ONBOARDING_STEPS.find((x) => x.key === s.key)!;
+      const t = app.copy.steps.find((x) => x.key === s.key)!;
       s.dueDate = demoDueDate(o.kickoff, t.offset);
     }
     const c = store().clients.find((x) => x.engagementId === app.engagementId)!;
-    const item = itemOf(c, todayIsoInDisplayZone());
+    const item = itemOf(c, todayIsoInDisplayZone(), templateReader());
     return ok({ id: app.id, kickoff: app.kickoff, progress: item.progress, next: item.next });
   }
   return null;
