@@ -13469,7 +13469,7 @@ A "CSV template" download holds the expected headers. In DEMO_MODE the page show
 - **Cerbos** is asked once per distinct officer before the transaction, in apply only; a stale answer (the officer changed in between) is 409 `status_changed`. A denial of the machine's `create` is its own 403, which rolls the import back.
 - **The activity rows** are written after the commit, one per changed engagement (`updated`, `{allocation, via: "sheet_import", importId}`) and one per new post (`create`, the create's metadata with `via` and `importId`); a failed write is logged and never undoes the import.
 
-### 63.24 Periodic reports, "Generate with AI" and report automation (SCP-5b, SCP-Q37 to SCP-Q40; plan §8 SCP-5) — on 63.18's rows, routes, states and gates — **STATUS: SERVER BUILT (W5-A1 in release 472, W5-A2 in 473, W5-A3 in 475, W5-A5 in 476); the pages (W5-A4, W5-A6) IN PROGRESS (2026-10-31)**
+### 63.24 Periodic reports, "Generate with AI" and report automation (SCP-5b, SCP-Q37 to SCP-Q40; plan §8 SCP-5) — on 63.18's rows, routes, states and gates — **STATUS: BUILT (server: W5-A1 in release 472, W5-A2 in 473, W5-A3 in 475, W5-A5 in 476; pages: W5-A4 and W5-A6 in the wave-c car, 2026-10-31)**
 
 **What it is.** A client's report for a day, a week, a month, a quarter, a half year or a year: the period's numbers, the words that go with them, and what comes next. Each is a `social_reports` row of one kind, on 63.18's routes, its four states (Draft, HoD check, Ready, Sent) and its gates. The monthly report stays exactly as SCP-5a built it; the five other periodic kinds follow its pattern; `campaign` and `adhoc` keep SMM-23's rules. **Every rule below is a default** (SCP-Q41): each company sets its own in Settings (63.30), and a report, a run or a schedule's run keeps the rules it was made under (`rules_ref`). "Generate with AI" drafts them for one client or for every client the person may draft for (63.24.5), an agent drafts them by chat (63.24.6), as the owner ruled (SCP-Q37), and the four can set them to be drafted on a schedule (63.24.9, SCP-Q38).
 
@@ -13570,6 +13570,8 @@ CHECKs: `(status IN ('done','failed')) = (finished_at IS NOT NULL)`; `status = '
 These tools only draft. Approving, sending back and sending stay `social.approveReport` and `social.deliverReport` (63.15, unchanged), under the four's gates and the confirm step. An unattended automation is refused, as every social write is (63.15), so there is no scheduled generation: it would have no person behind it.
 
 **63.24.7 Pages.** `{D}/social-reports` (the `reports` row's `social` tab, 63.17) gains a kind switch (Daily, Weekly, Monthly, Quarterly, Half-year, Yearly, Other), a period picker for the kind, and "Generate with AI": for one client it calls the create route; for "all my clients" ("all clients" for the four) it starts a run and shows its progress and each client's result in place, each linking to its report. A report opens at `{D}/social-reports/[reportId]` in the same area. A short kind shows its period's navigation, the numbers, the best post, the next period from the pipeline, and "What to tell the client" (the summary and the next-period line). A long kind shows the monthly's page over its range, with "Ideas for next month" (63.25) on the monthly only. Draft with AI, submit, and for the four send back, approve and send. No new row or key. The client reads them in `/portal/reports` (PV7-04b).
+
+**As built (W5-A4, 2026-10-31).** The kinds a company offers come from `GET rules` (`reports.kinds[k].enabled`, 63.30): the allocation's `reportKinds` is per client. One client's "Generate with AI" is the create route; "all my clients" (all clients for the four) starts a run, and `{D}/social-reports?run=<runId>` opens any run's progress (W5-A6's links use it). The read gives no separate summary for a short kind: its document's narrative ends with the next-period line, which the page splits off. OPEN: a `summary` field on the read, so the page never parses the narrative.
 
 **DEMO_MODE.** One client with a report of each kind in a mix of states and one client with none; "Generate with AI" runs in the demo store as a run that settles client by client, its results following the server's rules.
 
@@ -13676,7 +13678,7 @@ Activity on entity `social_report_schedule`: `created`, `updated`, `paused`, `re
 - The page's "Next runs" preview is computed in the browser (UTC, Monday to Friday, no holidays), and says so; the card shows the server's `nextRunAt` once saved. OPEN: a server preview on the company's zone and working calendar, so the preview and the job never disagree near a holiday.
 - A run's results link to `{D}/social-reports?run=<runId>`, which the reports page opens on its progress (W5-A4).
 
-### 63.25 Ideas for next month (SCP-5c) — **STATUS: SERVER BUILT (W5-B1 in release 470, W5-B2 in 472); the monthly page's section and "From an idea" (W5-A4) IN PROGRESS (2026-10-31)**
+### 63.25 Ideas for next month (SCP-5c) — **STATUS: BUILT (server: W5-B1 in 470, W5-B2 in 472, the printed list W5-S1; page: W5-A4, in the wave-c car, 2026-10-31)**
 
 **What it is.** Per client: what we saw, the metric it rests on, and what we suggest. "Add to next plan" turns an idea into a `planned` post of a cycle the person picks, linked both ways; "Mark shared" records that the team shared it with the client. By default ideas stay internal and nothing reaches the portal or the report's PDF (SCP-Q27). A company may set shared ideas to print in the next monthly report (`ideas.sharedInMonthlyReport`, 63.30): that report's document and PDF then list its client's ideas marked shared since the previous monthly report, by the report's own rules. They sit on the monthly report's page, as in the team's design.
 
@@ -13723,6 +13725,8 @@ CHECKs (`status` is NOT NULL; every other side is written with `IS NULL`): `(sta
 - Activity: the post's `create` row carries `metadata.ideaId`; the idea gets `planned`. Content-month progress syncs as create does.
 
 **63.25.4 Pages.** No new URL or key. On a monthly report's page, `{D}/social-reports/[reportId]`, the section "Ideas for next month" lists the client's ideas with their status ("Proposed", "Shared with client", "Added to plan" with "Open post") and offers the officer and the four: Add idea (what we saw, the metric it rests on, what we suggest), Add to next plan (with the cycle picker), Mark shared and Delete. An idea added there carries the report's id. `PipelinePost` (63.6.2) gains `idea: {id, saw, metric, suggestion} | null` (additive), and the post page shows "From an idea".
+
+**As built (W5-B2, W5-A4, W5-S1; 2026-10-31).** "Add to next plan" refuses a cycle whose month is before TODAY's month (409 `cycle_closed`), not before the report's month; the picker offers the client's cycles from the month after the report that have not begun. The printed list (63.25.1, W5-S1) is the table "Ideas we shared" in the monthly report's frozen numbers: the ideas of the report's engagement with `shared_at` after the previous monthly report's creation and up to the report's freeze, only when the report's own rules have `ideas.sharedInMonthlyReport` on; a sent report never changes. DEMO_MODE: discarding a planned post does not yet release its idea (W5-H2).
 
 **DEMO_MODE.** An idea in each status on the demo client with a monthly report, one planned into next month's cycle; "Add to next plan" and the discard release run in the demo store in the server's order.
 
@@ -14002,7 +14006,7 @@ Roles: `officer`, `lead` and `client`. A `client` step is the client's to provid
 
 **63.29.6 Proofs:** the payload's 400s (an unknown phase or role, a repeated key, an offset out of range); the apply's due dates on the golden working-day table (a kickoff on a holiday, a weekend, the year turn) and its milestones; one application per project and template, a replay answering the same ids; a kickoff move re-dating only the open tasks; the start refused to the officer and a `company_admin` (403 `not_a_social_approver`), `no_project` and `onboarding_template_not_set`; a `client` step assigned to the officer; the settings picker refusing another company's template and a `task` template.
 
-### 63.30 Company rules for SCP-5 (SCP-Q41) — **STATUS: SERVER BUILT (W5-A0 in release 471); the settings page's rules sections (W5-C5) PLANNED (2026-10-31)**
+### 63.30 Company rules for SCP-5 (SCP-Q41) — **STATUS: BUILT (server: W5-A0 in 471; the Settings sections: W5-C5, in the wave-c car, 2026-10-31)**
 
 **What it is.** Each company sets its own rules for the rest of SCP-5 in the UI, and the owner's rulings SCP-Q25 to SCP-Q40 are the seeded defaults (plan §2). The owner's words: "i want ui can be used to set all these rules. it will give flexibility that company need". It also keeps the module free of our own group's habits ("internal now, SaaS later"). §63.24 to §63.29 read their rules from here, and none of them hard-codes a rule this section names.
 
@@ -14075,6 +14079,8 @@ Saves take `pg_advisory_xact_lock` on `social_rules:<tenantId>`, so two saves ne
 - saves one section at a time with `expectedVersion`;
 - previews where it helps: the next due dates, the next cycle's steps for a chosen client, a client's score;
 - names the field of a refused save in words.
+
+**As built (W5-C5, 2026-10-31).** The server has five rules sections: `reports`, `ideas`, `cycle`, `audit` and `saved`. Onboarding is not one: it is the template picker (`PUT settings {onboardingTemplateId}`, 63.29.2, first built here: W5-C4 had not added it) and the template's steps, edited through PM's `PATCH pm/templates/:id`. PM's template routes ask `pm_task` · `manage`, so one of the four without it sees the chosen template's name and why it cannot be changed; that PATCH has no version, so two edits are last-write-wins (the page says so). The diff and history are by leaf. Each section shows "Default: …" beside each control, saves with `expectedVersion`, resets behind a confirm, previews through `POST rules/preview` and lists its history; `canEdit` false shows the values read-only; a refused or failed read says it cannot be shown, never the defaults.
 
 At phone width the sections stack. By keyboard every control is in order and focus returns after each dialog. Nothing is said by colour alone. DEMO_MODE keeps the rules in its store, starting from the seed, and answers the routes in the server's order. No new row, key or URL.
 
